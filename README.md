@@ -9,6 +9,13 @@ spring:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
       - org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration
 ```
+```java
+/** 开启repository自动装配  basePackages 指定repository 存放路径 **/
+@EnableWcdkR2dbcRepositories(basePackages = {
+        "com.*"
+})
+public class QxtdIotAdminApplication {}
+```
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Java 21](https://img.shields.io/badge/Java-21+-green.svg)](https://www.oracle.com/java/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5+-brightgreen.svg)](https://spring.io/projects/spring-boot)
