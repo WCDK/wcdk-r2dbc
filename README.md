@@ -1,21 +1,7 @@
 # WCDK-R2DBC
 
-> 基于 Spring Boot 的响应式数据库访问框架，提供多数据源支持、动态路由、SQL生命周期拦截等特性。<br/>
-```yaml
-#需要屏蔽spring自动配置
-spring: 
-  autoconfigure: 
-    exclude: 
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-      - org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration
-```
-```java
-/** 开启repository自动装配  basePackages 指定repository 存放路径 **/
-@EnableWcdkR2dbcRepositories(basePackages = {
-        "com.*"
-})
-public class QxtdIotAdminApplication {}
-```
+> 基于 Spring Boot 的响应式数据库访问框架，提供多数据源支持、动态路由、SQL生命周期拦截等特性。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Java 21](https://img.shields.io/badge/Java-21+-green.svg)](https://www.oracle.com/java/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5+-brightgreen.svg)](https://spring.io/projects/spring-boot)
@@ -23,15 +9,15 @@ public class QxtdIotAdminApplication {}
 ## 目录
 
 - [特性](#特性)
-- [架构设计](#架构设计)
 - [快速开始](#快速开始)
 - [配置说明](#配置说明)
 - [多数据源配置](#多数据源配置)
-- [SQL生命周期拦截器](#sql生命周期拦截器)
-- [数据库方言支持](#数据库方言支持)
 - [XML映射配置](#xml映射配置)
+- [SQL生命周期拦截器](#sql生命周期拦截器)
+- [事务管理](#事务管理)
+- [数据库方言支持](#数据库方言支持)
 - [API文档](#api文档)
-- [示例代码](#示例代码)
+- [常见问题](#常见问题)
 
 ## 特性
 
@@ -43,7 +29,7 @@ public class QxtdIotAdminApplication {}
 | **响应式编程** | 基于 Project Reactor 的完全非阻塞响应式模型 |
 | **多数据库兼容** | 支持达梦、PostgreSQL、MySQL、Oracle |
 | **连接池管理** | 内置 r2dbc-pool 连接池，支持精细化配置 |
-| **事务管理** | 支持响应式事务，保证数据一致性 |
+| **事务管理** | 支持声明式事务、模板事务、手动事务 |
 | **动态数据源切换** | 通过 AOP + 注解实现数据源动态切换 |
 | **SQL生命周期拦截** | 支持在SQL编译前/后、执行前/后自定义操作 |
 
@@ -61,52 +47,6 @@ public class QxtdIotAdminApplication {}
 | **分页支持** | 内置分页查询功能，简化分页逻辑 |
 | **逻辑删除** | 支持逻辑删除，数据可恢复 |
 | **SQL日志** | 可配置的SQL日志输出，便于调试 |
-
-## 架构设计
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         应用层 (Application)                     │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │  Repository接口  │  │   XML映射文件   │  │  R2dbcUtil工具  │ │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
-└───────────┼────────────────────┼────────────────────┼───────────┘
-            │                    │                    │
-            ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       核心层 (Core)                              │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │           RepositoryProxyMethodInterceptor              │   │
-│  │           (SQL生成 + 生命周期拦截)                        │   │
-│  └────────────────────────┬────────────────────────────────┘   │
-│                           │                                     │
-│  ┌────────────────────────▼────────────────────────────────┐   │
-│  │           SqlLifecycleInterceptorChain                   │   │
-│  │           (SQL生命周期拦截器链)                            │   │
-│  └────────────────────────┬────────────────────────────────┘   │
-└───────────────────────────┼─────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     数据访问层 (Data Access)                     │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │    R2dbcUtil    │  │ EntityTemplate  │  │ DatabaseClient  │ │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘ │
-└───────────┼────────────────────┼────────────────────┼───────────┘
-            │                    │                    │
-            ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      数据源层 (DataSource)                       │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │        DynamicRoutingConnectionFactory                  │   │
-│  │        (动态路由连接工厂)                                 │   │
-│  └────────────────────────┬────────────────────────────────┘   │
-│                           │                                     │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐     │
-│  │   达梦    │ │ PostgreSQL│ │   MySQL   │ │  Oracle   │     │
-│  └───────────┘ └───────────┘ └───────────┘ └───────────┘     │
-└─────────────────────────────────────────────────────────────────┘
-```
 
 ## 快速开始
 
@@ -166,6 +106,22 @@ wcdk:
   r2dbc:
     enabled: true
     sql-log-enabled: true
+```
+
+### 启用注解
+
+在启动类上添加 `@EnableWcdkR2dbcRepositories` 注解，并指定 Repository 扫描路径：
+
+```java
+@EnableWcdkR2dbcRepositories(basePackages = {
+        "com.example.repository"
+})
+@SpringBootApplication
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
 ```
 
 ### 定义实体
@@ -258,10 +214,13 @@ public class SysUserService {
 | 属性 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `wcdk.r2dbc.enabled` | boolean | false | 启用WCDK R2DBC |
-| `wcdk.r2dbc.sql-log-enabled` | boolean | false | 启用SQL日志 |
-| `wcdk.r2dbc.logic-delete-value` | int | 1 | 逻辑删除值 |
-| `wcdk.r2dbc.logic-not-delete-value` | int | 0 | 未删除值 |
-| `wcdk.r2dbc.snowflake-id` | boolean | false | 启用雪花ID |
+| `wcdk.r2dbc.sql-log-enabled` | boolean | true | 启用SQL日志 |
+| `wcdk.r2dbc.quote-identifier` | boolean | true | 标识符加引号 |
+| `wcdk.r2dbc.mapper-locations` | String | `classpath*:repository/**/*.xml` | XML映射文件位置 |
+| `wcdk.r2dbc.logic-delete-field` | String | `delFlg` | 逻辑删除字段 |
+| `wcdk.r2dbc.logic-delete-value` | Object | 1 | 逻辑删除值 |
+| `wcdk.r2dbc.logic-not-delete-value` | Object | 0 | 未删除值 |
+| `wcdk.r2dbc.base-packages` | String[] | - | Repository扫描路径（可选，优先使用注解配置） |
 
 ### 连接池配置
 
@@ -370,184 +329,6 @@ public class OrderService {
 }
 ```
 
-## SQL生命周期拦截器
-
-### 生命周期阶段
-
-```
-Repository方法调用
-    │
-    ▼
-┌─────────────────┐
-│  beforeCompile  │  ← SQL编译前：参数预处理、权限校验
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│    SQL编译      │  ← 生成SQL语句
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   afterCompile  │  ← SQL编译后：SQL审计、日志、SQL修改
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  beforeExecute  │  ← SQL执行前：最终校验、计时开始
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│    SQL执行      │  ← 执行数据库操作
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  afterExecute   │  ← SQL执行后：计时结束、结果处理、异常处理
-└─────────────────┘
-```
-
-### 实现自定义拦截器
-
-```java
-@Component
-public class MySqlInterceptor implements SqlLifecycleInterceptor {
-    
-    private static final Logger log = LoggerFactory.getLogger(MySqlInterceptor.class);
-    
-    @Override
-    public void beforeCompile(SqlExecutionContext context) {
-        // SQL编译前：可以进行参数预处理、权限校验等
-        log.debug("准备编译SQL - 方法: {}", context.getMethod().getName());
-    }
-    
-    @Override
-    public void afterCompile(SqlExecutionContext context) {
-        // SQL编译后：可以进行SQL审计、日志记录、SQL修改等
-        log.debug("SQL编译完成: {}", context.getSql());
-        
-        // 可以修改SQL
-        // context.setSql(context.getSql() + " /* audit */");
-        
-        // 可以跳过执行
-        // context.setSkipped(true);
-    }
-    
-    @Override
-    public void beforeExecute(SqlExecutionContext context) {
-        // SQL执行前：可以进行最终校验、性能计时开始等
-        log.debug("准备执行SQL");
-    }
-    
-    @Override
-    public void afterExecute(SqlExecutionContext context) {
-        // SQL执行后：可以进行性能计时结束、结果处理、异常处理等
-        long durationMs = context.getDuration() / 1_000_000;
-        
-        if (context.hasError()) {
-            log.error("SQL执行失败 ({}ms): {}", durationMs, context.getSql(), context.getError());
-        } else {
-            log.info("SQL执行成功 ({}ms): {}", durationMs, context.getSql());
-        }
-    }
-    
-    @Override
-    public int getOrder() {
-        return 0; // 数值越小越先执行
-    }
-}
-```
-
-### 性能监控拦截器
-
-```java
-@Component
-public class PerformanceInterceptor implements SqlLifecycleInterceptor {
-    
-    private static final long SLOW_SQL_THRESHOLD_MS = 1000;
-    
-    @Override
-    public void afterExecute(SqlExecutionContext context) {
-        long durationMs = context.getDuration() / 1_000_000;
-        
-        if (durationMs > SLOW_SQL_THRESHOLD_MS) {
-            // 记录慢SQL告警
-            AlertService.alert("慢SQL检测", context.getSql(), durationMs);
-        }
-    }
-    
-    @Override
-    public int getOrder() {
-        return Integer.MAX_VALUE;
-    }
-}
-```
-
-### SQL审计拦截器
-
-```java
-@Component
-public class AuditInterceptor implements SqlLifecycleInterceptor {
-    
-    @Autowired
-    private AuditLogService auditLogService;
-    
-    @Override
-    public void beforeCompile(SqlExecutionContext context) {
-        // 记录SQL操作开始
-        AuditLog log = new AuditLog();
-        log.setMethod(context.getMethod().getName());
-        log.setRepository(context.getRepositoryInterface().getSimpleName());
-        log.setStartTime(LocalDateTime.now());
-        auditLogService.save(log);
-    }
-    
-    @Override
-    public void afterExecute(SqlExecutionContext context) {
-        // 记录SQL操作完成
-        AuditLog log = auditLogService.findByMethod(context.getMethod().getName());
-        log.setSql(context.getSql());
-        log.setDuration(context.getDuration());
-        log.setSuccess(!context.hasError());
-        auditLogService.update(log);
-    }
-    
-    @Override
-    public int getOrder() {
-        return -100;
-    }
-}
-```
-
-### 内置拦截器
-
-| 拦截器 | 说明 | 执行顺序 |
-|--------|------|----------|
-| `SqlAuditInterceptor` | SQL审计日志 | -100 |
-| `SqlPerformanceInterceptor` | 性能监控 | MAX_VALUE |
-
-## 数据库方言支持
-
-### 支持的数据库
-
-| 数据库 | 方言类 | 驱动 | 连接URL格式 |
-|--------|--------|------|-------------|
-| 达梦 | `DmR2dbcDialect` | dm-r2dbc | `r2dbc:dm://host:port` |
-| PostgreSQL | `PostgresDialect` | r2dbc-postgresql | `r2dbc:postgresql://host:port/db` |
-| MySQL | `MySqlDialect` | r2dbc-mysql | `r2dbc:mysql://host:port/db` |
-| Oracle | `OracleDialect` | oracle-r2dbc | `r2dbc:oracle://host:port/db` |
-
-### 方言特性对比
-
-| 特性 | 达梦 | PostgreSQL | MySQL | Oracle |
-|------|------|------------|-------|--------|
-| 绑定参数风格 | `?` | `$1,$2` | `?` | `?` |
-| LIMIT/OFFSET | ✓ | ✓ | ✓ | ✓ |
-| RETURNING | ✓ | ✓ | ✗ | ✓ |
-| JSON类型 | ✓ | ✓ | ✓ | ✓ |
-| 数组类型 | ✗ | ✓ | ✗ | ✓ |
-
 ## XML映射配置
 
 ### 配置说明
@@ -562,7 +343,7 @@ XML映射文件用于定义复杂的SQL语句，支持 `resultType` 和 `resultM
 wcdk:
   r2dbc:
     enabled: true
-    mapper-locations: classpath*:mapper/**/*.xml
+    mapper-locations: classpath*:repository/**/*.xml
 ```
 
 ### 基础结构
@@ -747,6 +528,291 @@ wcdk:
 </repository>
 ```
 
+## SQL生命周期拦截器
+
+### 生命周期阶段
+
+```
+Repository方法调用
+    │
+    ▼
+┌─────────────────┐
+│  beforeCompile  │  ← SQL编译前：参数预处理、权限校验
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│    SQL编译      │  ← 生成SQL语句
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   afterCompile  │  ← SQL编译后：SQL审计、日志、SQL修改
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  beforeExecute  │  ← SQL执行前：最终校验、计时开始
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│    SQL执行      │  ← 执行数据库操作
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  afterExecute   │  ← SQL执行后：计时结束、结果处理、异常处理
+└─────────────────┘
+```
+
+### 实现自定义拦截器
+
+```java
+@Component
+public class MySqlInterceptor implements SqlLifecycleInterceptor {
+    
+    private static final Logger log = LoggerFactory.getLogger(MySqlInterceptor.class);
+    
+    @Override
+    public void beforeCompile(SqlExecutionContext context) {
+        // SQL编译前：可以进行参数预处理、权限校验等
+        log.debug("准备编译SQL - 方法: {}", context.getMethod().getName());
+    }
+    
+    @Override
+    public void afterCompile(SqlExecutionContext context) {
+        // SQL编译后：可以进行SQL审计、日志记录、SQL修改等
+        log.debug("SQL编译完成: {}", context.getSql());
+        
+        // 可以修改SQL
+        // context.setSql(context.getSql() + " /* audit */");
+        
+        // 可以跳过执行
+        // context.setSkipped(true);
+    }
+    
+    @Override
+    public void beforeExecute(SqlExecutionContext context) {
+        // SQL执行前：可以进行最终校验、性能计时开始等
+        log.debug("准备执行SQL");
+    }
+    
+    @Override
+    public void afterExecute(SqlExecutionContext context) {
+        // SQL执行后：可以进行性能计时结束、结果处理、异常处理等
+        long durationMs = context.getDuration() / 1_000_000;
+        
+        if (context.hasError()) {
+            log.error("SQL执行失败 ({}ms): {}", durationMs, context.getSql(), context.getError());
+        } else {
+            log.info("SQL执行成功 ({}ms): {}", durationMs, context.getSql());
+        }
+    }
+    
+    @Override
+    public int getOrder() {
+        return 0; // 数值越小越先执行
+    }
+}
+```
+
+### 内置拦截器
+
+| 拦截器 | 说明 | 执行顺序 |
+|--------|------|----------|
+| `SqlAuditInterceptor` | SQL审计日志 | -100 |
+| `SqlPerformanceInterceptor` | 性能监控 | MAX_VALUE |
+
+## 事务管理
+
+### 事务控制方式对比
+
+| 方式 | 说明 | 适用场景 | 复杂度 |
+|------|------|----------|--------|
+| **声明式事务** | `@Transactional` 注解 | 简单事务，自动提交/回滚 | 低 |
+| **模板事务** | `TransactionTemplate` | 需要自动控制的事务 | 中 |
+| **手动事务** | `ManualTransaction` | 需要精细控制的复杂事务 | 高 |
+
+### 声明式事务
+
+```java
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+    
+    private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
+    private final R2dbcUtil r2dbcUtil;
+    
+    /**
+     * 创建订单（声明式事务）
+     */
+    @Transactional
+    public Mono<Order> createOrder(Order order) {
+        return r2dbcUtil.transaction(client -> {
+            // 1. 扣减库存
+            return productRepository.decreaseStock(order.getProductId(), order.getQuantity())
+                    // 2. 创建订单
+                    .then(orderRepository.insert(order));
+        }).next();
+    }
+}
+```
+
+### 模板事务
+
+```java
+@Service
+@RequiredArgsConstructor
+public class TransactionTemplateService {
+    
+    private final R2dbcUtil r2dbcUtil;
+    private final UserRepository userRepository;
+    private final OrderRepository orderRepository;
+    
+    /**
+     * 自动提交/回滚事务
+     */
+    public Mono<Order> createOrderWithTemplate(Order order) {
+        return r2dbcUtil.executeInTransaction(connection -> {
+            return inventoryRepository.decrease(connection, order.getProductId(), order.getQuantity())
+                    .then(Mono.from(orderRepository.insert(connection, order)));
+        });
+    }
+    
+    /**
+     * 只读事务
+     */
+    public Mono<List<User>> findUsersReadOnly() {
+        return r2dbcUtil.executeInReadOnlyTransaction(connection -> {
+            return userRepository.findAll(connection).collectList();
+        });
+    }
+}
+```
+
+### 手动事务
+
+#### ManualTransaction API
+
+| 方法 | 返回类型 | 说明 |
+|------|----------|------|
+| `commit()` | `Mono<Boolean>` | 提交事务 |
+| `rollback()` | `Mono<Boolean>` | 回滚事务 |
+| `createSavepoint(String)` | `Mono<Savepoint>` | 创建保存点 |
+| `rollbackToSavepoint(Savepoint)` | `Mono<Boolean>` | 回滚到保存点 |
+| `releaseSavepoint(Savepoint)` | `Mono<Boolean>` | 释放保存点 |
+| `getStatus()` | `TransactionStatus` | 获取事务状态 |
+| `isActive()` | `boolean` | 判断事务是否活跃 |
+| `isReadOnly()` | `boolean` | 判断是否只读事务 |
+| `setReadOnly(boolean)` | `void` | 设置只读模式 |
+| `setTimeout(int)` | `void` | 设置超时时间（秒） |
+
+#### 使用示例
+
+```java
+@Service
+@RequiredArgsConstructor
+public class ManualTransactionService {
+    
+    private final R2dbcUtil r2dbcUtil;
+    private final UserRepository userRepository;
+    private final OrderRepository orderRepository;
+    
+    /**
+     * 手动事务示例 - 转账操作
+     */
+    public Mono<Void> transfer(Long fromId, Long toId, BigDecimal amount) {
+        return r2dbcUtil.createManualTransaction("transfer")
+                .flatMap(transaction -> {
+                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
+                    
+                    return userRepository.decreaseBalance(connection, fromId, amount)
+                            .then(userRepository.increaseBalance(connection, toId, amount))
+                            .then(transaction.commit())
+                            .onErrorResume(error -> {
+                                log.error("转账失败，回滚事务", error);
+                                return transaction.rollback().then(Mono.error(error));
+                            });
+                })
+                .then();
+    }
+    
+    /**
+     * 使用保存点的事务
+     */
+    public Mono<Order> createOrderWithSavepoint(Order order) {
+        return r2dbcUtil.createManualTransaction("create-order")
+                .flatMap(transaction -> {
+                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
+                    
+                    return inventoryRepository.decrease(connection, order.getProductId(), order.getQuantity())
+                            .then(transaction.createSavepoint("after-inventory"))
+                            .flatMap(savepoint -> 
+                                orderRepository.insert(connection, order)
+                                    .onErrorResume(error -> 
+                                        transaction.rollbackToSavepoint(savepoint)
+                                            .then(Mono.error(error)))
+                            )
+                            .then(transaction.commit())
+                            .onErrorResume(error -> 
+                                transaction.rollback().then(Mono.error(error)));
+                });
+    }
+}
+```
+
+### 事务生命周期图
+
+```
+createTransaction()
+    │
+    ▼
+┌─────────────────┐
+│   NEW 状态      │  ← 事务创建
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  ACTIVE 状态    │  ← 事务激活
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+┌────────┐ ┌────────┐
+│ commit │ │rollback│
+└────┬───┘ └────┬───┘
+     │          │
+     ▼          ▼
+┌─────────────────┐
+│ COMMITTED /     │  ← 事务完成
+│ ROLLED_BACK     │
+└─────────────────┘
+```
+
+## 数据库方言支持
+
+### 支持的数据库
+
+| 数据库 | 方言类 | 驱动 | 连接URL格式 |
+|--------|--------|------|-------------|
+| 达梦 | `DmR2dbcDialect` | dm-r2dbc | `r2dbc:dm://host:port` |
+| PostgreSQL | `PostgresDialect` | r2dbc-postgresql | `r2dbc:postgresql://host:port/db` |
+| MySQL | `MySqlDialect` | r2dbc-mysql | `r2dbc:mysql://host:port/db` |
+| Oracle | `OracleDialect` | oracle-r2dbc | `r2dbc:oracle://host:port/db` |
+
+### 方言特性对比
+
+| 特性 | 达梦 | PostgreSQL | MySQL | Oracle |
+|------|------|------------|-------|--------|
+| 绑定参数风格 | `?` | `$1,$2` | `?` | `?` |
+| LIMIT/OFFSET | ✓ | ✓ | ✓ | ✓ |
+| RETURNING | ✓ | ✓ | ✗ | ✓ |
+| JSON类型 | ✓ | ✓ | ✓ | ✓ |
+| 数组类型 | ✗ | ✓ | ✗ | ✓ |
+
 ## API文档
 
 ### BaseRepository 接口
@@ -869,61 +935,6 @@ public class MyService {
 }
 ```
 
-#### 事务操作
-
-```java
-@Service
-public class TransactionService {
-    
-    private final R2dbcUtil r2dbcUtil;
-    
-    // 声明式事务（使用TransactionalOperator）
-    public <T> Flux<T> transaction(Function<DatabaseClient, Publisher<T>> action) {
-        return r2dbcUtil.transaction(action);
-    }
-    
-    // 指定数据源的事务
-    public <T> Flux<T> transaction(String dataSource, Function<DatabaseClient, Publisher<T>> action) {
-        return r2dbcUtil.transaction(dataSource, action);
-    }
-    
-    // 创建手动事务
-    public Mono<ManualTransaction> createManualTransaction() {
-        return r2dbcUtil.createManualTransaction();
-    }
-    
-    // 创建带名称的手动事务
-    public Mono<ManualTransaction> createManualTransaction(String name) {
-        return r2dbcUtil.createManualTransaction(name);
-    }
-    
-    // 使用事务模板执行（自动提交/回滚）
-    public <T> Mono<T> executeInTransaction(Function<Connection, Publisher<T>> action) {
-        return r2dbcUtil.executeInTransaction(action);
-    }
-    
-    // 使用事务模板执行（带事务名称）
-    public <T> Mono<T> executeInTransaction(String name, Function<Connection, Publisher<T>> action) {
-        return r2dbcUtil.executeInTransaction(name, action);
-    }
-    
-    // 使用只读事务模板执行
-    public <T> Mono<T> executeInReadOnlyTransaction(Function<Connection, Publisher<T>> action) {
-        return r2dbcUtil.executeInReadOnlyTransaction(action);
-    }
-    
-    // 获取事务模板
-    public TransactionTemplate getTransactionTemplate() {
-        return r2dbcUtil.getTransactionTemplate();
-    }
-    
-    // 获取事务管理器
-    public TransactionManager getTransactionManager() {
-        return r2dbcUtil.getTransactionManager();
-    }
-}
-```
-
 #### 数据源操作
 
 ```java
@@ -944,759 +955,50 @@ public class DataSourceService {
 }
 ```
 
-#### 其他操作
+## 常见问题
 
-```java
-@Service
-public class OtherService {
-    
-    private final R2dbcUtil r2dbcUtil;
-    
-    // 获取DatabaseClient
-    public DatabaseClient getDatabaseClient() {
-        return r2dbcUtil.databaseClient();
-    }
-    
-    // 获取EntityTemplate
-    public R2dbcEntityTemplate getEntityTemplate() {
-        return r2dbcUtil.entityTemplate();
-    }
-    
-    // 实体映射
-    public <T> T map(Row row, Class<T> entityClass) {
-        return r2dbcUtil.map(row, entityClass);
-    }
-    
-    // 值转换
-    public Object convertValue(Object value, Class<?> targetType) {
-        return r2dbcUtil.convertValue(value, targetType);
-    }
-}
-```
+### Q1: 如何启用WCDK R2DBC？
 
-## 示例代码
-
-### 完整CRUD示例
-
-```java
-@Repository
-public interface UserRepository extends BaseRepository<User> {
-    
-    @Select("SELECT * FROM user WHERE email = #{email}")
-    Mono<User> findByEmail(@Param("email") String email);
-    
-    @Insert("INSERT INTO user (name, email) VALUES (#{name}, #{email})")
-    Mono<Void> insertUser(@Param("name") String name, @Param("email") String email);
-}
-
-@Service
-@RequiredArgsConstructor
-public class UserService {
-    
-    private final UserRepository userRepository;
-    
-    // 新增
-    public Mono<User> createUser(User user) {
-        user.setCreateTime(LocalDateTime.now());
-        return userRepository.insert(user);
-    }
-    
-    // 修改
-    public Mono<Long> updateUser(User user) {
-        return userRepository.updateById(user);
-    }
-    
-    // 删除
-    public Mono<Long> deleteUser(Long id) {
-        return userRepository.deleteById(id);
-    }
-    
-    // 查询单个
-    public Mono<User> getUser(Long id) {
-        return userRepository.selectById(id);
-    }
-    
-    // 条件查询
-    public Flux<User> getUsersByStatus(Integer status) {
-        QueryWrapper<User> wrapper = new QueryWrapper<>();
-        wrapper.eq("status", status);
-        return userRepository.selectList(wrapper);
-    }
-    
-    // 分页查询
-    public Mono<Page<User>> getUserPage(int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        return userRepository.selectPage(pageable);
-    }
-    
-    // 复杂查询
-    public Flux<User> complexQuery(String name, Integer status) {
-        QueryWrapper<User> wrapper = new QueryWrapper<>();
-        if (name != null) {
-            wrapper.like("name", name);
-        }
-        if (status != null) {
-            wrapper.eq("status", status);
-        }
-        wrapper.orderByDesc("create_time");
-        return userRepository.selectList(wrapper);
-    }
-}
-```
-
-### XML映射示例
-
-```xml
-<!-- UserMapper.xml -->
-<repository namespace="com.example.repository.UserRepository">
-    
-    <!-- 使用 resultType 指定返回类型 -->
-    <select id="findByName" resultType="com.example.entity.User">
-        SELECT * FROM user WHERE name = #{name}
-    </select>
-    
-    <!-- 使用 resultMap 自定义列映射 -->
-    <resultMap id="userResultMap" type="com.example.entity.User">
-        <id column="user_id" property="id"/>
-        <result column="user_name" property="name"/>
-        <result column="user_email" property="email"/>
-    </resultMap>
-    
-    <select id="findById" resultMap="userResultMap">
-        SELECT * FROM user WHERE id = #{id}
-    </select>
-    
-    <!-- 带鉴别器的 resultMap -->
-    <resultMap id="vehicleResultMap" type="com.example.entity.Vehicle">
-        <id column="vehicle_id" property="id"/>
-        <result column="vehicle_type" property="type"/>
-        <discriminator column="vehicle_type">
-            <case value="car" resultMap="carResultMap"/>
-            <case value="truck" resultMap="truckResultMap"/>
-        </discriminator>
-    </resultMap>
-    
-    <resultMap id="carResultMap" type="com.example.entity.Car">
-        <id column="vehicle_id" property="id"/>
-        <result column="seat_count" property="seatCount"/>
-    </resultMap>
-    
-    <resultMap id="truckResultMap" type="com.example.entity.Truck">
-        <id column="vehicle_id" property="id"/>
-        <result column="payload_capacity" property="payloadCapacity"/>
-    </resultMap>
-    
-    <select id="findVehicle" resultMap="vehicleResultMap">
-        SELECT * FROM vehicle WHERE id = #{id}
-    </select>
-    
-    <!-- 基础CRUD操作 -->
-    <insert id="insertUser">
-        INSERT INTO user (name, email) VALUES (#{name}, #{email})
-    </insert>
-    
-    <update id="updateStatus">
-        UPDATE user SET status = #{status} WHERE id = #{id}
-    </update>
-    
-    <delete id="deleteByIds">
-        DELETE FROM user WHERE id IN 
-        <foreach collection="ids" item="id" open="(" separator="," close=")">
-            #{id}
-        </foreach>
-    </delete>
-    
-</repository>
-```
-
-### XML映射详解
-
-#### resultType
-
-`resultType` 用于指定查询结果的返回类型。支持以下类型：
-
-- **实体类**：自动映射列名到字段名（支持驼峰命名转换）
-- **基本类型**：`String`、`Integer`、`Long`、`Boolean` 等
-- **`Map`**：返回 `Map<String, Object>` 格式
-
-```xml
-<!-- 实体类映射 -->
-<select id="findById" resultType="com.example.entity.User">
-    SELECT * FROM user WHERE id = #{id}
-</select>
-
-<!-- 基本类型映射 -->
-<select id="countByStatus" resultType="java.lang.Long">
-    SELECT COUNT(*) FROM user WHERE status = #{status}
-</select>
-```
-
-#### resultMap
-
-`resultMap` 用于自定义列名到属性名的映射关系，适用于列名与字段名不一致的场景。
-
-```xml
-<resultMap id="userResultMap" type="com.example.entity.User">
-    <!-- 主键映射 -->
-    <id column="user_id" property="id"/>
-    
-    <!-- 普通字段映射 -->
-    <result column="user_name" property="name"/>
-    <result column="user_email" property="email"/>
-    <result column="create_time" property="createTime"/>
-</resultMap>
-
-<select id="findById" resultMap="userResultMap">
-    SELECT user_id, user_name, user_email, create_time 
-    FROM user WHERE user_id = #{id}
-</select>
-```
-
-#### discriminator（鉴别器）
-
-`discriminator` 用于根据列值选择不同的 `resultMap`，实现多态映射。
-
-```xml
-<resultMap id="vehicleResultMap" type="com.example.entity.Vehicle">
-    <id column="vehicle_id" property="id"/>
-    <result column="vehicle_type" property="type"/>
-    
-    <!-- 根据 vehicle_type 列的值选择不同的 resultMap -->
-    <discriminator column="vehicle_type">
-        <case value="car" resultMap="carResultMap"/>
-        <case value="truck" resultMap="truckResultMap"/>
-        <case value="motorcycle" resultMap="motorcycleResultMap"/>
-    </discriminator>
-</resultMap>
-
-<resultMap id="carResultMap" type="com.example.entity.Car">
-    <id column="vehicle_id" property="id"/>
-    <result column="seat_count" property="seatCount"/>
-    <result column="fuel_type" property="fuelType"/>
-</resultMap>
-
-<resultMap id="truckResultMap" type="com.example.entity.Truck">
-    <id column="vehicle_id" property="id"/>
-    <result column="payload_capacity" property="payloadCapacity"/>
-    <result column="axle_count" property="axleCount"/>
-</resultMap>
-
-<select id="findVehicle" resultMap="vehicleResultMap">
-    SELECT * FROM vehicle WHERE id = #{id}
-</select>
-```
-
-#### 使用示例
-
-```java
-@Repository
-public interface UserRepository extends BaseRepository<User> {
-    
-    // XML中定义的方法
-    Mono<User> findByName(@Param("name") String name);
-    
-    Mono<User> findById(@Param("id") Long id);
-}
-
-@Service
-@RequiredArgsConstructor
-public class UserService {
-    
-    private final UserRepository userRepository;
-    
-    public Mono<User> findUserByName(String name) {
-        return userRepository.findByName(name);
-    }
-    
-    public Mono<User> findUserById(Long id) {
-        return userRepository.findById(id);
-    }
-}
-```
-
-### 事务示例
-
-```java
-@Service
-@RequiredArgsConstructor
-public class OrderService {
-    
-    private final OrderRepository orderRepository;
-    private final ProductRepository productRepository;
-    private final R2dbcUtil r2dbcUtil;
-    
-    /**
-     * 创建订单（声明式事务）
-     */
-    @Transactional
-    public Mono<Order> createOrder(Order order) {
-        return r2dbcUtil.transaction(client -> {
-            // 1. 扣减库存
-            return productRepository.decreaseStock(order.getProductId(), order.getQuantity())
-                    // 2. 创建订单
-                    .then(orderRepository.insert(order));
-        }).next();
-    }
-    
-    /**
-     * 转账操作（声明式事务）
-     */
-    public Mono<Void> transfer(Long fromId, Long toId, BigDecimal amount) {
-        return r2dbcUtil.transaction(client -> {
-            return accountRepository.decrease(fromId, amount)
-                    .then(accountRepository.increase(toId, amount))
-                    .then();
-        }).then();
-    }
-}
-```
-
-## 手动事务管理
-
-### 事务控制方式对比
-
-| 方式 | 说明 | 适用场景 | 复杂度 |
-|------|------|----------|--------|
-| **声明式事务** | `@Transactional` 注解 | 简单事务，自动提交/回滚 | 低 |
-| **模板事务** | `TransactionTemplate` | 需要自动控制的事务 | 中 |
-| **手动事务** | `ManualTransaction` | 需要精细控制的复杂事务 | 高 |
-
-### ManualTransaction API 详解
-
-#### 核心方法
-
-| 方法 | 返回类型 | 说明 |
-|------|----------|------|
-| `commit()` | `Mono<Boolean>` | 提交事务，返回是否成功 |
-| `rollback()` | `Mono<Boolean>` | 回滚事务，返回是否成功 |
-| `getStatus()` | `TransactionStatus` | 获取当前事务状态 |
-| `isActive()` | `boolean` | 判断事务是否活跃 |
-| `isCompleted()` | `boolean` | 判断事务是否已完成 |
-| `isReadOnly()` | `boolean` | 判断是否只读事务 |
-| `setReadOnly(boolean)` | `void` | 设置只读模式 |
-| `setTimeout(int)` | `void` | 设置超时时间（秒） |
-| `getName()` | `string` | 获取事务名称 |
-| `setName(String)` | `void` | 设置事务名称 |
-
-#### 保存点方法
-
-| 方法 | 返回类型 | 说明 |
-|------|----------|------|
-| `createSavepoint(String)` | `Mono<Savepoint>` | 创建保存点 |
-| `rollbackToSavepoint(Savepoint)` | `Mono<Boolean>` | 回滚到保存点 |
-| `releaseSavepoint(Savepoint)` | `Mono<Boolean>` | 释放保存点 |
-
-#### 事务状态枚举
-
-| 状态 | 说明 |
-|------|------|
-| `NEW` | 新建事务 |
-| `ACTIVE` | 事务已激活 |
-| `COMMITTED` | 事务已提交 |
-| `ROLLED_BACK` | 事务已回滚 |
-| `COMPLETED` | 事务已完成 |
-| `READ_ONLY` | 事务标记为仅读取 |
-| `TIMEOUT` | 事务超时 |
-| `FAILED` | 事务异常 |
-
-### 使用示例
-
-#### 1. 基础手动事务
-
-```java
-@Service
-@RequiredArgsConstructor
-public class ManualTransactionService {
-    
-    private final R2dbcUtil r2dbcUtil;
-    private final UserRepository userRepository;
-    private final OrderRepository orderRepository;
-    
-    /**
-     * 手动事务示例 - 转账操作
-     */
-    public Mono<Void> transfer(Long fromId, Long toId, BigDecimal amount) {
-        return r2dbcUtil.createManualTransaction("transfer")
-                .flatMap(transaction -> {
-                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
-                    
-                    return userRepository.decreaseBalance(connection, fromId, amount)
-                            .then(userRepository.increaseBalance(connection, toId, amount))
-                            .then(transaction.commit())
-                            .onErrorResume(error -> {
-                                log.error("转账失败，回滚事务", error);
-                                return transaction.rollback().then(Mono.error(error));
-                            });
-                })
-                .then();
-    }
-    
-    /**
-     * 手动事务示例 - 批量插入
-     */
-    public Mono<List<User>> batchInsert(List<User> users) {
-        return r2dbcUtil.createManualTransaction("batch-insert")
-                .flatMap(transaction -> {
-                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
-                    
-                    return Flux.fromIterable(users)
-                            .concatMap(user -> userRepository.insert(connection, user))
-                            .collectList()
-                            .flatMap(result -> transaction.commit().thenReturn(result))
-                            .onErrorResume(error -> 
-                                transaction.rollback().then(Mono.error(error)));
-                });
-    }
-}
-```
-
-#### 2. 带保存点的事务
-
-```java
-@Service
-@RequiredArgsConstructor
-public class SavepointService {
-    
-    private final R2dbcUtil r2dbcUtil;
-    private final OrderRepository orderRepository;
-    private final InventoryRepository inventoryRepository;
-    
-    /**
-     * 创建订单（使用保存点）
-     * 扣减库存成功后，如果创建订单失败，只回滚订单操作，保留库存扣减
-     */
-    public Mono<Order> createOrderWithSavepoint(Order order) {
-        return r2dbcUtil.createManualTransaction("create-order")
-                .flatMap(transaction -> {
-                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
-                    
-                    return inventoryRepository.decrease(connection, order.getProductId(), order.getQuantity())
-                            // 创建保存点
-                            .then(transaction.createSavepoint("after-inventory"))
-                            .flatMap(savepoint -> 
-                                orderRepository.insert(connection, order)
-                                    .onErrorResume(error -> 
-                                        // 回滚到保存点，只回滚订单操作
-                                        transaction.rollbackToSavepoint(savepoint)
-                                            .then(Mono.error(error)))
-                            )
-                            .then(transaction.commit())
-                            .onErrorResume(error -> 
-                                transaction.rollback().then(Mono.error(error)));
-                });
-    }
-    
-    /**
-     * 复杂业务流程（多个保存点）
-     */
-    public Mono<Void> complexBusinessProcess() {
-        return r2dbcUtil.createManualTransaction("complex-process")
-                .flatMap(transaction -> {
-                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
-                    
-                    return step1(connection)
-                        .then(transaction.createSavepoint("step1-done"))
-                        .flatMap(sp1 -> step2(connection)
-                            .onErrorResume(e -> transaction.rollbackToSavepoint(sp1).then(Mono.error(e)))
-                        )
-                        .then(transaction.createSavepoint("step2-done"))
-                        .flatMap(sp2 -> step3(connection)
-                            .onErrorResume(e -> transaction.rollbackToSavepoint(sp2).then(Mono.error(e)))
-                        )
-                        .then(transaction.commit())
-                        .onErrorResume(e -> transaction.rollback().then(Mono.error(e)));
-                })
-                .then();
-    }
-}
-```
-
-#### 3. 事务模板使用
-
-```java
-@Service
-@RequiredArgsConstructor
-public class TransactionTemplateService {
-    
-    private final R2dbcUtil r2dbcUtil;
-    private final UserRepository userRepository;
-    private final OrderRepository orderRepository;
-    
-    /**
-     * 自动提交/回滚事务
-     */
-    public Mono<Order> createOrderWithTemplate(Order order) {
-        return r2dbcUtil.executeInTransaction(connection -> {
-            return inventoryRepository.decrease(connection, order.getProductId(), order.getQuantity())
-                    .then(Mono.from(orderRepository.insert(connection, order)));
-        });
-    }
-    
-    /**
-     * 带事务名称的事务
-     */
-    public Mono<Void> transferWithTemplate(Long fromId, Long toId, BigDecimal amount) {
-        return r2dbcUtil.executeInTransaction("transfer-operation", connection -> {
-            return accountRepository.decrease(connection, fromId, amount)
-                    .then(Mono.from(accountRepository.increase(connection, toId, amount)))
-                    .then();
-        });
-    }
-    
-    /**
-     * 只读事务
-     */
-    public Mono<List<User>> findUsersReadOnly() {
-        return r2dbcUtil.executeInReadOnlyTransaction(connection -> {
-            return userRepository.findAll(connection).collectList();
-        });
-    }
-    
-    /**
-     * 执行多个操作的事务
-     */
-    public Mono<List<Object>> executeMultipleOperations() {
-        return r2dbcUtil.getTransactionTemplate()
-            .executeInTransaction(
-                connection -> userRepository.findAll(connection).collectList(),
-                connection -> orderRepository.findAll(connection).collectList()
-            )
-            .collectList();
-    }
-}
-```
-
-#### 4. 条件事务
-
-```java
-@Service
-@RequiredArgsConstructor
-public class ConditionalTransactionService {
-    
-    private final R2dbcUtil r2dbcUtil;
-    
-    /**
-     * 根据条件决定是否提交事务
-     */
-    public Mono<Boolean> conditionalCommit(boolean shouldCommit) {
-        return r2dbcUtil.createManualTransaction("conditional")
-                .flatMap(transaction -> {
-                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
-                    
-                    return someOperation(connection)
-                            .then(Mono.defer(() -> {
-                                if (shouldCommit) {
-                                    return transaction.commit();
-                                } else {
-                                    return transaction.rollback();
-                                }
-                            }));
-                });
-    }
-    
-    /**
-     * 部分提交事务
-     */
-    public Mono<Void> partialCommit() {
-        return r2dbcUtil.createManualTransaction("partial")
-                .flatMap(transaction -> {
-                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
-                    
-                    return operation1(connection)
-                            .then(transaction.commit())  // 提交操作1
-                            .then(r2dbcUtil.createManualTransaction("partial-2"))
-                            .flatMap(t -> {
-                                Connection conn = ((ManualTransactionImpl) t).getConnection();
-                                return operation2(conn)
-                                    .then(t.commit());
-                            });
-                })
-                .then();
-    }
-}
-```
-
-### 事务管理器 API
-
-```java
-@Service
-@RequiredArgsConstructor
-public class TransactionManagerService {
-    
-    private final TransactionManager transactionManager;
-    
-    /**
-     * 创建事务
-     */
-    public Mono<ManualTransaction> createTransaction() {
-        return transactionManager.createTransaction("my-transaction");
-    }
-    
-    /**
-     * 创建只读事务
-     */
-    public Mono<ManualTransaction> createReadOnlyTransaction() {
-        return transactionManager.createReadOnlyTransaction();
-    }
-    
-    /**
-     * 创建带超时的事务
-     */
-    public Mono<ManualTransaction> createTimedTransaction(int timeoutSeconds) {
-        return transactionManager.createTransaction(timeoutSeconds);
-    }
-    
-    /**
-     * 使用事务模板
-     */
-    public Mono<Result> executeWithTemplate() {
-        TransactionTemplate template = new TransactionTemplate(transactionManager);
-        return template.execute(connection -> {
-            // 数据库操作
-            return Mono.just(result);
-        });
-    }
-}
-```
-
-### 事务配置
+在 `application.yml` 中配置：
 
 ```yaml
 wcdk:
   r2dbc:
     enabled: true
-    # 事务相关配置
-    transaction:
-      enabled: true
-      default-timeout: 30        # 默认超时时间（秒）
-      default-read-only: false   # 默认是否只读
-      max-retry: 3              # 最大重试次数
 ```
 
-### 事务生命周期图
+并在启动类上添加注解：
 
-```
-createTransaction()
-    │
-    ▼
-┌─────────────────┐
-│   NEW 状态      │  ← 事务创建
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  ACTIVE 状态    │  ← 事务激活
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    │         │
-    ▼         ▼
-┌────────┐ ┌────────┐
-│ commit │ │rollback│
-└────┬───┘ └────┬───┘
-     │          │
-     ▼          ▼
-┌─────────────────┐
-│ COMMITTED /     │  ← 事务完成
-│ ROLLED_BACK     │
-└─────────────────┘
+```java
+@EnableWcdkR2dbcRepositories(basePackages = "com.example.repository")
 ```
 
-### 保存点生命周期图
+### Q2: 如何配置多数据源？
 
-```
-ACTIVE 事务
-    │
-    ▼
-createSavepoint("savepoint1")
-    │
-    ▼
-┌─────────────────┐
-│  操作1          │
-└────────┬────────┘
-         │
-         ▼
-createSavepoint("savepoint2")
-    │
-    ▼
-┌─────────────────┐
-│  操作2          │
-└────────┬────────┘
-         │
-    ┌────┴────────────┐
-    │                 │
-    ▼                 ▼
-┌────────────┐ ┌────────────────┐
-│ commit     │ │rollbackTo      │
-│ (所有操作) │ │Savepoint("s1") │
-└────────────┘ └────────────────┘
-                  │
-                  ▼
-            ┌─────────────────┐
-            │ 操作1保留       │
-            │ 操作2回滚       │
-            └─────────────────┘
-```
+参考 [多数据源配置](#多数据源配置) 章节。
 
-### 常见问题
+### Q3: XML映射文件放在哪里？
 
-#### Q1: 手动事务与声明式事务的区别？
+默认位置为 `classpath*:repository/**/*.xml`，可通过 `wcdk.r2dbc.mapper-locations` 配置。
+
+### Q4: 如何使用 resultMap？
+
+参考 [XML映射配置](#xml映射配置) 章节中的 `resultMap` 部分。
+
+### Q5: 手动事务与声明式事务的区别？
 
 | 特性 | 手动事务 | 声明式事务 |
 |------|----------|------------|
 | 控制粒度 | 精细控制 | 粗粒度控制 |
 | 提交/回滚 | 手动调用 | 自动 |
 | 保存点支持 | 支持 | 不支持 |
-| 事务传播 | 需要手动管理 | 自动管理 |
 | 适用场景 | 复杂业务流程 | 简单CRUD操作 |
 
-#### Q2: 何时使用保存点？
-
-- 执行多个步骤的业务流程
-- 需要部分回滚的场景
-- 需要保留前面操作结果的场景
-
-#### Q3: 如何处理嵌套事务？
-
-```java
-// 使用保存点实现嵌套事务效果
-r2dbcUtil.createManualTransaction("outer")
-    .flatMap(outer -> {
-        return operation1(outer.getConnection())
-            .then(outer.createSavepoint("nested"))
-            .flatMap(sp -> 
-                r2dbcUtil.createManualTransaction("inner")
-                    .flatMap(inner -> 
-                        operation2(inner.getConnection())
-                            .then(inner.commit())
-                            .onErrorResume(e -> inner.rollback().then(Mono.error(e)))
-                    )
-                    .onErrorResume(e -> 
-                        outer.rollbackToSavepoint(sp).then(Mono.error(e)))
-            )
-            .then(outer.commit())
-            .onErrorResume(e -> outer.rollback().then(Mono.error(e)));
-    });
-```
-
-#### Q4: 事务超时如何处理？
-
-```java
-r2dbcUtil.createManualTransaction("timeout-example")
-    .doOnSuccess(transaction -> transaction.setTimeout(30)) // 30秒超时
-    .flatMap(transaction -> {
-        return longRunningOperation(transaction.getConnection())
-            .then(transaction.commit())
-            .onErrorResume(e -> transaction.rollback().then(Mono.error(e)));
-    });
-```
-
-#### Q5: 如何调试事务问题？
+### Q6: 如何调试SQL问题？
 
 1. 开启SQL日志：`wcdk.r2dbc.sql-log-enabled=true`
-2. 使用事务名称标识：`createTransaction("my-transaction")`
-3. 监控事务状态：`transaction.getStatus()`
-4. 使用拦截器记录事务操作
+2. 使用SQL拦截器记录执行详情
+3. 监控慢SQL：实现 `SqlLifecycleInterceptor` 接口
 
 ## 许可证
 
