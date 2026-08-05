@@ -82,7 +82,7 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
             }
         }
         if (environment != null) {
-            result.addAll(List.of(environment.getProperty("Wcdk.r2dbc.base-packages", String[].class, new String[0])));
+            result.addAll(List.of(environment.getProperty("wcdk.r2dbc.base-packages", String[].class, new String[0])));
         }
         if (registry.containsBeanDefinition(AUTO_CONFIGURATION_PACKAGES_BEAN_NAME)) {
             Object value = registry.getBeanDefinition(AUTO_CONFIGURATION_PACKAGES_BEAN_NAME)

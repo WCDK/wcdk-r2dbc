@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @version 1.0
  **/
 @Data
-@ConfigurationProperties(prefix = "Wcdk.r2dbc")
+@ConfigurationProperties(prefix = "wcdk.r2dbc")
 public class WcdkR2dbcProperties {
 
     private boolean enabled;

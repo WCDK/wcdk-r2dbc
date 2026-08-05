@@ -22,7 +22,7 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
  **/
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(WcdkR2dbcProperties.class)
-@ConditionalOnProperty(prefix = "Wcdk.r2dbc", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "wcdk.r2dbc", name = "enabled", havingValue = "true")
 public class R2dbcConfiguration {
 
     @Bean

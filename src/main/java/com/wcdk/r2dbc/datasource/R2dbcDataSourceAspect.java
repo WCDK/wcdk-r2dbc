@@ -22,7 +22,7 @@ import java.lang.reflect.Method;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class R2dbcDataSourceAspect {
 
-    @Around("@within(com.Wcdk.r2dbc.datasource.R2dbcDataSource) || @annotation(com.Wcdk.r2dbc.datasource.R2dbcDataSource)")
+    @Around("@within(com.wcdk.r2dbc.datasource.R2dbcDataSource) || @annotation(com.wcdk.r2dbc.datasource.R2dbcDataSource)")
     public Object switchDataSource(ProceedingJoinPoint joinPoint) throws Throwable {
         R2dbcDataSource dataSource = findDataSource(joinPoint);
         Object result = joinPoint.proceed();

@@ -55,7 +55,7 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
 })
 @ConditionalOnClass(DatabaseClient.class)
 @EnableConfigurationProperties({WcdkR2dbcProperties.class, WcdkSpringR2dbcProperties.class})
-@ConditionalOnProperty(prefix = "Wcdk.r2dbc", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "wcdk.r2dbc", name = "enabled", havingValue = "true")
 @Primary
 public class WcdkR2dbcAutoConfiguration {
 
