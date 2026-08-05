@@ -10,7 +10,8 @@ import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata.FieldColumn;
 import com.wcdk.r2dbc.core.query.QueryWrapper;
-import com.Wcdk.r2dbc.core.xml.RepositoryStatement;
+import com.wcdk.r2dbc.core.xml.ResultMapDefinition;
+import com.wcdk.r2dbc.core.xml.RepositoryStatement;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
 import io.r2dbc.spi.Row;
 import org.aopalliance.intercept.MethodInterceptor;
@@ -154,7 +155,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         try {
             result = switch (statement.commandType()) {
                 case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
-                case SELECT -> executeXmlSelect(finalBoundSql, method);
+                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
             };
         } catch (Exception e) {
             context.setError(e);
@@ -204,10 +205,14 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         return rows;
     }
 
-    private Object executeXmlSelect(BoundSql boundSql, Method method) {
+    private Object executeXmlSelect(BoundSql boundSql, Method method, RepositoryStatement statement) {
         Class<?> valueType = reactiveValueType(method);
+        String resultType = statement.resultType();
+        String resultMapId = statement.resultMapId();
+
         if (method.getReturnType() == Flux.class) {
-            return r2dbcUtil.query(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> mapXmlRow(row, valueType));
+            return r2dbcUtil.query(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
+                    mapXmlRow(row, valueType, resultType, resultMapId));
         }
         if (valueType == Boolean.class || valueType == boolean.class) {
             return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue() > 0)
@@ -221,10 +226,21 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).intValue())
                     .defaultIfEmpty(0);
         }
-        return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> mapXmlRow(row, valueType));
+        return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
+                mapXmlRow(row, valueType, resultType, resultMapId));
     }
 
-    private Object mapXmlRow(Row row, Class<?> valueType) {
+    private Object mapXmlRow(Row row, Class<?> valueType, String resultType, String resultMapId) {
+        if (StringUtils.hasText(resultMapId)) {
+            return mapRowByResultMap(row, resultMapId);
+        }
+        if (StringUtils.hasText(resultType)) {
+            Class<?> targetClass = resolveClass(resultType);
+            if (Number.class.isAssignableFrom(targetClass) || targetClass == String.class || targetClass == Boolean.class || targetClass == boolean.class) {
+                return r2dbcUtil.convertValue(row.get(0), targetClass);
+            }
+            return r2dbcUtil.map(row, targetClass);
+        }
         if (valueType == Object.class) {
             if (metadata == null) {
                 throw new IllegalStateException("无法确定实体类型，请在 XML 中明确指定返回值类型或继承 BaseRepository");
@@ -235,6 +251,61 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             return r2dbcUtil.convertValue(row.get(0), valueType);
         }
         return r2dbcUtil.map(row, valueType);
+    }
+
+    private Object mapRowByResultMap(Row row, String resultMapId) {
+        ResultMapDefinition resultMap = repositoryXmlRegistry.findResultMap(resultMapId)
+                .orElseThrow(() -> new IllegalStateException("resultMap 不存在：" + resultMapId));
+
+        String discriminatorColumn = resultMap.discriminatorColumn();
+        if (StringUtils.hasText(discriminatorColumn)) {
+            Object discriminatorValue = row.get(discriminatorColumn);
+            if (discriminatorValue != null) {
+                String valueStr = String.valueOf(discriminatorValue);
+                String mappedResultMapId = resultMap.discriminatorMappings().get(valueStr);
+                if (StringUtils.hasText(mappedResultMapId)) {
+                    return mapRowByResultMap(row, mappedResultMapId);
+                }
+            }
+        }
+
+        Class<?> targetClass = resolveClass(resultMap.type());
+        try {
+            Object entity = targetClass.getDeclaredConstructor().newInstance();
+            for (Map.Entry<String, String> entry : resultMap.idMappings().entrySet()) {
+                String column = entry.getKey();
+                String property = entry.getValue();
+                Object value = row.get(column);
+                Field field = findField(targetClass, property);
+                if (field != null) {
+                    field.setAccessible(true);
+                    field.set(entity, r2dbcUtil.convertValue(value, field.getType()));
+                }
+            }
+            return entity;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("通过 resultMap 映射实体失败：" + resultMapId, e);
+        }
+    }
+
+    private Class<?> resolveClass(String className) {
+        try {
+            return Class.forName(className);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("类不存在：" + className, e);
+        }
+    }
+
+    private Field findField(Class<?> type, String name) {
+        Class<?> searchType = type;
+        while (searchType != null && searchType != Object.class) {
+            try {
+                return searchType.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                searchType = searchType.getSuperclass();
+            }
+        }
+        return null;
     }
 
     private Number numberValue(Row row) {

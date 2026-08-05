@@ -15,6 +15,7 @@
 - [多数据源配置](#多数据源配置)
 - [SQL生命周期拦截器](#sql生命周期拦截器)
 - [数据库方言支持](#数据库方言支持)
+- [XML映射配置](#xml映射配置)
 - [API文档](#api文档)
 - [示例代码](#示例代码)
 
@@ -39,6 +40,9 @@
 | **简化API** | 提供 BaseRepository 接口，封装常用CRUD操作 |
 | **查询构造器** | QueryWrapper 提供链式编程构建查询条件 |
 | **XML映射** | 支持类似 MyBatis 的 XML SQL 映射文件 |
+| **resultType** | 支持指定查询结果的返回类型 |
+| **resultMap** | 支持自定义列名到属性名的映射关系 |
+| **discriminator** | 支持根据列值选择不同的 resultMap，实现多态映射 |
 | **自动ID生成** | 内置雪花算法，自动生成分布式唯一ID |
 | **分页支持** | 内置分页查询功能，简化分页逻辑 |
 | **逻辑删除** | 支持逻辑删除，数据可恢复 |
@@ -530,6 +534,205 @@ public class AuditInterceptor implements SqlLifecycleInterceptor {
 | JSON类型 | ✓ | ✓ | ✓ | ✓ |
 | 数组类型 | ✗ | ✓ | ✗ | ✓ |
 
+## XML映射配置
+
+### 配置说明
+
+XML映射文件用于定义复杂的SQL语句，支持 `resultType` 和 `resultMap` 两种结果映射方式。
+
+### 文件位置
+
+在 `application.yml` 中配置XML文件位置：
+
+```yaml
+wcdk:
+  r2dbc:
+    enabled: true
+    mapper-locations: classpath*:mapper/**/*.xml
+```
+
+### 基础结构
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<repository namespace="com.example.repository.UserRepository">
+    
+    <!-- SQL语句定义 -->
+    <select id="findByName" resultType="com.example.entity.User">
+        SELECT * FROM user WHERE name = #{name}
+    </select>
+    
+</repository>
+```
+
+### 参数绑定
+
+支持以下参数绑定方式：
+
+```xml
+<!-- 使用 #{} 绑定参数 -->
+<select id="findUser" resultType="com.example.entity.User">
+    SELECT * FROM user WHERE name = #{name} AND status = #{status}
+</select>
+
+<!-- 支持嵌套属性 -->
+<select id="findOrder" resultType="com.example.entity.Order">
+    SELECT * FROM order WHERE user_id = #{user.id}
+</select>
+
+<!-- 支持集合参数 -->
+<delete id="deleteByIds">
+    DELETE FROM user WHERE id IN 
+    <foreach collection="ids" item="id" open="(" separator="," close=")">
+        #{id}
+    </foreach>
+</delete>
+```
+
+### resultType 详解
+
+`resultType` 用于指定查询结果的返回类型：
+
+```xml
+<!-- 实体类映射 -->
+<select id="findById" resultType="com.example.entity.User">
+    SELECT * FROM user WHERE id = #{id}
+</select>
+
+<!-- 基本类型映射 -->
+<select id="countByStatus" resultType="java.lang.Long">
+    SELECT COUNT(*) FROM user WHERE status = #{status}
+</select>
+
+<!-- Map类型映射 -->
+<select id="findMap" resultType="java.util.Map">
+    SELECT * FROM user WHERE id = #{id}
+</select>
+```
+
+### resultMap 详解
+
+`resultMap` 用于自定义列名到属性名的映射关系：
+
+```xml
+<resultMap id="userResultMap" type="com.example.entity.User">
+    <!-- 主键映射 -->
+    <id column="user_id" property="id"/>
+    
+    <!-- 普通字段映射 -->
+    <result column="user_name" property="name"/>
+    <result column="user_email" property="email"/>
+    <result column="create_time" property="createTime"/>
+</resultMap>
+
+<select id="findById" resultMap="userResultMap">
+    SELECT user_id, user_name, user_email, create_time 
+    FROM user WHERE user_id = #{id}
+</select>
+```
+
+### discriminator 鉴别器
+
+`discriminator` 用于根据列值选择不同的 `resultMap`，实现多态映射：
+
+```xml
+<resultMap id="vehicleResultMap" type="com.example.entity.Vehicle">
+    <id column="vehicle_id" property="id"/>
+    <result column="vehicle_type" property="type"/>
+    
+    <!-- 根据 vehicle_type 列的值选择不同的 resultMap -->
+    <discriminator column="vehicle_type">
+        <case value="car" resultMap="carResultMap"/>
+        <case value="truck" resultMap="truckResultMap"/>
+        <case value="motorcycle" resultMap="motorcycleResultMap"/>
+    </discriminator>
+</resultMap>
+
+<resultMap id="carResultMap" type="com.example.entity.Car">
+    <id column="vehicle_id" property="id"/>
+    <result column="seat_count" property="seatCount"/>
+    <result column="fuel_type" property="fuelType"/>
+</resultMap>
+
+<resultMap id="truckResultMap" type="com.example.entity.Truck">
+    <id column="vehicle_id" property="id"/>
+    <result column="payload_capacity" property="payloadCapacity"/>
+    <result column="axle_count" property="axleCount"/>
+</resultMap>
+
+<select id="findVehicle" resultMap="vehicleResultMap">
+    SELECT * FROM vehicle WHERE id = #{id}
+</select>
+```
+
+### 完整示例
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<repository namespace="com.example.repository.UserRepository">
+    
+    <!-- 定义 resultMap -->
+    <resultMap id="userResultMap" type="com.example.entity.User">
+        <id column="user_id" property="id"/>
+        <result column="user_name" property="name"/>
+        <result column="user_email" property="email"/>
+        <result column="user_status" property="status"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+    
+    <!-- 使用 resultType -->
+    <select id="findByName" resultType="com.example.entity.User">
+        SELECT * FROM user WHERE user_name = #{name}
+    </select>
+    
+    <!-- 使用 resultMap -->
+    <select id="findById" resultMap="userResultMap">
+        SELECT user_id, user_name, user_email, user_status, create_time, update_time
+        FROM user WHERE user_id = #{id}
+    </select>
+    
+    <!-- 带条件的查询 -->
+    <select id="findByCondition" resultMap="userResultMap">
+        SELECT user_id, user_name, user_email, user_status, create_time, update_time
+        FROM user
+        <where>
+            <if test="name != null">
+                AND user_name LIKE CONCAT('%', #{name}, '%')
+            </if>
+            <if test="status != null">
+                AND user_status = #{status}
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+    
+    <!-- 批量插入 -->
+    <insert id="batchInsert">
+        INSERT INTO user (user_name, user_email, user_status)
+        VALUES
+        <foreach collection="users" item="user" separator=",">
+            (#{user.name}, #{user.email}, #{user.status})
+        </foreach>
+    </insert>
+    
+    <!-- 更新操作 -->
+    <update id="updateStatus">
+        UPDATE user SET user_status = #{status}, update_time = NOW()
+        WHERE user_id = #{id}
+    </update>
+    
+    <!-- 删除操作 -->
+    <delete id="deleteByIds">
+        DELETE FROM user WHERE user_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+    
+</repository>
+```
+
 ## API文档
 
 ### BaseRepository 接口
@@ -831,17 +1034,51 @@ public class UserService {
 
 ```xml
 <!-- UserMapper.xml -->
-<mapper namespace="com.example.repository.UserRepository">
+<repository namespace="com.example.repository.UserRepository">
     
+    <!-- 使用 resultType 指定返回类型 -->
     <select id="findByName" resultType="com.example.entity.User">
         SELECT * FROM user WHERE name = #{name}
     </select>
     
-    <insert id="batchInsert">
-        INSERT INTO user (name, email) VALUES 
-        <foreach collection="users" item="user" separator=",">
-            (#{user.name}, #{user.email})
-        </foreach>
+    <!-- 使用 resultMap 自定义列映射 -->
+    <resultMap id="userResultMap" type="com.example.entity.User">
+        <id column="user_id" property="id"/>
+        <result column="user_name" property="name"/>
+        <result column="user_email" property="email"/>
+    </resultMap>
+    
+    <select id="findById" resultMap="userResultMap">
+        SELECT * FROM user WHERE id = #{id}
+    </select>
+    
+    <!-- 带鉴别器的 resultMap -->
+    <resultMap id="vehicleResultMap" type="com.example.entity.Vehicle">
+        <id column="vehicle_id" property="id"/>
+        <result column="vehicle_type" property="type"/>
+        <discriminator column="vehicle_type">
+            <case value="car" resultMap="carResultMap"/>
+            <case value="truck" resultMap="truckResultMap"/>
+        </discriminator>
+    </resultMap>
+    
+    <resultMap id="carResultMap" type="com.example.entity.Car">
+        <id column="vehicle_id" property="id"/>
+        <result column="seat_count" property="seatCount"/>
+    </resultMap>
+    
+    <resultMap id="truckResultMap" type="com.example.entity.Truck">
+        <id column="vehicle_id" property="id"/>
+        <result column="payload_capacity" property="payloadCapacity"/>
+    </resultMap>
+    
+    <select id="findVehicle" resultMap="vehicleResultMap">
+        SELECT * FROM vehicle WHERE id = #{id}
+    </select>
+    
+    <!-- 基础CRUD操作 -->
+    <insert id="insertUser">
+        INSERT INTO user (name, email) VALUES (#{name}, #{email})
     </insert>
     
     <update id="updateStatus">
@@ -855,7 +1092,112 @@ public class UserService {
         </foreach>
     </delete>
     
-</mapper>
+</repository>
+```
+
+### XML映射详解
+
+#### resultType
+
+`resultType` 用于指定查询结果的返回类型。支持以下类型：
+
+- **实体类**：自动映射列名到字段名（支持驼峰命名转换）
+- **基本类型**：`String`、`Integer`、`Long`、`Boolean` 等
+- **`Map`**：返回 `Map<String, Object>` 格式
+
+```xml
+<!-- 实体类映射 -->
+<select id="findById" resultType="com.example.entity.User">
+    SELECT * FROM user WHERE id = #{id}
+</select>
+
+<!-- 基本类型映射 -->
+<select id="countByStatus" resultType="java.lang.Long">
+    SELECT COUNT(*) FROM user WHERE status = #{status}
+</select>
+```
+
+#### resultMap
+
+`resultMap` 用于自定义列名到属性名的映射关系，适用于列名与字段名不一致的场景。
+
+```xml
+<resultMap id="userResultMap" type="com.example.entity.User">
+    <!-- 主键映射 -->
+    <id column="user_id" property="id"/>
+    
+    <!-- 普通字段映射 -->
+    <result column="user_name" property="name"/>
+    <result column="user_email" property="email"/>
+    <result column="create_time" property="createTime"/>
+</resultMap>
+
+<select id="findById" resultMap="userResultMap">
+    SELECT user_id, user_name, user_email, create_time 
+    FROM user WHERE user_id = #{id}
+</select>
+```
+
+#### discriminator（鉴别器）
+
+`discriminator` 用于根据列值选择不同的 `resultMap`，实现多态映射。
+
+```xml
+<resultMap id="vehicleResultMap" type="com.example.entity.Vehicle">
+    <id column="vehicle_id" property="id"/>
+    <result column="vehicle_type" property="type"/>
+    
+    <!-- 根据 vehicle_type 列的值选择不同的 resultMap -->
+    <discriminator column="vehicle_type">
+        <case value="car" resultMap="carResultMap"/>
+        <case value="truck" resultMap="truckResultMap"/>
+        <case value="motorcycle" resultMap="motorcycleResultMap"/>
+    </discriminator>
+</resultMap>
+
+<resultMap id="carResultMap" type="com.example.entity.Car">
+    <id column="vehicle_id" property="id"/>
+    <result column="seat_count" property="seatCount"/>
+    <result column="fuel_type" property="fuelType"/>
+</resultMap>
+
+<resultMap id="truckResultMap" type="com.example.entity.Truck">
+    <id column="vehicle_id" property="id"/>
+    <result column="payload_capacity" property="payloadCapacity"/>
+    <result column="axle_count" property="axleCount"/>
+</resultMap>
+
+<select id="findVehicle" resultMap="vehicleResultMap">
+    SELECT * FROM vehicle WHERE id = #{id}
+</select>
+```
+
+#### 使用示例
+
+```java
+@Repository
+public interface UserRepository extends BaseRepository<User> {
+    
+    // XML中定义的方法
+    Mono<User> findByName(@Param("name") String name);
+    
+    Mono<User> findById(@Param("id") Long id);
+}
+
+@Service
+@RequiredArgsConstructor
+public class UserService {
+    
+    private final UserRepository userRepository;
+    
+    public Mono<User> findUserByName(String name) {
+        return userRepository.findByName(name);
+    }
+    
+    public Mono<User> findUserById(Long id) {
+        return userRepository.findById(id);
+    }
+}
 ```
 
 ### 事务示例
