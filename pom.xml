@@ -27,6 +27,7 @@
         <dependency>
             <groupId>com.dameng</groupId>
             <artifactId>dm-r2dbc</artifactId>
+            <version>1.0.0</version>
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
