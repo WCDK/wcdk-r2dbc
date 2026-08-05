@@ -8,6 +8,7 @@
         <version>3.5.16</version>
         <relativePath/>
     </parent>
+    <groupId>com.wcdk.r2dbc</groupId>
     <artifactId>wcdk-r2dbc</artifactId>
     <name>wcdk-r2dbc</name>
     <description>wcdk-r2dbc</description>
