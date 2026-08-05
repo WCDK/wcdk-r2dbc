@@ -3,11 +3,14 @@ package com.wcdk.r2dbc;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
 import com.wcdk.r2dbc.core.datasource.R2dbcDataSourceRouter;
-import com.wcdk.r2dbc.core.executor.R2dbcQueryExecutor;
+import com.wcdk.r2dbc.core.executor.ParameterBinder;
+import com.wcdk.r2dbc.core.executor.R2dbcQueryOperations;
+import com.wcdk.r2dbc.core.executor.R2dbcRowMapper;
+import com.wcdk.r2dbc.core.executor.R2dbcTransactionOperations;
+import com.wcdk.r2dbc.core.executor.R2dbcUpdateOperations;
+import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
 import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
-import com.wcdk.r2dbc.core.mapper.R2dbcEntityMapper;
 import com.wcdk.r2dbc.core.transaction.ManualTransaction;
-import com.wcdk.r2dbc.core.transaction.R2dbcTransactionHelper;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
 import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
 import io.r2dbc.spi.Connection;
@@ -39,15 +42,21 @@ public class R2dbcUtil {
 
     private final R2dbcEntityTemplate entityTemplate;
 
-    private final R2dbcQueryExecutor queryExecutor;
+    private final WcdkR2dbcProperties properties;
 
-    private final R2dbcTransactionHelper transactionHelper;
+    private final WcdkSpringR2dbcProperties springR2dbcProperties;
 
-    private final R2dbcEntityMapper entityMapper;
-
+    // 基础组件
+    private final ParameterBinder parameterBinder;
+    private final SqlLifecycleExecutor lifecycleExecutor;
+    private final R2dbcRowMapper rowMapper;
+    private final R2dbcSqlLogger sqlLogger;
     private final R2dbcDataSourceRouter dataSourceRouter;
 
-    private final R2dbcSqlLogger sqlLogger;
+    // 操作组件
+    private final R2dbcQueryOperations queryOperations;
+    private final R2dbcUpdateOperations updateOperations;
+    private final R2dbcTransactionOperations transactionOperations;
 
     public R2dbcUtil(DatabaseClient databaseClient,
                      R2dbcEntityTemplate entityTemplate,
@@ -71,11 +80,18 @@ public class R2dbcUtil {
         this.entityTemplate = entityTemplate;
         this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
         this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
+
+        // 初始化基础组件
+        this.parameterBinder = new ParameterBinder();
+        this.lifecycleExecutor = new SqlLifecycleExecutor();
+        this.rowMapper = new R2dbcRowMapper();
         this.sqlLogger = new R2dbcSqlLogger(this.properties, this.springR2dbcProperties);
-        this.queryExecutor = new R2dbcQueryExecutor(databaseClient, sqlLogger);
-        this.transactionHelper = new R2dbcTransactionHelper(databaseClient, transactionalOperator);
-        this.entityMapper = new R2dbcEntityMapper();
         this.dataSourceRouter = new R2dbcDataSourceRouter();
+
+        // 初始化操作组件
+        this.queryOperations = new R2dbcQueryOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.transactionOperations = new R2dbcTransactionOperations(databaseClient, transactionalOperator);
     }
 
     public R2dbcUtil(DatabaseClient databaseClient,
@@ -88,21 +104,24 @@ public class R2dbcUtil {
         this.entityTemplate = entityTemplate;
         this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
         this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
+
+        // 初始化基础组件
+        this.parameterBinder = new ParameterBinder();
+        this.lifecycleExecutor = new SqlLifecycleExecutor();
+        this.rowMapper = new R2dbcRowMapper();
         this.sqlLogger = new R2dbcSqlLogger(this.properties, this.springR2dbcProperties);
-        this.queryExecutor = new R2dbcQueryExecutor(databaseClient, sqlLogger);
-        this.transactionHelper = new R2dbcTransactionHelper(databaseClient, transactionalOperator, transactionManager);
-        this.entityMapper = new R2dbcEntityMapper();
         this.dataSourceRouter = new R2dbcDataSourceRouter();
+
+        // 初始化操作组件
+        this.queryOperations = new R2dbcQueryOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.transactionOperations = new R2dbcTransactionOperations(databaseClient, transactionalOperator, transactionManager);
     }
-
-    private final WcdkR2dbcProperties properties;
-
-    private final WcdkSpringR2dbcProperties springR2dbcProperties;
 
     // ==================== 委托方法：查询执行 ====================
 
     public DatabaseClient databaseClient() {
-        return queryExecutor.databaseClient();
+        return databaseClient;
     }
 
     public R2dbcEntityTemplate entityTemplate() {
@@ -113,85 +132,85 @@ public class R2dbcUtil {
     }
 
     public Flux<Map<String, Object>> query(String sql) {
-        return queryExecutor.query(sql);
+        return queryOperations.query(sql);
     }
 
     public Flux<Map<String, Object>> query(String sql, Map<?, ?> parameters) {
-        return queryExecutor.query(sql, parameters);
+        return queryOperations.query(sql, parameters);
     }
 
     public <T> Flux<T> query(String sql, BiFunction<Row, RowMetadata, T> mapper) {
-        return queryExecutor.query(sql, mapper);
+        return queryOperations.query(sql, mapper);
     }
 
     public <T> Flux<T> query(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) {
-        return queryExecutor.query(sql, parameters, mapper);
+        return queryOperations.query(sql, parameters, mapper);
     }
 
     public Mono<Map<String, Object>> queryOne(String sql) {
-        return queryExecutor.queryOne(sql);
+        return queryOperations.queryOne(sql);
     }
 
     public Mono<Map<String, Object>> queryOne(String sql, Map<?, ?> parameters) {
-        return queryExecutor.queryOne(sql, parameters);
+        return queryOperations.queryOne(sql, parameters);
     }
 
     public <T> Mono<T> queryOne(String sql, BiFunction<Row, RowMetadata, T> mapper) {
-        return queryExecutor.queryOne(sql, mapper);
+        return queryOperations.queryOne(sql, mapper);
     }
 
     public <T> Mono<T> queryOne(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) {
-        return queryExecutor.queryOne(sql, parameters, mapper);
+        return queryOperations.queryOne(sql, parameters, mapper);
     }
 
     public Mono<Long> update(String sql) {
-        return queryExecutor.update(sql);
+        return updateOperations.update(sql);
     }
 
     public Mono<Long> update(String sql, Map<?, ?> parameters) {
-        return queryExecutor.update(sql, parameters);
+        return updateOperations.update(sql, parameters);
     }
 
     public Mono<Long> batch(List<String> sqlList) {
-        return queryExecutor.batch(sqlList);
+        return updateOperations.batch(sqlList);
     }
 
     // ==================== 委托方法：事务管理 ====================
 
     public <T> Flux<T> transaction(Function<DatabaseClient, Publisher<T>> action) {
-        return transactionHelper.transaction(action);
+        return transactionOperations.transaction(action);
     }
 
     public <T> Flux<T> transaction(String dataSource, Function<DatabaseClient, Publisher<T>> action) {
-        return dataSourceRouter.dataSource(dataSource, transactionHelper.transaction(action));
+        return dataSourceRouter.dataSource(dataSource, transactionOperations.transaction(action));
     }
 
     public Mono<ManualTransaction> createManualTransaction() {
-        return transactionHelper.createManualTransaction();
+        return transactionOperations.createManualTransaction();
     }
 
     public Mono<ManualTransaction> createManualTransaction(String transactionName) {
-        return transactionHelper.createManualTransaction(transactionName);
+        return transactionOperations.createManualTransaction(transactionName);
     }
 
     public <T> Mono<T> executeInTransaction(Function<Connection, Publisher<T>> action) {
-        return transactionHelper.executeInTransaction(action);
+        return transactionOperations.executeInTransaction(action);
     }
 
     public <T> Mono<T> executeInTransaction(String transactionName, Function<Connection, Publisher<T>> action) {
-        return transactionHelper.executeInTransaction(transactionName, action);
+        return transactionOperations.executeInTransaction(transactionName, action);
     }
 
     public <T> Mono<T> executeInReadOnlyTransaction(Function<Connection, Publisher<T>> action) {
-        return transactionHelper.executeInReadOnlyTransaction(action);
+        return transactionOperations.executeInReadOnlyTransaction(action);
     }
 
     public TransactionTemplate getTransactionTemplate() {
-        return transactionHelper.getTransactionTemplate();
+        return transactionOperations.getTransactionTemplate();
     }
 
     public TransactionManager getTransactionManager() {
-        return transactionHelper.getTransactionManager();
+        return transactionOperations.getTransactionManager();
     }
 
     // ==================== 委托方法：数据源切换 ====================
@@ -233,32 +252,44 @@ public class R2dbcUtil {
     // ==================== 委托方法：实体映射 ====================
 
     public <T> T map(Row row, Class<T> entityClass) {
-        return entityMapper.map(row, entityClass);
+        return rowMapper.map(row, entityClass);
     }
 
     public Object convertValue(Object value, Class<?> targetType) {
-        return entityMapper.convertValue(value, targetType);
+        return rowMapper.convertValue(value, targetType);
     }
 
     // ==================== 获取内部组件 ====================
 
-    public R2dbcQueryExecutor getQueryExecutor() {
-        return queryExecutor;
+    public ParameterBinder getParameterBinder() {
+        return parameterBinder;
     }
 
-    public R2dbcTransactionHelper getTransactionHelper() {
-        return transactionHelper;
+    public SqlLifecycleExecutor getLifecycleExecutor() {
+        return lifecycleExecutor;
     }
 
-    public R2dbcEntityMapper getEntityMapper() {
-        return entityMapper;
+    public R2dbcRowMapper getRowMapper() {
+        return rowMapper;
+    }
+
+    public R2dbcSqlLogger getSqlLogger() {
+        return sqlLogger;
     }
 
     public R2dbcDataSourceRouter getDataSourceRouter() {
         return dataSourceRouter;
     }
 
-    public R2dbcSqlLogger getSqlLogger() {
-        return sqlLogger;
+    public R2dbcQueryOperations getQueryOperations() {
+        return queryOperations;
+    }
+
+    public R2dbcUpdateOperations getUpdateOperations() {
+        return updateOperations;
+    }
+
+    public R2dbcTransactionOperations getTransactionOperations() {
+        return transactionOperations;
     }
 }
