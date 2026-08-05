@@ -1,11 +1,11 @@
 # WCDK-R2DBC
 
-> 基于 Spring Boot 的响应式数据库访问框架，提供多数据源支持、动态路由、SQL生命周期拦截等特性。
-> 需要屏蔽spring自动配置
-spring:
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+> 基于 Spring Boot 的响应式数据库访问框架，提供多数据源支持、动态路由、SQL生命周期拦截等特性。<br/>
+> 需要屏蔽spring自动配置 <br/>
+spring: <br/>
+  autoconfigure: <br/>
+    exclude: <br/>
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration <br/>
       - org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
