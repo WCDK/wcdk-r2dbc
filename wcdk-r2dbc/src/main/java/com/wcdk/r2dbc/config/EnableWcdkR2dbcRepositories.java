@@ -9,7 +9,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Enables qxtd R2DBC repository proxy scanning.
+ * Enables wcdk R2DBC repository proxy scanning.
  *
  * @author WCDK
  * @date 2026/7/21
