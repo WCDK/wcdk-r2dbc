@@ -14,9 +14,11 @@
 - [多数据源配置](#多数据源配置)
 - [XML映射配置](#xml映射配置)
 - [SQL生命周期拦截器](#sql生命周期拦截器)
+- [自定义仓储方法](#自定义仓储方法)
 - [事务管理](#事务管理)
 - [数据库方言支持](#数据库方言支持)
 - [API文档](#api文档)
+- [架构设计](#架构设计)
 - [常见问题](#常见问题)
 
 ## 特性
@@ -47,6 +49,8 @@
 | **分页支持** | 内置分页查询功能，简化分页逻辑 |
 | **逻辑删除** | 支持逻辑删除，数据可恢复 |
 | **SQL日志** | 可配置的SQL日志输出，便于调试 |
+| **自定义仓储方法** | 支持通过方法名约定自动生成SQL（findBy*、countBy*等） |
+| **响应式拦截器** | 支持异步拦截器，不阻塞响应式流 |
 
 ## 快速开始
 
@@ -566,53 +570,173 @@ Repository方法调用
 └─────────────────┘
 ```
 
+### 执行状态
+
+拦截器通过 `SqlExecutionStatus` 枚举提供清晰的执行状态语义：
+
+| 状态 | 描述 | 是否终态 | 使用场景 |
+|------|------|----------|----------|
+| `CONTINUE` | 继续执行 | 否 | 默认状态，继续执行后续拦截器和SQL |
+| `COMPLETED` | 正常完成 | 是 | SQL正常执行完成（可能无结果） |
+| `DENIED_BY_PERMISSION` | 权限阻止 | 是 | 被权限拦截器阻止执行 |
+| `SKIPPED_BY_AUDIT` | 审计跳过 | 是 | 被审计策略跳过 |
+| `TERMINATED_AT_COMPILE` | 编译终止 | 是 | SQL编译阶段主动终止 |
+| `TERMINATED_AT_EXECUTE` | 执行终止 | 是 | SQL执行阶段主动终止 |
+| `CACHE_HIT` | 缓存命中 | 是 | 从缓存返回结果，无需执行SQL |
+| `DEGRADED` | 降级执行 | 是 | 降级策略触发，使用备用逻辑 |
+
 ### 实现自定义拦截器
 
 ```java
 @Component
-public class MySqlInterceptor implements SqlLifecycleInterceptor {
+public class PermissionInterceptor implements SqlLifecycleInterceptor {
     
-    private static final Logger log = LoggerFactory.getLogger(MySqlInterceptor.class);
-    
-    @Override
-    public void beforeCompile(SqlExecutionContext context) {
-        // SQL编译前：可以进行参数预处理、权限校验等
-        log.debug("准备编译SQL - 方法: {}", context.getMethod().getName());
-    }
-    
-    @Override
-    public void afterCompile(SqlExecutionContext context) {
-        // SQL编译后：可以进行SQL审计、日志记录、SQL修改等
-        log.debug("SQL编译完成: {}", context.getSql());
-        
-        // 可以修改SQL
-        // context.setSql(context.getSql() + " /* audit */");
-        
-        // 可以跳过执行
-        // context.setSkipped(true);
-    }
+    private static final Logger log = LoggerFactory.getLogger(PermissionInterceptor.class);
     
     @Override
     public void beforeExecute(SqlExecutionContext context) {
-        // SQL执行前：可以进行最终校验、性能计时开始等
-        log.debug("准备执行SQL");
-    }
-    
-    @Override
-    public void afterExecute(SqlExecutionContext context) {
-        // SQL执行后：可以进行性能计时结束、结果处理、异常处理等
-        long durationMs = context.getDuration() / 1_000_000;
-        
-        if (context.hasError()) {
-            log.error("SQL执行失败 ({}ms): {}", durationMs, context.getSql(), context.getError());
-        } else {
-            log.info("SQL执行成功 ({}ms): {}", durationMs, context.getSql());
+        // 权限校验
+        if (!hasPermission(getCurrentUser(), context.getSql())) {
+            // 明确标识：权限阻止
+            context.denyByPermission("用户 " + getCurrentUser() + " 无权执行此SQL");
         }
     }
     
     @Override
     public int getOrder() {
-        return 0; // 数值越小越先执行
+        return -200; // 权限拦截器优先执行
+    }
+}
+
+@Component
+public class AuditInterceptor implements SqlLifecycleInterceptor {
+    
+    private static final Logger log = LoggerFactory.getLogger(AuditInterceptor.class);
+    
+    @Override
+    public void afterCompile(SqlExecutionContext context) {
+        // 审计检查
+        if (isReadOnlyAuditMode() && isWriteOperation(context.getSql())) {
+            // 明确标识：审计跳过
+            context.skipByAudit("只读审计模式，跳过写操作");
+        }
+    }
+    
+    @Override
+    public int getOrder() {
+        return -100; // 审计拦截器
+    }
+}
+
+@Component
+public class CacheInterceptor implements SqlLifecycleInterceptor {
+    
+    @Override
+    public void beforeExecute(SqlExecutionContext context) {
+        Object cachedResult = cache.get(context.getSql());
+        if (cachedResult != null) {
+            // 明确标识：缓存命中
+            context.cacheHit(cachedResult);
+        }
+    }
+    
+    @Override
+    public int getOrder() {
+        return -300; // 缓存拦截器最先执行
+    }
+}
+```
+
+### SqlExecutionContext 快捷方法
+
+```java
+// 控制执行流程
+context.denyByPermission("权限不足");           // 权限阻止
+context.skipByAudit("审计跳过");               // 审计跳过
+context.terminateAtCompile("参数校验失败");     // 编译终止
+context.terminateAtExecute("熔断器打开");       // 执行终止
+context.cacheHit(cachedResult);                // 缓存命中
+context.degrade("数据库超时，使用缓存");        // 降级执行
+
+// 状态查询
+context.getStatus();           // 获取状态枚举
+context.getStatusReason();     // 获取状态原因
+context.shouldContinue();      // 判断是否继续执行
+context.isTerminated();        // 判断是否已终止
+```
+
+### 同步与异步拦截器对比
+
+| 特性 | `SqlLifecycleInterceptor` | `ReactiveSqlLifecycleInterceptor` |
+|------|---------------------------|-----------------------------------|
+| 方法签名 | `void beforeCompile(context)` | `Mono<Void> beforeCompileReactive(context)` |
+| 执行模式 | 同步 | 异步 |
+| 适用场景 | 简单逻辑（日志、计时） | 需要异步操作（远程调用、数据库查询等） |
+| 阻塞风险 | 可能阻塞响应式流 | 不阻塞 |
+| 执行顺序 | 在异步拦截器之后执行 | 在同步拦截器之前执行 |
+
+### 响应式拦截器示例
+
+```java
+@Component
+public class RemotePermissionInterceptor implements ReactiveSqlLifecycleInterceptor {
+    
+    private final PermissionService permissionService;
+    
+    @Override
+    public Mono<Void> beforeCompileReactive(SqlExecutionContext context) {
+        // 异步远程调用验证权限
+        return permissionService.checkPermission(context.getSql())
+                .flatMap(hasPermission -> {
+                    if (!hasPermission) {
+                        context.denyByPermission("权限不足");
+                    }
+                    return Mono.empty();
+                });
+    }
+    
+    @Override
+    public int getOrder() {
+        return -300; // 缓存拦截器最先执行
+    }
+}
+
+@Component
+public class CacheInterceptor implements ReactiveSqlLifecycleInterceptor {
+    
+    private final CacheService cacheService;
+    
+    @Override
+    public Mono<Void> beforeExecuteReactive(SqlExecutionContext context) {
+        return cacheService.get(context.getSql())
+                .flatMap(cachedResult -> {
+                    if (cachedResult != null) {
+                        context.cacheHit(cachedResult);
+                    }
+                    return Mono.empty();
+                });
+    }
+    
+    @Override
+    public int getOrder() {
+        return -200;
+    }
+}
+```
+
+### 拦截器初始化
+
+```java
+@Configuration
+public class InterceptorConfig {
+    
+    @Bean
+    public SqlLifecycleInterceptorChain interceptorChain(
+            List<SqlLifecycleInterceptor> syncInterceptors,
+            List<ReactiveSqlLifecycleInterceptor> reactiveInterceptors) {
+        
+        SqlLifecycleInterceptorHolder.init(syncInterceptors, reactiveInterceptors);
+        return SqlLifecycleInterceptorHolder.getChain();
     }
 }
 ```
@@ -623,6 +747,75 @@ public class MySqlInterceptor implements SqlLifecycleInterceptor {
 |--------|------|----------|
 | `SqlAuditInterceptor` | SQL审计日志 | -100 |
 | `SqlPerformanceInterceptor` | 性能监控 | MAX_VALUE |
+
+## 自定义仓储方法
+
+### 方法名约定
+
+支持通过方法名约定自动生成SQL，无需编写XML或注解。
+
+### 支持的方法格式
+
+| 方法格式 | 示例 | 生成SQL |
+|----------|------|---------|
+| `findAll` | `findAll()` | `SELECT * FROM table` |
+| `findBy[Field]` | `findByUserName(String name)` | `SELECT * FROM table WHERE user_name = ?` |
+| `findBy[Field1]And[Field2]` | `findByNameAndStatus(String name, Integer status)` | `SELECT * FROM table WHERE name = ? AND status = ?` |
+| `findBy[Field]Or[Field]` | `findByNameOrEmail(String name, String email)` | `SELECT * FROM table WHERE name = ? OR email = ?` |
+| `countBy[Field]` | `countByStatus(Integer status)` | `SELECT COUNT(1) FROM table WHERE status = ?` |
+| `existsBy[Field]` | `existsByEmail(String email)` | `SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END FROM table WHERE email = ?` |
+| `deleteBy[Field]` | `deleteByStatus(Integer status)` | `UPDATE table SET del_flg = 1 WHERE status = ?`（逻辑删除） |
+| `update[Field]ById` | `updateStatusById(Long id, Integer status)` | `UPDATE table SET status = ? WHERE id = ?` |
+| `findBy[Field]OrderBy[Field]Asc/Desc` | `findByNameOrderByCreateTimeDesc()` | `SELECT * FROM table ORDER BY create_time DESC` |
+
+### 支持的条件操作
+
+| 操作 | 方法后缀 | 示例 | 生成条件 |
+|------|----------|------|----------|
+| 等值查询 | (默认) | `findByStatus` | `WHERE status = ?` |
+| 模糊查询 | `Like` | `findByNameLike` | `WHERE name LIKE ?` |
+| 包含查询 | `In` | `findByIdIn` | `WHERE id IN (?)` |
+| 范围查询 | `Between` | `findByAgeBetween` | `WHERE age BETWEEN ? AND ?` |
+| 空值查询 | `IsNull` / `IsNotNull` | `findByEmailIsNull` | `WHERE email IS NULL` |
+| 排序 | `OrderBy[Field]Asc/Desc` | `findByNameOrderByAgeDesc` | `ORDER BY age DESC` |
+
+### 使用示例
+
+```java
+@Repository
+public interface UserRepository extends BaseRepository<User> {
+    
+    // 查询所有用户
+    Flux<User> findAll();
+    
+    // 根据用户名查询
+    Mono<User> findByUserName(String userName);
+    
+    // 根据状态和邮箱查询
+    Flux<User> findByStatusAndEmail(Integer status, String email);
+    
+    // 统计指定状态的用户数
+    Mono<Long> countByStatus(Integer status);
+    
+    // 检查邮箱是否存在
+    Mono<Boolean> existsByEmail(String email);
+    
+    // 逻辑删除指定状态的用户
+    Mono<Long> deleteByStatus(Integer status);
+    
+    // 更新用户状态
+    Mono<Long> updateStatusById(Long id, Integer status);
+    
+    // 根据用户名排序查询
+    Flux<User> findByStatusOrderByCreateTimeDesc(Integer status);
+}
+```
+
+### 执行顺序
+
+1. 先尝试从XML注册表查找方法
+2. 如果找不到，尝试通过方法名约定解析
+3. 如果都找不到，抛出异常
 
 ## 事务管理
 
@@ -983,6 +1176,64 @@ public class DataSourceService {
     }
 }
 ```
+
+## 架构设计
+
+### 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Application Layer                        │
+├─────────────────────────────────────────────────────────────────┤
+│  BaseRepository  │  @Repository  │  XML Mapping  │  QueryWrapper │
+├─────────────────────────────────────────────────────────────────┤
+│                     Repository Proxy Layer                      │
+│  RepositoryProxyMethodInterceptor  │  CustomMethodResolver      │
+├─────────────────────────────────────────────────────────────────┤
+│                       Core Layer (R2dbcUtil)                    │
+├─────────────┬─────────────┬─────────────┬───────────────────────┤
+│   Query     │   Update    │ Transaction │      DataSource       │
+│ Operations  │ Operations  │ Operations  │        Router         │
+├─────────────┴─────────────┴─────────────┴───────────────────────┤
+│                    Infrastructure Layer                          │
+├─────────────┬─────────────┬─────────────┬───────────────────────┤
+│  Parameter  │    SQL      │    Row      │      SQL              │
+│   Binder    │  Lifecycle  │   Mapper    │      Logger           │
+│             │  Executor   │             │                       │
+├─────────────┴─────────────┴─────────────┴───────────────────────┤
+│                    Interceptor Layer                             │
+├─────────────────────────────┬───────────────────────────────────┤
+│  SqlLifecycleInterceptor    │ ReactiveSqlLifecycleInterceptor   │
+│       (Sync)                │         (Async)                   │
+├─────────────────────────────┴───────────────────────────────────┤
+│                    Database Layer (R2DBC SPI)                    │
+├─────────────┬─────────────┬─────────────┬───────────────────────┤
+│   达梦      │ PostgreSQL  │    MySQL    │      Oracle           │
+└─────────────┴─────────────┴─────────────┴───────────────────────┘
+```
+
+### 组件职责
+
+| 层级 | 组件 | 职责 |
+|------|------|------|
+| **应用层** | BaseRepository | 基础CRUD接口 |
+| | @Repository | 仓储接口标识 |
+| | XML Mapping | SQL映射配置 |
+| | QueryWrapper | 查询条件构造 |
+| **代理层** | RepositoryProxyMethodInterceptor | 方法拦截与分发 |
+| | CustomMethodResolver | 方法名约定解析 |
+| **核心层** | R2dbcUtil | 统一API入口（门面模式） |
+| | R2dbcQueryOperations | 查询操作 |
+| | R2dbcUpdateOperations | 更新操作 |
+| | R2dbcTransactionOperations | 事务管理 |
+| | R2dbcDataSourceRouter | 数据源路由 |
+| **基础设施层** | ParameterBinder | SQL参数绑定 |
+| | SqlLifecycleExecutor | 生命周期管理 |
+| | R2dbcRowMapper | 行映射与转换 |
+| | R2dbcSqlLogger | SQL日志记录 |
+| **拦截器层** | SqlLifecycleInterceptor | 同步拦截器 |
+| | ReactiveSqlLifecycleInterceptor | 异步拦截器 |
+| **数据库层** | R2DBC SPI | 数据库驱动接口 |
 
 ## 常见问题
 

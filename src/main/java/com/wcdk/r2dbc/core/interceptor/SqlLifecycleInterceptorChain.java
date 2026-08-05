@@ -2,15 +2,22 @@ package com.wcdk.r2dbc.core.interceptor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /**
  * SQL生命周期拦截器链管理器。
  * <p>
- * 负责管理和执行所有注册的 {@link SqlLifecycleInterceptor}。
+ * 负责管理和执行所有注册的拦截器，支持同步和异步两种模式：
+ * <ul>
+ *     <li>{@link SqlLifecycleInterceptor} - 同步拦截器</li>
+ *     <li>{@link ReactiveSqlLifecycleInterceptor} - 异步拦截器</li>
+ * </ul>
+ * <p>
+ * 执行顺序：异步拦截器在同步拦截器之前执行。
  *
  * @author WCDK
  * @date 2026/8/5
@@ -20,28 +27,119 @@ public class SqlLifecycleInterceptorChain {
 
     private static final Logger log = LoggerFactory.getLogger(SqlLifecycleInterceptorChain.class);
 
-    private final List<SqlLifecycleInterceptor> interceptors;
+    private final List<SqlLifecycleInterceptor> syncInterceptors;
 
-    public SqlLifecycleInterceptorChain(List<SqlLifecycleInterceptor> interceptors) {
-        this.interceptors = interceptors != null
-                ? interceptors.stream()
+    private final List<ReactiveSqlLifecycleInterceptor> reactiveInterceptors;
+
+    public SqlLifecycleInterceptorChain(List<SqlLifecycleInterceptor> syncInterceptors,
+                                        List<ReactiveSqlLifecycleInterceptor> reactiveInterceptors) {
+        this.syncInterceptors = syncInterceptors != null
+                ? syncInterceptors.stream()
                     .sorted(Comparator.comparingInt(SqlLifecycleInterceptor::getOrder))
+                    .toList()
+                : List.of();
+        this.reactiveInterceptors = reactiveInterceptors != null
+                ? reactiveInterceptors.stream()
+                    .sorted(Comparator.comparingInt(ReactiveSqlLifecycleInterceptor::getOrder))
                     .toList()
                 : List.of();
     }
 
     /**
-     * 执行SQL编译前拦截。
+     * 兼容旧构造函数 - 仅同步拦截器。
+     *
+     * @param interceptors 同步拦截器列表
+     */
+    public SqlLifecycleInterceptorChain(List<SqlLifecycleInterceptor> interceptors) {
+        this(interceptors, null);
+    }
+
+    /**
+     * 执行SQL编译前拦截（响应式）。
      *
      * @param context SQL执行上下文
-     * @return 是否跳过后续执行
+     * @return 是否终止后续执行
      */
+    public Mono<Boolean> beforeCompileReactive(SqlExecutionContext context) {
+        // 先执行异步拦截器
+        return executeReactiveInterceptors(reactiveInterceptors,
+                interceptor -> interceptor.beforeCompileReactive(context), "beforeCompileReactive")
+                .then(Mono.defer(() -> {
+                    // 如果已终止，直接返回
+                    if (context.isTerminated()) {
+                        return Mono.just(true);
+                    }
+                    // 再执行同步拦截器
+                    return Mono.fromCallable(() -> executeSyncInterceptors(syncInterceptors,
+                            SqlLifecycleInterceptor::beforeCompile, "beforeCompile", context));
+                }));
+    }
+
+    /**
+     * 执行SQL编译后拦截（响应式）。
+     *
+     * @param context SQL执行上下文
+     * @return 是否终止后续执行
+     */
+    public Mono<Boolean> afterCompileReactive(SqlExecutionContext context) {
+        return executeReactiveInterceptors(reactiveInterceptors,
+                interceptor -> interceptor.afterCompileReactive(context), "afterCompileReactive")
+                .then(Mono.defer(() -> {
+                    if (context.isTerminated()) {
+                        return Mono.just(true);
+                    }
+                    return Mono.fromCallable(() -> executeSyncInterceptors(syncInterceptors,
+                            SqlLifecycleInterceptor::afterCompile, "afterCompile", context));
+                }));
+    }
+
+    /**
+     * 执行SQL执行前拦截（响应式）。
+     *
+     * @param context SQL执行上下文
+     * @return 是否终止后续执行
+     */
+    public Mono<Boolean> beforeExecuteReactive(SqlExecutionContext context) {
+        return executeReactiveInterceptors(reactiveInterceptors,
+                interceptor -> interceptor.beforeExecuteReactive(context), "beforeExecuteReactive")
+                .then(Mono.defer(() -> {
+                    if (context.isTerminated()) {
+                        return Mono.just(true);
+                    }
+                    return Mono.fromCallable(() -> executeSyncInterceptors(syncInterceptors,
+                            SqlLifecycleInterceptor::beforeExecute, "beforeExecute", context));
+                }));
+    }
+
+    /**
+     * 执行SQL执行后拦截（响应式）。
+     *
+     * @param context SQL执行上下文
+     * @return 完成信号
+     */
+    public Mono<Void> afterExecuteReactive(SqlExecutionContext context) {
+        return executeReactiveInterceptors(reactiveInterceptors,
+                interceptor -> interceptor.afterExecuteReactive(context), "afterExecuteReactive")
+                .then(Mono.fromRunnable(() -> executeSyncAfterExecute(syncInterceptors, context)));
+    }
+
+    /**
+     * 执行SQL编译前拦截（同步，兼容旧API）。
+     *
+     * @param context SQL执行上下文
+     * @return 是否终止后续执行
+     * @deprecated 使用 {@link #beforeCompileReactive(SqlExecutionContext)} 替代
+     */
+    @Deprecated
     public boolean beforeCompile(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : interceptors) {
+        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
             try {
                 interceptor.beforeCompile(context);
-                if (context.isSkipped()) {
-                    log.debug("Interceptor [{}] skipped execution at beforeCompile", interceptor.getClass().getSimpleName());
+                if (context.isTerminated()) {
+                    log.debug("Interceptor [{}] terminated execution at beforeCompile: status={}, reason={}",
+                            interceptor.getClass().getSimpleName(),
+                            context.getStatus(),
+                            context.getStatusReason());
                     return true;
                 }
             } catch (Exception e) {
@@ -52,17 +150,22 @@ public class SqlLifecycleInterceptorChain {
     }
 
     /**
-     * 执行SQL编译后拦截。
+     * 执行SQL编译后拦截（同步，兼容旧API）。
      *
      * @param context SQL执行上下文
-     * @return 是否跳过后续执行
+     * @return 是否终止后续执行
+     * @deprecated 使用 {@link #afterCompileReactive(SqlExecutionContext)} 替代
      */
+    @Deprecated
     public boolean afterCompile(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : interceptors) {
+        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
             try {
                 interceptor.afterCompile(context);
-                if (context.isSkipped()) {
-                    log.debug("Interceptor [{}] skipped execution at afterCompile", interceptor.getClass().getSimpleName());
+                if (context.isTerminated()) {
+                    log.debug("Interceptor [{}] terminated execution at afterCompile: status={}, reason={}",
+                            interceptor.getClass().getSimpleName(),
+                            context.getStatus(),
+                            context.getStatusReason());
                     return true;
                 }
             } catch (Exception e) {
@@ -73,17 +176,22 @@ public class SqlLifecycleInterceptorChain {
     }
 
     /**
-     * 执行SQL执行前拦截。
+     * 执行SQL执行前拦截（同步，兼容旧API）。
      *
      * @param context SQL执行上下文
-     * @return 是否跳过后续执行
+     * @return 是否终止后续执行
+     * @deprecated 使用 {@link #beforeExecuteReactive(SqlExecutionContext)} 替代
      */
+    @Deprecated
     public boolean beforeExecute(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : interceptors) {
+        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
             try {
                 interceptor.beforeExecute(context);
-                if (context.isSkipped()) {
-                    log.debug("Interceptor [{}] skipped execution at beforeExecute", interceptor.getClass().getSimpleName());
+                if (context.isTerminated()) {
+                    log.debug("Interceptor [{}] terminated execution at beforeExecute: status={}, reason={}",
+                            interceptor.getClass().getSimpleName(),
+                            context.getStatus(),
+                            context.getStatusReason());
                     return true;
                 }
             } catch (Exception e) {
@@ -94,11 +202,68 @@ public class SqlLifecycleInterceptorChain {
     }
 
     /**
-     * 执行SQL执行后拦截。
+     * 执行SQL执行后拦截（同步，兼容旧API）。
      *
      * @param context SQL执行上下文
+     * @deprecated 使用 {@link #afterExecuteReactive(SqlExecutionContext)} 替代
      */
+    @Deprecated
     public void afterExecute(SqlExecutionContext context) {
+        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
+            try {
+                interceptor.afterExecute(context);
+            } catch (Exception e) {
+                log.error("Interceptor [{}] error at afterExecute", interceptor.getClass().getSimpleName(), e);
+            }
+        }
+    }
+
+    /**
+     * 执行异步拦截器链。
+     */
+    private Mono<Boolean> executeReactiveInterceptors(List<ReactiveSqlLifecycleInterceptor> interceptors,
+                                                      ReactiveInterceptorAction action,
+                                                      String phase) {
+        if (interceptors.isEmpty()) {
+            return Mono.just(false);
+        }
+
+        return Flux.fromIterable(interceptors)
+                .concatMap(interceptor -> action.execute(interceptor)
+                        .doOnSubscribe(s -> log.trace("Executing interceptor [{}] {}", interceptor.getClass().getSimpleName(), phase))
+                        .doOnError(e -> log.error("Interceptor [{}] error at {}", interceptor.getClass().getSimpleName(), phase, e))
+                        .then(Mono.fromSupplier(() -> false))
+                )
+                .then(Mono.fromCallable(() -> false));
+    }
+
+    /**
+     * 执行同步拦截器链（用于before*阶段）。
+     */
+    private boolean executeSyncInterceptors(List<SqlLifecycleInterceptor> interceptors,
+                                            SyncInterceptorAction action,
+                                            String phase,
+                                            SqlExecutionContext context) {
+        for (SqlLifecycleInterceptor interceptor : interceptors) {
+            try {
+                action.execute(interceptor, context);
+                if (context.isTerminated()) {
+                    log.debug("Interceptor [{}] terminated execution at {}: status={}, reason={}",
+                            interceptor.getClass().getSimpleName(), phase,
+                            context.getStatus(), context.getStatusReason());
+                    return true;
+                }
+            } catch (Exception e) {
+                log.error("Interceptor [{}] error at {}", interceptor.getClass().getSimpleName(), phase, e);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 执行同步拦截器（用于after*阶段）。
+     */
+    private void executeSyncAfterExecute(List<SqlLifecycleInterceptor> interceptors, SqlExecutionContext context) {
         for (SqlLifecycleInterceptor interceptor : interceptors) {
             try {
                 interceptor.afterExecute(context);
@@ -109,12 +274,12 @@ public class SqlLifecycleInterceptorChain {
     }
 
     /**
-     * 获取拦截器数量。
+     * 获取同步拦截器数量。
      *
-     * @return 拦截器数量
+     * @return 同步拦截器数量
      */
     public int size() {
-        return interceptors.size();
+        return syncInterceptors.size() + reactiveInterceptors.size();
     }
 
     /**
@@ -123,6 +288,22 @@ public class SqlLifecycleInterceptorChain {
      * @return 是否有拦截器
      */
     public boolean isEmpty() {
-        return interceptors.isEmpty();
+        return syncInterceptors.isEmpty() && reactiveInterceptors.isEmpty();
+    }
+
+    /**
+     * 函数式接口：异步拦截器操作。
+     */
+    @FunctionalInterface
+    private interface ReactiveInterceptorAction {
+        Mono<Void> execute(ReactiveSqlLifecycleInterceptor interceptor);
+    }
+
+    /**
+     * 函数式接口：同步拦截器操作。
+     */
+    @FunctionalInterface
+    private interface SyncInterceptorAction {
+        void execute(SqlLifecycleInterceptor interceptor, SqlExecutionContext context);
     }
 }

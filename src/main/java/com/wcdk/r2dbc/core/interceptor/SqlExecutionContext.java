@@ -30,13 +30,21 @@ public class SqlExecutionContext {
 
     private Object result;
 
-    private boolean skipped;
+    /**
+     * 执行状态 - 使用枚举替代简单的boolean，提供更清晰的语义
+     */
+    private SqlExecutionStatus status;
+
+    /**
+     * 状态原因说明 - 用于记录为什么跳过/终止执行
+     */
+    private String statusReason;
 
     public SqlExecutionContext(Method method, Class<?> repositoryInterface, Object[] arguments) {
         this.method = method;
         this.repositoryInterface = repositoryInterface;
         this.arguments = arguments;
-        this.skipped = false;
+        this.status = SqlExecutionStatus.CONTINUE;
     }
 
     public Method getMethod() {
@@ -103,16 +111,146 @@ public class SqlExecutionContext {
         this.result = result;
     }
 
-    public boolean isSkipped() {
-        return skipped;
+    /**
+     * 获取执行状态。
+     *
+     * @return 执行状态
+     */
+    public SqlExecutionStatus getStatus() {
+        return status;
     }
 
+    /**
+     * 设置执行状态。
+     *
+     * @param status 执行状态
+     */
+    public void setStatus(SqlExecutionStatus status) {
+        this.status = status;
+    }
+
+    /**
+     * 获取状态原因说明。
+     *
+     * @return 原因说明
+     */
+    public String getStatusReason() {
+        return statusReason;
+    }
+
+    /**
+     * 设置状态原因说明。
+     *
+     * @param reason 原因说明
+     */
+    public void setStatusReason(String reason) {
+        this.statusReason = reason;
+    }
+
+    /**
+     * 设置跳过状态（兼容旧API）。
+     *
+     * @param skipped 是否跳过
+     * @deprecated 使用 {@link #setStatus(SqlExecutionStatus)} 替代
+     */
+    @Deprecated
     public void setSkipped(boolean skipped) {
-        this.skipped = skipped;
+        if (skipped && this.status == SqlExecutionStatus.CONTINUE) {
+            this.status = SqlExecutionStatus.TERMINATED_AT_COMPILE;
+        }
+    }
+
+    /**
+     * 获取是否跳过（兼容旧API）。
+     *
+     * @return 是否跳过
+     * @deprecated 使用 {@link #getStatus()} 替代
+     */
+    @Deprecated
+    public boolean isSkipped() {
+        return status != null && status.isSkipped();
+    }
+
+    /**
+     * 判断是否应该继续执行SQL。
+     *
+     * @return 是否继续执行
+     */
+    public boolean shouldContinue() {
+        return status == SqlExecutionStatus.CONTINUE;
+    }
+
+    /**
+     * 判断是否已终止（不再执行后续逻辑）。
+     *
+     * @return 是否已终止
+     */
+    public boolean isTerminated() {
+        return status != null && status.isTerminal();
     }
 
     public boolean hasError() {
         return error != null;
+    }
+
+    /**
+     * 快捷方法：设置为权限阻止状态。
+     *
+     * @param reason 阻止原因
+     */
+    public void denyByPermission(String reason) {
+        this.status = SqlExecutionStatus.DENIED_BY_PERMISSION;
+        this.statusReason = reason;
+    }
+
+    /**
+     * 快捷方法：设置为审计跳过状态。
+     *
+     * @param reason 跳过原因
+     */
+    public void skipByAudit(String reason) {
+        this.status = SqlExecutionStatus.SKIPPED_BY_AUDIT;
+        this.statusReason = reason;
+    }
+
+    /**
+     * 快捷方法：设置为编译终止状态。
+     *
+     * @param reason 终止原因
+     */
+    public void terminateAtCompile(String reason) {
+        this.status = SqlExecutionStatus.TERMINATED_AT_COMPILE;
+        this.statusReason = reason;
+    }
+
+    /**
+     * 快捷方法：设置为执行终止状态。
+     *
+     * @param reason 终止原因
+     */
+    public void terminateAtExecute(String reason) {
+        this.status = SqlExecutionStatus.TERMINATED_AT_EXECUTE;
+        this.statusReason = reason;
+    }
+
+    /**
+     * 快捷方法：设置为缓存命中状态。
+     *
+     * @param result 缓存的结果
+     */
+    public void cacheHit(Object result) {
+        this.status = SqlExecutionStatus.CACHE_HIT;
+        this.result = result;
+    }
+
+    /**
+     * 快捷方法：设置为降级执行状态。
+     *
+     * @param reason 降级原因
+     */
+    public void degrade(String reason) {
+        this.status = SqlExecutionStatus.DEGRADED;
+        this.statusReason = reason;
     }
 
     @Override
@@ -121,7 +259,8 @@ public class SqlExecutionContext {
                 "method=" + method.getName() +
                 ", repository=" + repositoryInterface.getSimpleName() +
                 ", sql='" + sql + '\'' +
-                ", skipped=" + skipped +
+                ", status=" + status +
+                ", statusReason='" + statusReason + '\'' +
                 '}';
     }
 }

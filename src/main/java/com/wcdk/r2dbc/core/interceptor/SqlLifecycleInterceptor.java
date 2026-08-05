@@ -23,7 +23,16 @@ public interface SqlLifecycleInterceptor {
      * SQL编译前调用。
      * <p>
      * 此时SQL尚未生成，可以进行参数预处理、权限校验等操作。
-     * 可以通过 {@link SqlExecutionContext#setSkipped(boolean)} 设置跳过后续执行。
+     * <p>
+     * 可以通过以下方式控制执行流程：
+     * <ul>
+     *     <li>{@link SqlExecutionContext#setStatus(SqlExecutionStatus)} - 设置执行状态</li>
+     *     <li>{@link SqlExecutionContext#denyByPermission(String)} - 权限阻止</li>
+     *     <li>{@link SqlExecutionContext#skipByAudit(String)} - 审计跳过</li>
+     *     <li>{@link SqlExecutionContext#terminateAtCompile(String)} - 编译终止</li>
+     *     <li>{@link SqlExecutionContext#cacheHit(Object)} - 缓存命中</li>
+     *     <li>{@link SqlExecutionContext#degrade(String)} - 降级执行</li>
+     * </ul>
      *
      * @param context SQL执行上下文
      */
@@ -34,8 +43,14 @@ public interface SqlLifecycleInterceptor {
      * SQL编译后调用。
      * <p>
      * 此时SQL已生成但尚未执行，可以进行SQL审计、日志记录、SQL修改等操作。
-     * 可以通过 {@link SqlExecutionContext#setSql(String)} 修改SQL。
-     * 可以通过 {@link SqlExecutionContext#setSkipped(boolean)} 设置跳过后续执行。
+     * <p>
+     * 可以通过以下方式控制执行流程：
+     * <ul>
+     *     <li>{@link SqlExecutionContext#setSql(String)} - 修改SQL</li>
+     *     <li>{@link SqlExecutionContext#setStatus(SqlExecutionStatus)} - 设置执行状态</li>
+     *     <li>{@link SqlExecutionContext#skipByAudit(String)} - 审计跳过</li>
+     *     <li>{@link SqlExecutionContext#terminateAtCompile(String)} - 编译终止</li>
+     * </ul>
      *
      * @param context SQL执行上下文
      */
@@ -46,7 +61,13 @@ public interface SqlLifecycleInterceptor {
      * SQL执行前调用。
      * <p>
      * 此时SQL即将执行，可以进行最终校验、性能计时开始等操作。
-     * 可以通过 {@link SqlExecutionContext#setSkipped(boolean)} 设置跳过后续执行。
+     * <p>
+     * 可以通过以下方式控制执行流程：
+     * <ul>
+     *     <li>{@link SqlExecutionContext#setStatus(SqlExecutionStatus)} - 设置执行状态</li>
+     *     <li>{@link SqlExecutionContext#denyByPermission(String)} - 权限阻止</li>
+     *     <li>{@link SqlExecutionContext#terminateAtExecute(String)} - 执行终止</li>
+     * </ul>
      *
      * @param context SQL执行上下文
      */
