@@ -84,7 +84,7 @@ public class R2dbcUtil {
                      TransactionalOperator transactionalOperator,
                      WcdkR2dbcProperties properties,
                      WcdkSpringR2dbcProperties springR2dbcProperties) {
-        this(databaseClient = databaseClient;
+        this.databaseClient = databaseClient;
         this.entityTemplate = entityTemplate;
         this.transactionalOperator = transactionalOperator;
         this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
