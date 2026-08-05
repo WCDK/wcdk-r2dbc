@@ -1,4 +1,4 @@
-package com.wcdk.r2dbc.dm;
+package com.wcdk.r2dbc.database.dm;
 
 import io.r2dbc.spi.ConnectionFactory;
 import org.springframework.r2dbc.core.binding.BindMarkersFactory;

@@ -1,0 +1,73 @@
+# WCDK R2DBC 多数据库配置示例
+# 支持达梦、PostgreSQL、MySQL、Oracle数据库
+
+spring:
+  r2dbc:
+    # 主数据源名称
+    primary: master
+    # 多数据源配置
+    data-sources:
+      # 达梦数据库
+      master:
+        url: r2dbc:dm://localhost:5236
+        username: SYSDBA
+        password: SYSDBA
+        pool:
+          enabled: true
+          max-size: 20
+          max-idle-time: 30m
+          max-life-time: 30m
+          max-acquire-time: 10s
+          acquire-retry: 3
+          initial-size: 5
+      # PostgreSQL数据库
+      postgres:
+        url: r2dbc:postgresql://localhost:5432/testdb
+        username: postgres
+        password: postgres
+        pool:
+          enabled: true
+          max-size: 20
+          max-idle-time: 30m
+          max-life-time: 30m
+      
+      # MySQL数据库
+      mysql:
+        url: r2dbc:mysql://localhost:3306/testdb
+        username: root
+        password: root
+        pool:
+          enabled: true
+          max-size: 20
+          max-idle-time: 30m
+          max-life-time: 30m
+      
+      # Oracle数据库
+      oracle:
+        url: r2dbc:oracle://localhost:1521/testdb
+        username: system
+        password: oracle
+        pool:
+          enabled: true
+          max-size: 20
+          max-idle-time: 30m
+          max-life-time: 30m
+    
+    # 全局连接池配置（可被数据源单独配置覆盖）
+    pool:
+      enabled: true
+      max-size: 20
+      max-idle-time: 30m
+      max-life-time: 30m
+      max-acquire-time: 10s
+      acquire-retry: 3
+      initial-size: 5
+
+# WCDK R2DBC 配置
+wcdk:
+  r2dbc:
+    enabled: true
+    # SQL日志
+    sql-log-enabled: true
+    # 雪花ID生成
+    snowflake-id: true

@@ -1,4 +1,4 @@
-package com.wcdk.r2dbc.dm;
+package com.wcdk.r2dbc.database.dm;
 
 import org.springframework.data.r2dbc.dialect.OracleDialect;
 import org.springframework.r2dbc.core.binding.BindMarkersFactory;
