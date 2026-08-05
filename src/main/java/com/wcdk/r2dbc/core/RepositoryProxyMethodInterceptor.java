@@ -84,9 +84,11 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         String methodName = invocation.getMethod().getName();
         Object[] arguments = invocation.getArguments();
         if (!isBaseMethod(methodName)) {
+            // 1. 先尝试从XML注册表查找
             return repositoryXmlRegistry.find(repositoryInterface, methodName)
                     .map(statement -> executeXmlStatement(statement, invocation.getMethod(), arguments))
-                    .orElseThrow(() -> new UnsupportedOperationException("暂不支持自定义仓储方法：" + methodName));
+                    // 2. 尝试通过方法名约定解析自定义方法
+                    .orElseGet(() -> executeCustomMethod(invocation.getMethod(), arguments));
         }
         if (metadata == null && isBaseCrudMethod(methodName)) {
             throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持基础 CRUD 方法：" + methodName);
@@ -121,6 +123,72 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                  "exists" -> true;
             default -> false;
         };
+    }
+
+    /**
+     * 执行自定义方法（通过方法名约定解析）。
+     */
+    private Object executeCustomMethod(Method method, Object[] arguments) {
+        if (metadata == null) {
+            throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持自定义方法：" + method.getName());
+        }
+
+        CustomMethodResolver resolver = new CustomMethodResolver(metadata);
+        CustomMethodResolver.ParsedMethod parsedMethod = resolver.resolve(method, arguments);
+
+        if (parsedMethod == null) {
+            throw new UnsupportedOperationException("暂不支持自定义仓储方法：" + method.getName());
+        }
+
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
+        context.setSql(parsedMethod.sql());
+        context.setParameters(parsedMethod.parameters());
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        if (parsedMethod.isQuery()) {
+            // 查询操作
+            Flux<?> flux = r2dbcUtil.query(context.getSql(), context.getParameters(),
+                    (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
+
+            return flux.doOnComplete(() -> {
+                context.setEndTime(System.nanoTime());
+                chain.afterExecute(context);
+            }).doOnError(e -> {
+                context.setError(e);
+                context.setEndTime(System.nanoTime());
+                chain.afterExecute(context);
+            });
+        } else {
+            // 更新操作
+            return r2dbcUtil.update(context.getSql(), context.getParameters())
+                    .doOnSuccess(r -> {
+                        context.setResult(r);
+                        context.setEndTime(System.nanoTime());
+                        chain.afterExecute(context);
+                    })
+                    .doOnError(e -> {
+                        context.setError(e);
+                        context.setEndTime(System.nanoTime());
+                        chain.afterExecute(context);
+                    });
+        }
     }
 
     private Object executeXmlStatement(RepositoryStatement statement, Method method, Object[] arguments) {

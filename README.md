@@ -887,6 +887,35 @@ wrapper.page(1, 10); // 第1页，每页10条
 
 ### R2dbcUtil 工具类
 
+#### 架构说明
+
+R2dbcUtil 采用门面模式，内部组合了多个专业组件：
+
+```
+R2dbcUtil (门面)
+├── ParameterBinder (参数绑定)
+├── SqlLifecycleExecutor (生命周期)
+├── R2dbcRowMapper (行映射)
+├── R2dbcSqlLogger (日志)
+├── R2dbcDataSourceRouter (数据源)
+├── R2dbcQueryOperations (查询)
+├── R2dbcUpdateOperations (更新)
+└── R2dbcTransactionOperations (事务)
+```
+
+#### 组件说明
+
+| 组件 | 职责 |
+|------|------|
+| `ParameterBinder` | SQL参数绑定 |
+| `SqlLifecycleExecutor` | SQL生命周期管理（拦截器调用） |
+| `R2dbcRowMapper` | 数据库行到实体的映射 |
+| `R2dbcSqlLogger` | SQL日志记录 |
+| `R2dbcDataSourceRouter` | 多数据源动态路由 |
+| `R2dbcQueryOperations` | 查询操作（query、queryOne） |
+| `R2dbcUpdateOperations` | 更新操作（update、batch） |
+| `R2dbcTransactionOperations` | 事务管理 |
+
 #### 基础操作
 
 ```java
