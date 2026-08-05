@@ -2,7 +2,14 @@ package com.wcdk.r2dbc;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
+import com.wcdk.r2dbc.core.interceptor.SqlExecutionContext;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorHolder;
+import com.wcdk.r2dbc.core.transaction.ManualTransaction;
+import com.wcdk.r2dbc.core.transaction.TransactionManager;
+import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
+import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import org.springframework.data.annotation.Transient;
@@ -19,6 +26,7 @@ import reactor.core.publisher.Mono;
 import reactor.util.context.ContextView;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -54,6 +62,9 @@ public class R2dbcUtil {
 
     private final WcdkSpringR2dbcProperties springR2dbcProperties;
 
+    private final TransactionManager transactionManager;
+
+    private final TransactionTemplate transactionTemplate;
 
     public R2dbcUtil(DatabaseClient databaseClient,
                      R2dbcEntityTemplate entityTemplate,
@@ -73,11 +84,28 @@ public class R2dbcUtil {
                      TransactionalOperator transactionalOperator,
                      WcdkR2dbcProperties properties,
                      WcdkSpringR2dbcProperties springR2dbcProperties) {
+        this(databaseClient = databaseClient;
+        this.entityTemplate = entityTemplate;
+        this.transactionalOperator = transactionalOperator;
+        this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
+        this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
+        this.transactionManager = null;
+        this.transactionTemplate = null;
+    }
+
+    public R2dbcUtil(DatabaseClient databaseClient,
+                     R2dbcEntityTemplate entityTemplate,
+                     TransactionalOperator transactionalOperator,
+                     WcdkR2dbcProperties properties,
+                     WcdkSpringR2dbcProperties springR2dbcProperties,
+                     TransactionManager transactionManager) {
         this.databaseClient = databaseClient;
         this.entityTemplate = entityTemplate;
         this.transactionalOperator = transactionalOperator;
         this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
         this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
+        this.transactionManager = transactionManager;
+        this.transactionTemplate = transactionManager != null ? new TransactionTemplate(transactionManager) : null;
     }
 
     public DatabaseClient databaseClient() {
@@ -97,9 +125,38 @@ public class R2dbcUtil {
 
     public Flux<Map<String, Object>> query(String sql, Map<?, ?> parameters) {
         String requiredSql = requireSql(sql);
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(findMethod("query"), R2dbcUtil.class, null);
+        context.setSql(requiredSql);
+        context.setParameters((Map<String, Object>) parameters);
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Flux.empty();
+        }
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Flux.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Flux.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
         return Flux.deferContextual(contextView -> {
-            logSql(contextView, requiredSql, parameters);
-            return execute(requiredSql, parameters).fetch().all();
+            logSql(contextView, context.getSql(), context.getParameters());
+            return execute(context.getSql(), context.getParameters()).fetch().all();
+        }).doOnComplete(() -> {
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
+        }).doOnError(e -> {
+            context.setError(e);
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
         });
     }
 
@@ -109,9 +166,38 @@ public class R2dbcUtil {
 
     public <T> Flux<T> query(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) {
         String requiredSql = requireSql(sql);
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(findMethod("query"), R2dbcUtil.class, null);
+        context.setSql(requiredSql);
+        context.setParameters((Map<String, Object>) parameters);
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Flux.empty();
+        }
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Flux.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Flux.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
         return Flux.deferContextual(contextView -> {
-            logSql(contextView, requiredSql, parameters);
-            return execute(requiredSql, parameters).map(mapper).all();
+            logSql(contextView, context.getSql(), context.getParameters());
+            return execute(context.getSql(), context.getParameters()).map(mapper).all();
+        }).doOnComplete(() -> {
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
+        }).doOnError(e -> {
+            context.setError(e);
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
         });
     }
 
@@ -137,9 +223,39 @@ public class R2dbcUtil {
 
     public Mono<Long> update(String sql, Map<?, ?> parameters) {
         String requiredSql = requireSql(sql);
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(findMethod("update"), R2dbcUtil.class, null);
+        context.setSql(requiredSql);
+        context.setParameters((Map<String, Object>) parameters);
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
         return Mono.deferContextual(contextView -> {
-            logSql(contextView, requiredSql, parameters);
-            return execute(requiredSql, parameters).fetch().rowsUpdated();
+            logSql(contextView, context.getSql(), context.getParameters());
+            return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated();
+        }).doOnSuccess(r -> {
+            context.setResult(r);
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
+        }).doOnError(e -> {
+            context.setError(e);
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
         });
     }
 
@@ -161,6 +277,92 @@ public class R2dbcUtil {
 
     public <T> Flux<T> transaction(String dataSource, Function<DatabaseClient, Publisher<T>> action) {
         return dataSource(dataSource, transaction(action));
+    }
+
+    /**
+     * 创建手动事务。
+     *
+     * @return 手动事务
+     */
+    public Mono<ManualTransaction> createManualTransaction() {
+        if (transactionManager == null) {
+            throw new IllegalStateException("TransactionManager is not configured");
+        }
+        return transactionManager.createTransaction();
+    }
+
+    /**
+     * 创建手动事务。
+     *
+     * @param transactionName 事务名称
+     * @return 手动事务
+     */
+    public Mono<ManualTransaction> createManualTransaction(String transactionName) {
+        if (transactionManager == null) {
+            throw new IllegalStateException("TransactionManager is not configured");
+        }
+        return transactionManager.createTransaction(transactionName);
+    }
+
+    /**
+     * 使用事务模板执行操作（自动提交/回滚）。
+     *
+     * @param action 事务操作
+     * @param <T>    返回类型
+     * @return 操作结果
+     */
+    public <T> Mono<T> executeInTransaction(Function<Connection, Publisher<T>> action) {
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("TransactionTemplate is not configured");
+        }
+        return transactionTemplate.execute(action);
+    }
+
+    /**
+     * 使用事务模板执行操作（自动提交/回滚）。
+     *
+     * @param transactionName 事务名称
+     * @param action          事务操作
+     * @param <T>             返回类型
+     * @return 操作结果
+     */
+    public <T> Mono<T> executeInTransaction(String transactionName, Function<Connection, Publisher<T>> action) {
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("TransactionTemplate is not configured");
+        }
+        return transactionTemplate.execute(transactionName, action);
+    }
+
+    /**
+     * 使用只读事务模板执行操作。
+     *
+     * @param action 事务操作
+     * @param <T>    返回类型
+     * @return 操作结果
+     */
+    public <T> Mono<T> executeInReadOnlyTransaction(Function<Connection, Publisher<T>> action) {
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("TransactionTemplate is not configured");
+        }
+        return transactionTemplate.executeReadOnly(action);
+    }
+
+    /**
+     * 获取事务模板。
+     *
+     * @return 事务模板
+     */
+    public TransactionTemplate getTransactionTemplate() {
+        return transactionTemplate;
+    }
+
+    /**
+     * 获取事务管理器。
+     *
+     * @return 事务管理器
+     */
+    public TransactionManager getTransactionManager() {
+        return transactionManager;
     }
 
     public <T> Mono<T> dataSource(String dataSource, Mono<T> publisher) {
@@ -456,6 +658,18 @@ public class R2dbcUtil {
             }
         }
         return null;
+    }
+
+    private Method findMethod(String methodName) {
+        try {
+            return R2dbcUtil.class.getMethod(methodName, String.class, Map.class);
+        } catch (NoSuchMethodException e) {
+            try {
+                return R2dbcUtil.class.getDeclaredMethod(methodName, String.class, Map.class);
+            } catch (NoSuchMethodException ex) {
+                throw new IllegalStateException("Method not found: " + methodName, ex);
+            }
+        }
     }
 }
 

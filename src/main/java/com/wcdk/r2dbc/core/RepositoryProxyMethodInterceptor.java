@@ -3,6 +3,9 @@ package com.wcdk.r2dbc.core;
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
+import com.wcdk.r2dbc.core.interceptor.SqlExecutionContext;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorHolder;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata.FieldColumn;
@@ -120,11 +123,72 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     }
 
     private Object executeXmlStatement(RepositoryStatement statement, Method method, Object[] arguments) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
         BoundSql boundSql = bindSql(statement.sql(), method, arguments);
-        return switch (statement.commandType()) {
-            case INSERT, UPDATE, DELETE -> executeXmlUpdate(boundSql, method, arguments);
-            case SELECT -> executeXmlSelect(boundSql, method);
-        };
+        context.setSql(boundSql.sql());
+        context.setParameters(boundSql.parameters());
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // 使用可能被修改的SQL
+        BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        Object result;
+        try {
+            result = switch (statement.commandType()) {
+                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
+                case SELECT -> executeXmlSelect(finalBoundSql, method);
+            };
+        } catch (Exception e) {
+            context.setError(e);
+            context.setEndTime(System.nanoTime());
+            chain.afterExecute(context);
+            throw e;
+        }
+
+        // 包装结果以捕获异步完成
+        if (result instanceof Mono<?> mono) {
+            return mono.doOnSuccess(r -> {
+                context.setResult(r);
+                context.setEndTime(System.nanoTime());
+                chain.afterExecute(context);
+            }).doOnError(e -> {
+                context.setError(e);
+                context.setEndTime(System.nanoTime());
+                chain.afterExecute(context);
+            });
+        } else if (result instanceof Flux<?> flux) {
+            return flux.doOnComplete(() -> {
+                context.setEndTime(System.nanoTime());
+                chain.afterExecute(context);
+            }).doOnError(e -> {
+                context.setError(e);
+                context.setEndTime(System.nanoTime());
+                chain.afterExecute(context);
+            });
+        }
+
+        context.setResult(result);
+        context.setEndTime(System.nanoTime());
+        chain.afterExecute(context);
+        return result;
     }
 
     private Object executeXmlUpdate(BoundSql boundSql, Method method, Object[] arguments) {
@@ -306,6 +370,15 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     }
 
     private Mono<?> insert(Object entity) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("insert"), repositoryInterface, new Object[]{entity});
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
         if (snowflakeIdEnabled) {
             Object idValue = fieldValue(metadata.idColumn(), entity);
             if (idValue == null || (idValue instanceof Number number && number.longValue() == 0)) {
@@ -330,25 +403,101 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 .map(column -> ":" + column.field().getName())
                 .collect(Collectors.joining(", "));
         String sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
-        return r2dbcUtil.update(sql, parameters).thenReturn(entity);
+
+        context.setSql(sql);
+        context.setParameters(parameters);
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        return r2dbcUtil.update(context.getSql(), context.getParameters())
+                .doOnSuccess(r -> {
+                    context.setResult(entity);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .thenReturn(entity);
     }
 
     private Mono<Long> deleteById(Object id) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("deleteById"), repositoryInterface, new Object[]{id});
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
         FieldColumn logicDeleteColumn = metadata.logicDeleteColumn();
+        String sql;
+        Map<String, Object> parameters;
         if (logicDeleteColumn != null) {
-            String sql = "UPDATE " + metadata.tableName()
+            sql = "UPDATE " + metadata.tableName()
                     + " SET " + logicDeleteColumn.name() + " = :logicDeleteValue"
                     + " WHERE " + metadata.idColumn().name() + " = :id"
                     + logicNotDeleteSql(" AND ");
-            return r2dbcUtil.update(sql, Map.of(
+            parameters = Map.of(
                     "id", id,
                     "logicDeleteValue", properties.getLogicDeleteValue(),
-                    "logicNotDeleteValue", properties.getLogicNotDeleteValue()));
+                    "logicNotDeleteValue", properties.getLogicNotDeleteValue());
+        } else {
+            sql = "DELETE FROM " + metadata.tableName() + " WHERE " + metadata.idColumn().name() + " = :id";
+            parameters = Map.of("id", id);
         }
-        return r2dbcUtil.update("DELETE FROM " + metadata.tableName() + " WHERE " + metadata.idColumn().name() + " = :id", Map.of("id", id));
+
+        context.setSql(sql);
+        context.setParameters(parameters);
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        return r2dbcUtil.update(context.getSql(), context.getParameters())
+                .doOnSuccess(r -> {
+                    context.setResult(r);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                });
     }
 
     private Mono<Long> updateById(Object entity) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("updateById"), repositoryInterface, new Object[]{entity});
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
         Map<String, Object> parameters = new LinkedHashMap<>();
         String setSql = metadata.columns().stream()
                 .filter(column -> column != metadata.idColumn())
@@ -368,10 +517,45 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 + " SET " + setSql
                 + " WHERE " + metadata.idColumn().name() + " = :id"
                 + logicNotDeleteSql(" AND ");
-        return r2dbcUtil.update(sql, parameters);
+
+        context.setSql(sql);
+        context.setParameters(parameters);
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        return r2dbcUtil.update(context.getSql(), context.getParameters())
+                .doOnSuccess(r -> {
+                    context.setResult(r);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                });
     }
 
     private Mono<?> selectById(Object id) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("selectById"), repositoryInterface, new Object[]{id});
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
         String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
                 + " WHERE " + metadata.idColumn().name() + " = :id"
                 + logicNotDeleteSql(" AND ");
@@ -380,15 +564,77 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         if (metadata.logicDeleteColumn() != null) {
             parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
         }
-        return r2dbcUtil.queryOne(sql, parameters, (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
+
+        context.setSql(sql);
+        context.setParameters(parameters);
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        return r2dbcUtil.queryOne(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
+                .doOnSuccess(r -> {
+                    context.setResult(r);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                });
     }
 
     private Flux<?> selectList(QueryWrapper<?> queryWrapper) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("selectList"), repositoryInterface, new Object[]{queryWrapper});
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Flux.empty();
+        }
+
         SqlWhere where = buildWhere(queryWrapper);
         String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName() + where.sql()
                 + orderBySql(queryWrapper)
                 + limitSql(queryWrapper);
-        return r2dbcUtil.query(sql, where.parameters(), (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
+
+        context.setSql(sql);
+        context.setParameters(where.parameters());
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Flux.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Flux.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        return r2dbcUtil.query(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
+                .doOnComplete(() -> {
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                });
     }
 
     private Mono<?> selectOne(QueryWrapper<?> queryWrapper) {
@@ -415,10 +661,46 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     }
 
     private Mono<Long> selectCount(QueryWrapper<?> queryWrapper) {
+        SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("selectCount"), repositoryInterface, new Object[]{queryWrapper});
+
+        // beforeCompile
+        if (chain.beforeCompile(context)) {
+            return Mono.empty();
+        }
+
         SqlWhere where = buildWhere(queryWrapper);
         String sql = "SELECT COUNT(1) AS total FROM " + metadata.tableName() + where.sql();
-        return r2dbcUtil.queryOne(sql, where.parameters(), (row, rowMetadata) -> numberValue(row).longValue())
-                .defaultIfEmpty(0L);
+
+        context.setSql(sql);
+        context.setParameters(where.parameters());
+
+        // afterCompile
+        if (chain.afterCompile(context)) {
+            return Mono.empty();
+        }
+
+        // beforeExecute
+        if (chain.beforeExecute(context)) {
+            return Mono.empty();
+        }
+
+        context.setStartTime(System.nanoTime());
+
+        return r2dbcUtil.queryOne(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> numberValue(row).longValue())
+                .defaultIfEmpty(0L)
+                .doOnSuccess(r -> {
+                    context.setResult(r);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecute(context);
+                });
     }
 
     private Mono<Boolean> exists(QueryWrapper<?> queryWrapper) {
@@ -487,6 +769,20 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     private String selectColumns() {
         return metadata.columns().stream().map(FieldColumn::name).collect(Collectors.joining(", "));
+    }
+
+    private Method findMethod(String methodName) {
+        try {
+            for (Method method : repositoryInterface.getMethods()) {
+                if (method.getName().equals(methodName)) {
+                    return method;
+                }
+            }
+            // fallback to Object methods
+            return Object.class.getMethod(methodName);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException("Method not found: " + methodName, e);
+        }
     }
 
     private Object fieldValue(FieldColumn column, Object entity) {

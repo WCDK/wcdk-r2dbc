@@ -2,6 +2,10 @@ package com.wcdk.r2dbc.config;
 
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.core.RepositoryProxyFactory;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptor;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorHolder;
+import com.wcdk.r2dbc.core.transaction.TransactionManager;
+import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
 import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceAspect;
@@ -30,6 +34,7 @@ import org.springframework.transaction.ReactiveTransactionManager;
 import org.springframework.transaction.reactive.TransactionalOperator;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static io.r2dbc.spi.ConnectionFactoryOptions.PASSWORD;
@@ -103,8 +108,24 @@ public class WcdkR2dbcAutoConfiguration {
                                ObjectProvider<R2dbcEntityTemplate> entityTemplate,
                                ObjectProvider<TransactionalOperator> transactionalOperator,
                                WcdkR2dbcProperties properties,
-                               WcdkSpringR2dbcProperties springR2dbcProperties) {
-        return new R2dbcUtil(databaseClient, entityTemplate.getIfAvailable(), transactionalOperator.getIfAvailable(), properties, springR2dbcProperties);
+                               WcdkSpringR2dbcProperties springR2dbcProperties,
+                               ObjectProvider<TransactionManager> transactionManagerProvider) {
+        return new R2dbcUtil(databaseClient, entityTemplate.getIfAvailable(), transactionalOperator.getIfAvailable(), 
+                properties, springR2dbcProperties, transactionManagerProvider.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(TransactionManager.class)
+    @Role(ROLE_INFRASTRUCTURE)
+    public TransactionManager wcdkTransactionManager(ConnectionFactory connectionFactory) {
+        return new TransactionManager(connectionFactory);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(TransactionTemplate.class)
+    @Role(ROLE_INFRASTRUCTURE)
+    public TransactionTemplate transactionTemplate(TransactionManager transactionManager) {
+        return new TransactionTemplate(transactionManager);
     }
 
     @Bean
@@ -120,6 +141,12 @@ public class WcdkR2dbcAutoConfiguration {
                                                           RepositoryXmlRegistry repositoryXmlRegistry,
                                                           WcdkSpringR2dbcProperties springR2dbcProperties) {
         return new RepositoryProxyFactory(r2dbcUtil, properties, repositoryXmlRegistry, springR2dbcProperties);
+    }
+
+    @Bean
+    public SqlLifecycleInterceptorInitializer sqlLifecycleInterceptorInitializer(
+            ObjectProvider<List<SqlLifecycleInterceptor>> interceptorsProvider) {
+        return new SqlLifecycleInterceptorInitializer(interceptorsProvider.getIfAvailable());
     }
 
     private ConnectionFactory createConnectionFactory(String name, WcdkSpringR2dbcProperties.DataSourceProperties dsProperties, WcdkSpringR2dbcProperties.Pool globalPool) {
