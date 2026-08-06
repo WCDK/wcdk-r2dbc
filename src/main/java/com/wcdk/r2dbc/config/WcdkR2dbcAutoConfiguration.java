@@ -6,6 +6,7 @@ import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptor;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorHolder;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
 import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
+import com.wcdk.r2dbc.core.transaction.TransactionalAspect;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
 import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceAspect;
@@ -126,6 +127,15 @@ public class WcdkR2dbcAutoConfiguration {
     @Role(ROLE_INFRASTRUCTURE)
     public TransactionTemplate transactionTemplate(TransactionManager transactionManager) {
         return new TransactionTemplate(transactionManager);
+    }
+
+    @Bean
+    @ConditionalOnClass(name = "org.aspectj.lang.annotation.Aspect")
+    @ConditionalOnMissingBean(TransactionalAspect.class)
+    @Role(ROLE_INFRASTRUCTURE)
+    public TransactionalAspect transactionalAspect(TransactionalOperator transactionalOperator,
+                                                    TransactionTemplate transactionTemplate) {
+        return new TransactionalAspect(transactionalOperator, transactionTemplate);
     }
 
     @Bean

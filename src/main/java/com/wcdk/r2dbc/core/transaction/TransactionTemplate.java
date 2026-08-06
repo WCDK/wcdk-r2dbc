@@ -126,6 +126,28 @@ public class TransactionTemplate {
     }
 
     /**
+     * 包装 Mono 为只读事务。
+     *
+     * @param mono 原始 Mono
+     * @param <T>  返回类型
+     * @return 包装后的 Mono
+     */
+    public <T> Mono<T> wrapReadOnly(Mono<T> mono) {
+        return transactionManager.createReadOnlyTransaction()
+                .flatMap(transaction -> {
+                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
+                    return mono
+                            .flatMap(result -> transaction.commit().thenReturn(result))
+                            .onErrorResume(error -> transaction.rollback()
+                                    .onErrorResume(rollbackError -> {
+                                        error.addSuppressed(rollbackError);
+                                        return Mono.empty();
+                                    })
+                                    .then(Mono.error(error)));
+                });
+    }
+
+    /**
      * 获取事务管理器。
      *
      * @return 事务管理器

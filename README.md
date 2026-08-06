@@ -846,6 +846,85 @@ public interface UserRepository extends BaseRepository<User> {
 
 ### 声明式事务
 
+框架通过 `TransactionalAspect` 切面自动拦截带有 `@Transactional` 注解的方法，无需手动调用事务模板。
+
+#### 响应式执行流程
+
+```
+@Transactional 方法调用（AOP拦截）
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│  joinPoint.proceed()                    │  ← 仅构建 Mono/Flux，不执行
+│  返回 Mono/Flux Publisher              │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│  transactionalOperator.transactional()  │  ← 包装到事务上下文
+│  或 transactionTemplate.wrapReadOnly() │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│  返回包装后的 Mono/Flux                │  ← 仍未订阅
+└────────────────┬────────────────────────┘
+                 │
+        订阅时执行 │
+                 ▼
+┌─────────────────────────────────────────┐
+│  BEGIN TRANSACTION                      │  ← 事务开始
+│  执行业务逻辑                           │  ← 响应式链执行
+│  COMMIT / ROLLBACK                      │  ← 完成或异常时提交/回滚
+└─────────────────────────────────────────┘
+```
+
+#### 工作原理
+
+```
+@Transactional 方法调用
+    │
+    ▼
+┌─────────────────────────┐
+│  TransactionalAspect    │  ← AOP 切面拦截
+│  (LOWEST_PRECEDENCE-1)  │
+└────────┬────────────────┘
+         │
+    ┌────┴────────────┐
+    │                 │
+    ▼                 ▼
+┌──────────┐    ┌──────────────┐
+│ readOnly │    │  read/write  │
+│ = true   │    │  = false     │
+└────┬─────┘    └──────┬───────┘
+     │                 │
+     ▼                 ▼
+┌──────────────┐ ┌─────────────────┐
+│ Transaction  │ │ Transactional   │
+│ Template     │ │ Operator        │
+│ .wrapRead    │ │ .transactional()│
+│ Only()       │ │                 │
+└──────┬───────┘ └────────┬────────┘
+       │                  │
+       ▼                  ▼
+┌─────────────────────────────────┐
+│    自动提交/回滚事务           │
+└─────────────────────────────────┘
+```
+
+#### 响应式特性
+
+| 特性 | 说明 |
+|------|------|
+| **惰性求值** | 事务在订阅时才开始，不是在方法调用时 |
+| **非阻塞** | 所有操作都在 Reactor 线程池中执行 |
+| **背压支持** | Flux 事务支持背压控制 |
+| **错误传播** | 异常正确传播并触发回滚 |
+| **上下文传播** | 通过 Reactor Context 传播事务上下文 |
+| **资源管理** | 使用 `Mono.usingWhen()` 自动管理连接生命周期 |
+
+#### 返回类型支持
+
 ```java
 @Service
 @RequiredArgsConstructor
@@ -853,19 +932,200 @@ public class OrderService {
     
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
-    private final R2dbcUtil r2dbcUtil;
     
     /**
-     * 创建订单（声明式事务）
+     * Mono 返回类型 - 完整事务支持
      */
     @Transactional
     public Mono<Order> createOrder(Order order) {
-        return r2dbcUtil.transaction(client -> {
-            // 1. 扣减库存
-            return productRepository.decreaseStock(order.getProductId(), order.getQuantity())
-                    // 2. 创建订单
-                    .then(orderRepository.insert(order));
-        }).next();
+        return productRepository.decreaseStock(order.getProductId(), order.getQuantity())
+                .then(orderRepository.insert(order));
+    }
+    
+    /**
+     * Flux 返回类型 - 完整事务支持
+     */
+    @Transactional
+    public Flux<Order> findAllOrders() {
+        return orderRepository.findAll();
+    }
+    
+    /**
+     * 非响应式返回类型 - 自动包装为 Mono
+     */
+    @Transactional
+    public Order findOrderSync(Long id) {
+        // 方法体在事务上下文中同步执行
+        // 结果自动包装为 Mono.just()
+        return orderRepository.findById(id);
+    }
+    
+    /**
+     * 只读查询（声明式只读事务）
+     */
+    @Transactional(readOnly = true)
+    public Mono<User> findUser(Long id) {
+        return userRepository.selectById(id);
+    }
+}
+```
+
+#### 支持的事务属性
+
+| 属性 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `readOnly` | boolean | false | 只读事务，某些数据库可优化 |
+| `timeout` | int | -1 | 超时时间（秒），超时自动回滚 |
+| `propagation` | Propagation | REQUIRED | 事务传播行为 |
+
+#### 支持的传播行为
+
+| 传播行为 | 说明 | R2DBC支持 |
+|----------|------|-----------|
+| `REQUIRED` | 有事务则加入，无则新建 | ✅ |
+| `REQUIRES_NEW` | 始终新建事务 | ✅ |
+| `SUPPORTS` | 有事务则加入，无则非事务执行 | ✅ |
+| `NOT_SUPPORTED` | 不使用事务 | ⚠️ 直接执行 |
+| `MANDATORY` | 必须存在事务 | ⚠️ 直接执行 |
+| `NEVER` | 不能存在事务 | ⚠️ 直接执行 |
+
+> **注意**：R2DBC 响应式事务不完全支持所有传播行为，`NOT_SUPPORTED`、`MANDATORY`、`NEVER` 会直接执行方法。
+
+#### 超时设置
+
+```java
+@Service
+public class TimeoutService {
+    
+    /**
+     * 30秒超时事务
+     */
+    @Transactional(timeout = 30)
+    public Mono<Boolean> longRunningOperation() {
+        // 超过30秒自动回滚
+        return complexOperation();
+    }
+}
+```
+
+#### 错误处理与回滚
+
+```java
+@Service
+@RequiredArgsConstructor
+public class ErrorHandlingService {
+    
+    private final OrderRepository orderRepository;
+    private final InventoryRepository inventoryRepository;
+    
+    /**
+     * 自动回滚示例
+     * 当操作异常时，事务自动回滚
+     */
+    @Transactional
+    public Mono<Order> createOrderWithRollback(Order order) {
+        return inventoryRepository.decreaseStock(order.getProductId(), order.getQuantity())
+                .flatMap(inventory -> {
+                    if (inventory.getStock() < 0) {
+                        return Mono.error(new InsufficientStockException("库存不足"));
+                    }
+                    return orderRepository.insert(order);
+                });
+        // 如果抛出异常，事务自动回滚
+    }
+    
+    /**
+     * 多步操作的事务回滚
+     */
+    @Transactional
+    public Mono<Void> transferInventory(Long fromWarehouse, Long toWarehouse, Long productId, int quantity) {
+        return inventoryRepository.decrease(fromWarehouse, productId, quantity)
+                .then(inventoryRepository.increase(toWarehouse, productId, quantity))
+                .then();
+        // 任何一步失败，整个事务回滚
+    }
+}
+```
+
+#### 响应式最佳实践
+
+| 实践 | 说明 |
+|------|------|
+| **始终返回 Mono/Flux** | 确保事务在订阅时开始 |
+| **避免阻塞操作** | 不要在事务方法中使用 `.block()` |
+| **使用 `flatMap` 组合** | 使用 `flatMap`/`then` 组合多个操作 |
+| **错误传播** | 使用 `Mono.error()` 传播错误触发回滚 |
+| **资源清理** | 使用 `doFinally()` 清理资源 |
+
+```java
+@Service
+@RequiredArgsConstructor
+public class BestPracticeService {
+    
+    private final UserRepository userRepository;
+    private final OrderRepository orderRepository;
+    
+    /**
+     * 正确：使用 flatMap 组合操作
+     */
+    @Transactional
+    public Mono<Order> correctExample(Order order) {
+        return userRepository.findById(order.getUserId())
+                .flatMap(user -> {
+                    order.setUserName(user.getName());
+                    return orderRepository.insert(order);
+                });
+    }
+    
+    /**
+     * 错误：使用 .block() 会阻塞响应式流
+     */
+    @Transactional
+    public Order wrongExample(Order order) {
+        User user = userRepository.findById(order.getUserId()).block(); // 不要这样做！
+        order.setUserName(user.getName());
+        return orderRepository.insert(order).block(); // 不要这样做！
+    }
+    
+    /**
+     * 正确：使用 doFinally 清理资源
+     */
+    @Transactional
+    public Mono<Order> cleanupExample(Order order) {
+        return orderRepository.insert(order)
+                .doFinally(signal -> {
+                    // 清理资源
+                    log.debug("Transaction completed with signal: {}", signal);
+                });
+    }
+}
+```
+
+#### 结合数据源切换
+
+```java
+@Service
+@RequiredArgsConstructor
+public class MultiDsService {
+    
+    /**
+     * 在指定数据源上执行事务
+     */
+    @R2dbcDataSource("slave")
+    @Transactional
+    public Mono<Order> createOrderOnSlave(Order order) {
+        return orderRepository.insert(order);
+    }
+    
+    /**
+     * 跨数据源事务（需手动管理）
+     */
+    public Mono<Void> crossDataSourceOperation() {
+        return r2dbcUtil.executeInTransaction(connection -> {
+            // 手动事务管理
+            return operation1(connection)
+                    .then(operation2(connection));
+        }).then();
     }
 }
 ```
@@ -1206,6 +1466,9 @@ public class DataSourceService {
 ├─────────────────────────────────────────────────────────────────┤
 │  BaseRepository  │  @Repository  │  XML Mapping  │  QueryWrapper │
 ├─────────────────────────────────────────────────────────────────┤
+│                     AOP Layer                                    │
+│  TransactionalAspect (@Transactional)  │  R2dbcDataSourceAspect │
+├─────────────────────────────────────────────────────────────────┤
 │                     Repository Proxy Layer                      │
 │  RepositoryProxyMethodInterceptor  │  CustomMethodResolver      │
 ├─────────────────────────────────────────────────────────────────┤
@@ -1239,6 +1502,8 @@ public class DataSourceService {
 | | @Repository | 仓储接口标识 |
 | | XML Mapping | SQL映射配置 |
 | | QueryWrapper | 查询条件构造 |
+| **AOP层** | TransactionalAspect | 声明式事务拦截（@Transactional） |
+| | R2dbcDataSourceAspect | 动态数据源切换（@R2dbcDataSource） |
 | **代理层** | RepositoryProxyMethodInterceptor | 方法拦截与分发 |
 | | CustomMethodResolver | 方法名约定解析 |
 | **核心层** | R2dbcUtil | 统一API入口（门面模式） |
@@ -1293,11 +1558,112 @@ wcdk:
 | 保存点支持 | 支持 | 不支持 |
 | 适用场景 | 复杂业务流程 | 简单CRUD操作 |
 
-### Q6: 如何调试SQL问题？
+### Q6: 声明式事务如何工作？
+
+框架通过 `TransactionalAspect` AOP 切面自动拦截带有 `@Transactional` 注解的方法：
+- 检测方法返回类型（`Mono`/`Flux`）
+- 自动包装到事务中
+- 成功时自动提交，异常时自动回滚
+- 支持 `readOnly`、`timeout` 等属性
+
+### Q7: 如何调试SQL问题？
 
 1. 开启SQL日志：`wcdk.r2dbc.sql-log-enabled=true`
 2. 使用SQL拦截器记录执行详情
 3. 监控慢SQL：实现 `SqlLifecycleInterceptor` 接口
+
+### Q8: 声明式事务的执行顺序？
+
+`TransactionalAspect` 的执行顺序为 `LOWEST_PRECEDENCE - 1`，这意味着：
+- 它会在 `R2dbcDataSourceAspect`（`HIGHEST_PRECEDENCE`）之后执行
+- 数据源切换在事务之前完成
+- 事务包装的是整个方法执行过程
+
+### Q9: 声明式事务会阻塞吗？
+
+**不会阻塞响应式流。** 事务切面遵循以下原则：
+
+| 场景 | 阻塞性 | 说明 |
+|------|--------|------|
+| `Mono` 返回类型 | ✅ 非阻塞 | 事务在订阅时开始 |
+| `Flux` 返回类型 | ✅ 非阻塞 | 事务在订阅时开始 |
+| 非响应式返回类型 | ⚠️ 同步执行 | 自动包装为 `Mono.just()` |
+
+```java
+// 正确：非阻塞
+@Transactional
+public Mono<Order> createOrder(Order order) {
+    return orderRepository.insert(order);  // 返回 Mono，不阻塞
+}
+
+// 正确：自动包装
+@Transactional
+public Order findOrder(Long id) {
+    return orderRepository.findById(id);  // 同步方法，包装为 Mono
+}
+
+// 错误：不要在响应式链中使用 .block()
+@Transactional
+public Order wrongExample(Long id) {
+    return orderRepository.findById(id).block();  // 阻塞！
+}
+```
+
+### Q10: 声明式事务如何处理错误？
+
+事务切面内置自动错误处理机制：
+
+```java
+@Transactional
+public Mono<Order> createOrder(Order order) {
+    return inventoryRepository.decreaseStock(order.getProductId(), order.getQuantity())
+            .flatMap(inventory -> {
+                if (inventory.getStock() < 0) {
+                    return Mono.error(new InsufficientStockException("库存不足"));
+                }
+                return orderRepository.insert(order);
+            });
+    // 异常时自动回滚，无需手动处理
+}
+```
+
+错误处理流程：
+1. 操作异常 → 错误传播到 Reactor 链
+2. `TransactionalOperator` 捕获异常
+3. 自动执行 `ROLLBACK`
+4. 异常继续传播到调用者
+
+### Q11: 如何在响应式事务中使用保存点？
+
+```java
+@Service
+@RequiredArgsConstructor
+public class SavepointService {
+    
+    private final R2dbcUtil r2dbcUtil;
+    private final OrderRepository orderRepository;
+    private final InventoryRepository inventoryRepository;
+    
+    public Mono<Order> createOrderWithSavepoint(Order order) {
+        return r2dbcUtil.createManualTransaction("create-order")
+                .flatMap(transaction -> {
+                    Connection connection = ((ManualTransactionImpl) transaction).getConnection();
+                    
+                    return inventoryRepository.decrease(connection, order.getProductId(), order.getQuantity())
+                            .then(transaction.createSavepoint("after-inventory"))
+                            .flatMap(savepoint -> 
+                                orderRepository.insert(connection, order)
+                                    .onErrorResume(error -> 
+                                        transaction.rollbackToSavepoint(savepoint)
+                                            .then(Mono.error(error)))
+                            )
+                            .then(transaction.commit())
+                            .onErrorResume(error -> 
+                                transaction.rollback().then(Mono.error(error)));
+                });
+    }
+}
+```
 
 ## 许可证
 
