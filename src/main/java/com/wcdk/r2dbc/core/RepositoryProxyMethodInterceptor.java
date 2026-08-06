@@ -138,7 +138,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持自定义方法：" + method.getName());
         }
 
-        CustomMethodResolver resolver = new CustomMethodResolver(metadata);
+        CustomMethodResolver resolver = new CustomMethodResolver(metadata,
+                properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
         CustomMethodResolver.ParsedMethod parsedMethod = resolver.resolve(method, arguments);
 
         if (parsedMethod == null) {
@@ -156,39 +157,130 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 .filter(terminated -> !terminated)
                 .then(chain.beforeExecuteReactive(context));
 
-        if (parsedMethod.isQuery()) {
-            return lifecycle.filter(terminated -> !terminated)
-                    .thenMany(Flux.defer(() -> {
-                        context.setStartTime(System.nanoTime());
-                        return r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
-                                (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
-                    }))
-                    .doOnComplete(() -> {
-                        context.setEndTime(System.nanoTime());
-                        chain.afterExecuteReactive(context).subscribe();
-                    })
-                    .doOnError(e -> {
-                        context.setError(e);
-                        context.setEndTime(System.nanoTime());
-                        chain.afterExecuteReactive(context).subscribe();
-                    });
+        boolean returnsFlux = method.getReturnType() == Flux.class;
+        Class<?> valueType = reactiveValueType(method);
+
+        if (parsedMethod.commandType() == CustomMethodResolver.SqlCommandType.SELECT) {
+            if (valueType == Long.class || valueType == long.class) {
+                return executeCustomCountQuery(lifecycle, context, chain);
+            } else if (valueType == Boolean.class || valueType == boolean.class) {
+                return executeCustomExistsQuery(lifecycle, context, chain);
+            } else if (returnsFlux) {
+                return executeCustomFindQueryFlux(lifecycle, context, chain);
+            } else {
+                return executeCustomFindQueryMono(lifecycle, context, chain);
+            }
         } else {
-            return lifecycle.filter(terminated -> !terminated)
-                    .then(Mono.defer(() -> {
-                        context.setStartTime(System.nanoTime());
-                        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
-                                .doOnSuccess(r -> {
-                                    context.setResult(r);
-                                    context.setEndTime(System.nanoTime());
-                                    chain.afterExecuteReactive(context).subscribe();
-                                })
-                                .doOnError(e -> {
-                                    context.setError(e);
-                                    context.setEndTime(System.nanoTime());
-                                    chain.afterExecuteReactive(context).subscribe();
-                                });
-                    }));
+            return executeCustomUpdate(lifecycle, method, valueType, context, chain);
         }
+    }
+
+    private Object executeCustomCountQuery(Mono<Boolean> lifecycle, SqlExecutionContext context,
+                                            SqlLifecycleInterceptorChain chain) {
+        return lifecycle.filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                                    (row, rowMetadata) -> numberValue(row).longValue())
+                            .defaultIfEmpty(0L)
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
+    }
+
+    private Object executeCustomExistsQuery(Mono<Boolean> lifecycle, SqlExecutionContext context,
+                                             SqlLifecycleInterceptorChain chain) {
+        return lifecycle.filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                                    (row, rowMetadata) -> numberValue(row).longValue() > 0)
+                            .defaultIfEmpty(false)
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
+    }
+
+    private Object executeCustomFindQueryFlux(Mono<Boolean> lifecycle, SqlExecutionContext context,
+                                               SqlLifecycleInterceptorChain chain) {
+        return lifecycle.filter(terminated -> !terminated)
+                .thenMany(Flux.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
+                            (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
+                }))
+                .doOnComplete(() -> {
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecuteReactive(context).subscribe();
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecuteReactive(context).subscribe();
+                });
+    }
+
+    private Object executeCustomFindQueryMono(Mono<Boolean> lifecycle, SqlExecutionContext context,
+                                               SqlLifecycleInterceptorChain chain) {
+        return lifecycle.filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                            (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
+    }
+
+    private Object executeCustomUpdate(Mono<Boolean> lifecycle, Method method, Class<?> valueType,
+                                        SqlExecutionContext context, SqlLifecycleInterceptorChain chain) {
+        Mono<Long> updateMono = lifecycle.filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
+
+        if (method.getReturnType() == Mono.class && valueType == Boolean.class) {
+            return updateMono.map(count -> count > 0);
+        }
+        if (method.getReturnType() == Mono.class && valueType == Void.class) {
+            return updateMono.then();
+        }
+        return updateMono;
     }
 
     private Object executeXmlStatement(RepositoryStatement statement, Method method, Object[] arguments) {

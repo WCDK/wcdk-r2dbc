@@ -49,7 +49,7 @@
 | **分页支持** | 内置分页查询功能，简化分页逻辑 |
 | **逻辑删除** | 支持逻辑删除，数据可恢复 |
 | **SQL日志** | 可配置的SQL日志输出，便于调试 |
-| **自定义仓储方法** | 支持通过方法名约定自动生成SQL（findBy*、countBy*等） |
+| **自定义仓储方法** | 支持通过方法名约定自动生成SQL（findBy*、countBy*等）（实验性功能） |
 | **响应式拦截器** | 支持异步拦截器，不阻塞响应式流 |
 
 ## 快速开始
@@ -767,6 +767,8 @@ public class InterceptorConfig {
 
 ## 自定义仓储方法
 
+> **实验性功能**：方法名派生查询当前处于实验阶段，API 可能在后续版本中调整。
+
 ### 方法名约定
 
 支持通过方法名约定自动生成SQL，无需编写XML或注解。
@@ -783,6 +785,7 @@ public class InterceptorConfig {
 | `existsBy[Field]` | `existsByEmail(String email)` | `SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END FROM table WHERE email = ?` |
 | `deleteBy[Field]` | `deleteByStatus(Integer status)` | `UPDATE table SET del_flg = 1 WHERE status = ?`（逻辑删除） |
 | `update[Field]ById` | `updateStatusById(Long id, Integer status)` | `UPDATE table SET status = ? WHERE id = ?` |
+| `update[Field1]And[Field2]By[Condition]` | `updateNameAndEmailByStatus(String name, String email, Integer status)` | `UPDATE table SET name = ?, email = ? WHERE status = ?` |
 | `findBy[Field]OrderBy[Field]Asc/Desc` | `findByNameOrderByCreateTimeDesc()` | `SELECT * FROM table ORDER BY create_time DESC` |
 
 ### 支持的条件操作
@@ -791,10 +794,30 @@ public class InterceptorConfig {
 |------|----------|------|----------|
 | 等值查询 | (默认) | `findByStatus` | `WHERE status = ?` |
 | 模糊查询 | `Like` | `findByNameLike` | `WHERE name LIKE ?` |
-| 包含查询 | `In` | `findByIdIn` | `WHERE id IN (?)` |
+| 包含查询 | `In` | `findByIdIn` | `WHERE id IN (?, ?, ...)` |
 | 范围查询 | `Between` | `findByAgeBetween` | `WHERE age BETWEEN ? AND ?` |
 | 空值查询 | `IsNull` / `IsNotNull` | `findByEmailIsNull` | `WHERE email IS NULL` |
 | 排序 | `OrderBy[Field]Asc/Desc` | `findByNameOrderByAgeDesc` | `ORDER BY age DESC` |
+
+### 返回类型支持
+
+| 操作 | 支持的返回类型 |
+|------|----------------|
+| `findBy...` | `Flux<T>`, `Mono<T>`, `List<T>`, `T` |
+| `countBy...` | `Mono<Long>`, `Long`, `long`, `Integer`, `int` |
+| `existsBy...` | `Mono<Boolean>`, `Boolean`, `boolean` |
+| `deleteBy...` | `Mono<Long>`, `Mono<Boolean>`, `Mono<Void>` |
+| `update...` | `Mono<Long>`, `Mono<Boolean>`, `Mono<Void>` |
+
+### 启动期校验
+
+框架在 Repository 创建时会校验方法定义：
+
+- **方法名长度**：不超过 128 字符
+- **字段部分长度**：不超过 256 字符
+- **字段存在性**：引用的实体字段必须存在
+- **返回类型**：不支持的返回类型会快速失败
+- **参数数量**：参数数量不匹配时抛出异常
 
 ### 使用示例
 
@@ -805,8 +828,11 @@ public interface UserRepository extends BaseRepository<User> {
     // 查询所有用户
     Flux<User> findAll();
     
-    // 根据用户名查询
+    // 根据用户名查询（单个）
     Mono<User> findByUserName(String userName);
+    
+    // 根据用户名查询（多个）
+    Flux<User> findByStatus(Integer status);
     
     // 根据状态和邮箱查询
     Flux<User> findByStatusAndEmail(Integer status, String email);
@@ -823,8 +849,23 @@ public interface UserRepository extends BaseRepository<User> {
     // 更新用户状态
     Mono<Long> updateStatusById(Long id, Integer status);
     
+    // 批量更新字段
+    Mono<Long> updateNameAndEmailByStatus(String name, String email, Integer status);
+    
     // 根据用户名排序查询
     Flux<User> findByStatusOrderByCreateTimeDesc(Integer status);
+    
+    // 使用 IN 查询
+    Flux<User> findByIdIn(Collection<Long> ids);
+    
+    // 使用 BETWEEN 查询
+    Flux<User> findByAgeBetween(Integer minAge, Integer maxAge);
+    
+    // 使用 IS NULL 查询
+    Flux<User> findByEmailIsNull();
+    
+    // 使用 LIKE 查询
+    Flux<User> findByNameLike(String name);
 }
 ```
 

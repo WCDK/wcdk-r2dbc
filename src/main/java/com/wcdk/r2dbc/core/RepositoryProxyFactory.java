@@ -38,11 +38,31 @@ public class RepositoryProxyFactory {
     public Object create(Class<?> repositoryInterface) {
         Class<?> entityClass = resolveEntityClass(repositoryInterface);
         RepositoryMetadata metadata = entityClass != null ? new RepositoryMetadata(entityClass, properties) : null;
+
+        // 启动期校验派生方法
+        if (metadata != null) {
+            CustomMethodResolver resolver = new CustomMethodResolver(metadata,
+                    properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
+            for (java.lang.reflect.Method method : repositoryInterface.getMethods()) {
+                if (!isBaseMethod(method.getName())) {
+                    resolver.validateMethod(method);
+                }
+            }
+        }
+
         ProxyFactory proxyFactory = new ProxyFactory();
         proxyFactory.setInterfaces(repositoryInterface);
         proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(
                 r2dbcUtil, properties, metadata, repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
+    }
+
+    private boolean isBaseMethod(String methodName) {
+        return switch (methodName) {
+            case "insert", "deleteById", "updateById", "selectById", "selectList", "selectPage",
+                 "selectOne", "selectCount", "exists", "toString", "hashCode", "equals" -> true;
+            default -> false;
+        };
     }
 
     private Class<?> resolveEntityClass(Class<?> repositoryInterface) {
