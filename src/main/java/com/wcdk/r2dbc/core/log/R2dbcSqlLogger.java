@@ -13,8 +13,8 @@ import java.util.Map;
  * R2DBC SQL日志记录器。
  *
  * @author WCDK
- * @date 2026/8/5
  * @version 1.0
+ * @date 2026/8/5
  **/
 public class R2dbcSqlLogger {
 
@@ -77,6 +77,9 @@ public class R2dbcSqlLogger {
      * @return 格式化后的SQL
      */
     public String normalizeSql(String sql) {
-        return sql.strip().replaceAll("\\s+", " ");
+        if (sql != null && !sql.trim().isBlank()) {
+            return sql.strip().replaceAll("\\s+", " ");
+        }
+        return sql;
     }
 }
