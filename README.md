@@ -18,6 +18,7 @@
 - [事务管理](#事务管理)
 - [数据库方言支持](#数据库方言支持)
 - [API文档](#api文档)
+- [LambdaQueryWrapper](#lambdaquerywrapper-类型安全查询构造器)
 - [架构设计](#架构设计)
 - [常见问题](#常见问题)
 
@@ -41,6 +42,7 @@
 |------|------|
 | **简化API** | 提供 BaseRepository 接口，封装常用CRUD操作 |
 | **查询构造器** | QueryWrapper 提供链式编程构建查询条件 |
+| **类型安全查询** | LambdaQueryWrapper、LambdaUpdateWrapper、LambdaDeleteWrapper 通过方法引用构建类型安全的查询条件 |
 | **XML映射** | 支持类似 MyBatis 的 XML SQL 映射文件 |
 | **resultType** | 支持指定查询结果的返回类型 |
 | **resultMap** | 支持自定义列名到属性名的映射关系 |
@@ -1397,6 +1399,144 @@ wrapper.limit(10);
 wrapper.offset(20);
 wrapper.page(1, 10); // 第1页，每页10条
 ```
+
+### LambdaQueryWrapper 类型安全查询构造器
+
+`LambdaQueryWrapper` 提供类型安全的查询构造，通过方法引用指定字段，避免硬编码字段名。
+
+```java
+// 创建 LambdaQueryWrapper
+LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>(User.class);
+
+// 或使用静态工厂方法
+LambdaQueryWrapper<User> wrapper = LambdaQueryWrapper.of(User.class);
+
+// 类型安全的等值查询
+wrapper.eq(User::getStatus, 1);
+
+// 类型安全的模糊查询
+wrapper.like(User::getName, "张");
+
+// 类型安全的排序
+wrapper.orderByDesc(User::getCreateTime);
+
+// 组合查询
+LambdaQueryWrapper<User> wrapper = LambdaQueryWrapper.of(User.class);
+wrapper.eq(User::getStatus, 1)
+       .like(User::getName, "张")
+       .between(User::getAge, 18, 30)
+       .orderByDesc(User::getCreateTime)
+       .limit(10);
+```
+
+#### LambdaQueryWrapper 方法列表
+
+| 方法 | 说明 | 示例 |
+|------|------|------|
+| `eq` | 等值查询 | `wrapper.eq(User::getStatus, 1)` |
+| `ne` | 不等查询 | `wrapper.ne(User::getStatus, 0)` |
+| `gt` | 大于查询 | `wrapper.gt(User::getAge, 18)` |
+| `ge` | 大于等于 | `wrapper.ge(User::getAge, 18)` |
+| `lt` | 小于查询 | `wrapper.lt(User::getAge, 60)` |
+| `le` | 小于等于 | `wrapper.le(User::getAge, 60)` |
+| `like` | 模糊查询 | `wrapper.like(User::getName, "张")` |
+| `in` | IN 查询 | `wrapper.in(User::getId, 1, 2, 3)` |
+| `between` | BETWEEN 查询 | `wrapper.between(User::getAge, 18, 30)` |
+| `isNull` | IS NULL 查询 | `wrapper.isNull(User::getEmail)` |
+| `isNotNull` | IS NOT NULL 查询 | `wrapper.isNotNull(User::getEmail)` |
+| `orderByAsc` | 升序排序 | `wrapper.orderByAsc(User::getCreateTime)` |
+| `orderByDesc` | 降序排序 | `wrapper.orderByDesc(User::getCreateTime)` |
+| `limit` | 设置查询条数 | `wrapper.limit(10)` |
+| `offset` | 设置偏移量 | `wrapper.offset(20)` |
+| `page` | 设置分页 | `wrapper.page(1, 10)` |
+
+#### 与 QueryWrapper 的区别
+
+| 特性 | QueryWrapper | LambdaQueryWrapper |
+|------|--------------|---------------------|
+| 字段指定 | 字符串 | 方法引用 |
+| 类型安全 | 否 | 是 |
+| 重构支持 | 需手动修改 | 自动更新 |
+| 编译检查 | 无 | 有 |
+
+### LambdaUpdateWrapper 类型安全更新构造器
+
+`LambdaUpdateWrapper` 提供类型安全的更新操作，通过方法引用指定 SET 字段和 WHERE 条件。
+
+```java
+// 创建 LambdaUpdateWrapper
+LambdaUpdateWrapper<User> wrapper = LambdaUpdateWrapper.of(User.class);
+
+// 设置字段值
+wrapper.set(User::getName, "张三")
+       .set(User::getStatus, 1)
+       .set(User::getUpdateTime, LocalDateTime.now());
+
+// 设置字段为 NULL
+wrapper.setNull(User::getDeletedAt);
+
+// 设置字段递增
+wrapper.setIncrement(User::getLoginCount, 1);
+
+// 设置字段递减
+wrapper.setDecrement(User::getStock, 1);
+
+// 添加 WHERE 条件
+wrapper.eq(User::getId, 1L);
+
+// 配合 Repository 使用
+userRepository.update(wrapper);
+```
+
+#### LambdaUpdateWrapper 方法列表
+
+| 方法 | 说明 | 示例 |
+|------|------|------|
+| `set` | 设置字段值 | `wrapper.set(User::getName, "张三")` |
+| `setNull` | 设置字段为 NULL | `wrapper.setNull(User::getDeletedAt)` |
+| `setIncrement` | 字段递增 | `wrapper.setIncrement(User::getCount, 1)` |
+| `setDecrement` | 字段递减 | `wrapper.setDecrement(User::getStock, 1)` |
+| `eq` | 等值条件 | `wrapper.eq(User::getId, 1L)` |
+| `ne` | 不等条件 | `wrapper.ne(User::getStatus, 0)` |
+| `gt` | 大于条件 | `wrapper.gt(User::getAge, 18)` |
+| `ge` | 大于等于 | `wrapper.ge(User::getAge, 18)` |
+| `lt` | 小于条件 | `wrapper.lt(User::getAge, 60)` |
+| `le` | 小于等于 | `wrapper.le(User::getAge, 60)` |
+| `in` | IN 条件 | `wrapper.in(User::getId, 1, 2, 3)` |
+| `between` | BETWEEN 条件 | `wrapper.between(User::getAge, 18, 30)` |
+| `isNull` | IS NULL 条件 | `wrapper.isNull(User::getEmail)` |
+| `isNotNull` | IS NOT NULL 条件 | `wrapper.isNotNull(User::getEmail)` |
+
+### LambdaDeleteWrapper 类型安全删除构造器
+
+`LambdaDeleteWrapper` 提供类型安全的删除操作，通过方法引用指定 WHERE 条件。
+
+```java
+// 创建 LambdaDeleteWrapper
+LambdaDeleteWrapper<User> wrapper = LambdaDeleteWrapper.of(User.class);
+
+// 添加 WHERE 条件
+wrapper.eq(User::getStatus, 0)
+       .lt(User::getCreateTime, LocalDateTime.now().minusDays(30));
+
+// 配合 Repository 使用
+userRepository.delete(wrapper);
+```
+
+#### LambdaDeleteWrapper 方法列表
+
+| 方法 | 说明 | 示例 |
+|------|------|------|
+| `eq` | 等值条件 | `wrapper.eq(User::getStatus, 0)` |
+| `ne` | 不等条件 | `wrapper.ne(User::getStatus, 1)` |
+| `gt` | 大于条件 | `wrapper.gt(User::getAge, 18)` |
+| `ge` | 大于等于 | `wrapper.ge(User::getAge, 18)` |
+| `lt` | 小于条件 | `wrapper.lt(User::getAge, 60)` |
+| `le` | 小于等于 | `wrapper.le(User::getAge, 60)` |
+| `in` | IN 条件 | `wrapper.in(User::getId, 1, 2, 3)` |
+| `between` | BETWEEN 条件 | `wrapper.between(User::getAge, 18, 30)` |
+| `isNull` | IS NULL 条件 | `wrapper.isNull(User::getEmail)` |
+| `isNotNull` | IS NOT NULL 条件 | `wrapper.isNotNull(User::getEmail)` |
 
 ### R2dbcUtil 工具类
 
