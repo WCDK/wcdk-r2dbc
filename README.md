@@ -480,7 +480,8 @@ XML SQL 在 Repository 方法调用时根据实参动态渲染，当前支持以
 ### 完整示例
 
 ```xml
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE repository PUBLIC "https://github.com/WCDK/wcdk-r2dbc" "wcdk-r2dbc-repository.dtd">
 <repository namespace="com.example.repository.UserRepository">
     
     <!-- 定义 resultMap -->

@@ -210,48 +210,84 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 .filter(terminated -> !terminated)
                 .then(chain.beforeExecuteReactive(context));
 
-        BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
+        boolean returnsFlux = method.getReturnType() == Flux.class;
 
-        Object result;
-        try {
-            result = switch (statement.commandType()) {
-                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
-                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
-            };
-        } catch (Exception e) {
-            context.setError(e);
-            context.setEndTime(System.nanoTime());
-            chain.afterExecuteReactive(context).subscribe();
-            throw e;
-        }
-
-        if (result instanceof Mono<?> mono) {
+        if (returnsFlux) {
             return lifecycle.filter(terminated -> !terminated)
-                    .then(mono.doOnSuccess(r -> {
-                        context.setResult(r);
-                        context.setEndTime(System.nanoTime());
-                        chain.afterExecuteReactive(context).subscribe();
-                    }).doOnError(e -> {
-                        context.setError(e);
-                        context.setEndTime(System.nanoTime());
-                        chain.afterExecuteReactive(context).subscribe();
+                    .thenMany(Flux.deferContextual(contextView -> {
+                        BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
+                        context.setStartTime(System.nanoTime());
+
+                        Object result;
+                        try {
+                            result = switch (statement.commandType()) {
+                                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
+                                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
+                            };
+                        } catch (Exception e) {
+                            return Flux.error(e);
+                        }
+
+                        @SuppressWarnings("unchecked")
+                        Flux<Object> flux = result instanceof Flux<?> f
+                                ? (Flux<Object>) f
+                                : result instanceof Mono<?> m
+                                        ? (Flux<Object>) m.flux()
+                                        : Flux.just(result);
+
+                        return flux.doOnComplete(() -> {
+                            context.setEndTime(System.nanoTime());
+                            chain.afterExecuteReactive(context).subscribe();
+                        }).doOnError(e -> {
+                            context.setError(e);
+                            context.setEndTime(System.nanoTime());
+                            chain.afterExecuteReactive(context).subscribe();
+                        });
                     }));
-        } else if (result instanceof Flux<?> flux) {
+        } else {
             return lifecycle.filter(terminated -> !terminated)
-                    .thenMany(flux.doOnComplete(() -> {
+                    .then(Mono.defer(() -> {
+                        BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
+                        context.setStartTime(System.nanoTime());
+
+                        Object result;
+                        try {
+                            result = switch (statement.commandType()) {
+                                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
+                                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
+                            };
+                        } catch (Exception e) {
+                            return Mono.error(e);
+                        }
+
+                        if (result instanceof Mono<?> mono) {
+                            return mono.doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            }).doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                        } else if (result instanceof Flux<?> flux) {
+                            return flux.collectList().doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            }).doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                        }
+
+                        context.setResult(result);
                         context.setEndTime(System.nanoTime());
                         chain.afterExecuteReactive(context).subscribe();
-                    }).doOnError(e -> {
-                        context.setError(e);
-                        context.setEndTime(System.nanoTime());
-                        chain.afterExecuteReactive(context).subscribe();
+                        return Mono.justOrEmpty(result);
                     }));
         }
-
-        context.setResult(result);
-        context.setEndTime(System.nanoTime());
-        chain.afterExecuteReactive(context).subscribe();
-        return Mono.justOrEmpty(result);
     }
 
     private Object executeXmlUpdate(BoundSql boundSql, Method method, Object[] arguments) {
