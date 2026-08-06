@@ -137,10 +137,9 @@ public class WcdkR2dbcAutoConfiguration {
     @Bean
     @Role(ROLE_INFRASTRUCTURE)
     public RepositoryProxyFactory repositoryProxyFactory(R2dbcUtil r2dbcUtil,
-                                                          WcdkR2dbcProperties properties,
-                                                          RepositoryXmlRegistry repositoryXmlRegistry,
-                                                          WcdkSpringR2dbcProperties springR2dbcProperties) {
-        return new RepositoryProxyFactory(r2dbcUtil, properties, repositoryXmlRegistry, springR2dbcProperties);
+                                                           WcdkR2dbcProperties properties,
+                                                           RepositoryXmlRegistry repositoryXmlRegistry) {
+        return new RepositoryProxyFactory(r2dbcUtil, properties, repositoryXmlRegistry);
     }
 
     @Bean

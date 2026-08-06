@@ -16,6 +16,9 @@ public class WcdkR2dbcProperties {
 
     private boolean sqlLogEnabled = true;
 
+    private boolean snowflakeId;
+
+
     private boolean quoteIdentifier = true;
 
     private String mapperLocations = "classpath*:repository/**/*.xml";

@@ -163,12 +163,26 @@ public class R2dbcUtil {
         return queryOperations.queryOne(sql, parameters, mapper);
     }
 
+    public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                              BiFunction<Row, RowMetadata, T> mapper) {
+        return queryOperations.queryWithoutLifecycle(sql, parameters, mapper);
+    }
+
+    public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                 BiFunction<Row, RowMetadata, T> mapper) {
+        return queryOperations.queryOneWithoutLifecycle(sql, parameters, mapper);
+    }
+
     public Mono<Long> update(String sql) {
         return updateOperations.update(sql);
     }
 
     public Mono<Long> update(String sql, Map<?, ?> parameters) {
         return updateOperations.update(sql, parameters);
+    }
+
+    public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
+        return updateOperations.updateWithoutLifecycle(sql, parameters);
     }
 
     public Mono<Long> batch(List<String> sqlList) {

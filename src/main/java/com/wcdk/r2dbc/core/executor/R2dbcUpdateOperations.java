@@ -88,6 +88,14 @@ public class R2dbcUpdateOperations {
         });
     }
 
+    /** Executes an already intercepted repository update without invoking the lifecycle chain again. */
+    public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
+        return Mono.deferContextual(contextView -> {
+            sqlLogger.logSql(contextView, sql, parameters);
+            return execute(sql, parameters).fetch().rowsUpdated();
+        });
+    }
+
     /**
      * 批量执行SQL。
      *

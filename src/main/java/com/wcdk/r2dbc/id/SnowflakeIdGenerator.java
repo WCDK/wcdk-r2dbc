@@ -1,5 +1,10 @@
 package com.wcdk.r2dbc.id;
 
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
 public class SnowflakeIdGenerator {
 
     private static final long EPOCH = 1577808000000L;
@@ -11,12 +16,14 @@ public class SnowflakeIdGenerator {
     private static final long WORKER_ID_SHIFT = SEQUENCE_BITS;
     private static final long TIMESTAMP_SHIFT = WORKER_ID_BITS + SEQUENCE_BITS;
 
+    private static final long DEFAULT_WORKER_ID = resolveWorkerId();
+
     private final long workerId;
     private long sequence;
     private long lastTimestamp = -1L;
 
     public SnowflakeIdGenerator() {
-        this(0L);
+        this(DEFAULT_WORKER_ID);
     }
 
     public SnowflakeIdGenerator(long workerId) {
@@ -55,5 +62,23 @@ public class SnowflakeIdGenerator {
             timestamp = System.currentTimeMillis();
         }
         return timestamp;
+    }
+
+    private static long resolveWorkerId() {
+        String host;
+        try {
+            host = InetAddress.getLocalHost().getHostName();
+        } catch (Exception ignored) {
+            host = System.getenv().getOrDefault("HOSTNAME", "localhost");
+        }
+        String instanceIdentity = host + ':' + ProcessHandle.current().pid();
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(instanceIdentity.getBytes(StandardCharsets.UTF_8));
+            long value = ((digest[0] & 0xffL) << 8) | (digest[1] & 0xffL);
+            return value & MAX_WORKER_ID;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
     }
 }

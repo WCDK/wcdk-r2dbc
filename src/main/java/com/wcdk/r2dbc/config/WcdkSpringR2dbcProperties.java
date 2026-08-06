@@ -24,8 +24,6 @@ public class WcdkSpringR2dbcProperties {
 
     private Map<String, String> properties = new LinkedHashMap<>();
 
-    private boolean snowflakeId;
-
     private String primary = "master";
 
     private Map<String, DataSourceProperties> dataSources = new LinkedHashMap<>();

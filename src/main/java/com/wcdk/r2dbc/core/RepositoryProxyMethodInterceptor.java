@@ -2,7 +2,6 @@ package com.wcdk.r2dbc.core;
 
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
-import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
 import com.wcdk.r2dbc.core.interceptor.SqlExecutionContext;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorHolder;
@@ -10,6 +9,7 @@ import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata.FieldColumn;
 import com.wcdk.r2dbc.core.query.QueryWrapper;
+import com.wcdk.r2dbc.core.xml.DynamicSqlSource;
 import com.wcdk.r2dbc.core.xml.ResultMapDefinition;
 import com.wcdk.r2dbc.core.xml.RepositoryStatement;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
@@ -22,6 +22,8 @@ import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.core.ResolvableType;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.r2dbc.dialect.DialectResolver;
+import org.springframework.data.r2dbc.dialect.R2dbcDialect;
 import org.springframework.data.repository.query.Param;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
@@ -60,6 +62,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     private final RepositoryXmlRegistry repositoryXmlRegistry;
 
+    private final R2dbcDialect dialect;
+
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     private final boolean snowflakeIdEnabled;
@@ -69,14 +73,15 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                                      RepositoryMetadata metadata,
                                      Class<?> repositoryInterface,
                                      RepositoryXmlRegistry repositoryXmlRegistry,
-                                     WcdkSpringR2dbcProperties springR2dbcProperties) {
+                                     SnowflakeIdGenerator snowflakeIdGenerator) {
         this.r2dbcUtil = r2dbcUtil;
         this.properties = properties;
         this.metadata = metadata;
         this.repositoryInterface = repositoryInterface;
         this.repositoryXmlRegistry = repositoryXmlRegistry;
-        this.snowflakeIdEnabled = springR2dbcProperties != null && springR2dbcProperties.isSnowflakeId();
-        this.snowflakeIdGenerator = this.snowflakeIdEnabled ? new SnowflakeIdGenerator() : null;
+        this.dialect = DialectResolver.getDialect(r2dbcUtil.databaseClient().getConnectionFactory());
+        this.snowflakeIdEnabled = properties.isSnowflakeId();
+        this.snowflakeIdGenerator = snowflakeIdGenerator;
     }
 
     @Override
@@ -147,24 +152,24 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         // beforeCompile
         if (chain.beforeCompile(context)) {
-            return Mono.empty();
+            return terminatedPublisher(method);
         }
 
         // afterCompile
         if (chain.afterCompile(context)) {
-            return Mono.empty();
+            return terminatedPublisher(method);
         }
 
         // beforeExecute
         if (chain.beforeExecute(context)) {
-            return Mono.empty();
+            return terminatedPublisher(method);
         }
 
         context.setStartTime(System.nanoTime());
 
         if (parsedMethod.isQuery()) {
             // 查询操作
-            Flux<?> flux = r2dbcUtil.query(context.getSql(), context.getParameters(),
+            Flux<?> flux = r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
                     (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
 
             return flux.doOnComplete(() -> {
@@ -177,7 +182,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             });
         } else {
             // 更新操作
-            return r2dbcUtil.update(context.getSql(), context.getParameters())
+            return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
                     .doOnSuccess(r -> {
                         context.setResult(r);
                         context.setEndTime(System.nanoTime());
@@ -194,19 +199,23 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     private Object executeXmlStatement(RepositoryStatement statement, Method method, Object[] arguments) {
         SqlLifecycleInterceptorChain chain = SqlLifecycleInterceptorHolder.getChain();
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
+        context.setParameters(methodParameters(method, arguments));
 
         // beforeCompile
         if (chain.beforeCompile(context)) {
-            return Mono.empty();
+            return terminatedPublisher(method);
         }
 
-        BoundSql boundSql = bindSql(statement.sql(), method, arguments);
+        DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getParameters());
+        Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getParameters());
+        sourceParameters.putAll(renderedSql.additionalParameters());
+        BoundSql boundSql = bindSql(renderedSql.sql(), arguments, sourceParameters);
         context.setSql(boundSql.sql());
         context.setParameters(boundSql.parameters());
 
         // afterCompile
         if (chain.afterCompile(context)) {
-            return Mono.empty();
+            return terminatedPublisher(method);
         }
 
         // 使用可能被修改的SQL
@@ -214,7 +223,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         // beforeExecute
         if (chain.beforeExecute(context)) {
-            return Mono.empty();
+            return terminatedPublisher(method);
         }
 
         context.setStartTime(System.nanoTime());
@@ -261,7 +270,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     }
 
     private Object executeXmlUpdate(BoundSql boundSql, Method method, Object[] arguments) {
-        Mono<Long> rows = r2dbcUtil.update(boundSql.sql(), boundSql.parameters());
+        Mono<Long> rows = r2dbcUtil.updateWithoutLifecycle(boundSql.sql(), boundSql.parameters());
         Class<?> valueType = reactiveValueType(method);
         if (method.getReturnType() == Mono.class && valueType == Boolean.class) {
             return rows.map(count -> count > 0);
@@ -279,22 +288,22 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         String resultMapId = statement.resultMapId();
 
         if (method.getReturnType() == Flux.class) {
-            return r2dbcUtil.query(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
+            return r2dbcUtil.queryWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
                     mapXmlRow(row, valueType, resultType, resultMapId));
         }
         if (valueType == Boolean.class || valueType == boolean.class) {
-            return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue() > 0)
+            return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue() > 0)
                     .defaultIfEmpty(false);
         }
         if (valueType == Long.class || valueType == long.class) {
-            return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue())
+            return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue())
                     .defaultIfEmpty(0L);
         }
         if (valueType == Integer.class || valueType == int.class) {
-            return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).intValue())
+            return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).intValue())
                     .defaultIfEmpty(0);
         }
-        return r2dbcUtil.queryOne(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
+        return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
                 mapXmlRow(row, valueType, resultType, resultMapId));
     }
 
@@ -399,8 +408,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         return method.getReturnType();
     }
 
-    private BoundSql bindSql(String sql, Method method, Object[] arguments) {
-        Map<String, Object> sourceParameters = methodParameters(method, arguments);
+    private BoundSql bindSql(String sql, Object[] arguments, Map<String, Object> sourceParameters) {
         Map<String, Object> boundParameters = new LinkedHashMap<>();
         List<String> parameterNames = new ArrayList<>();
         Matcher matcher = PARAMETER_PATTERN.matcher(sql);
@@ -420,6 +428,10 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             boundParameters.put(bindName(name), parameterValue(sourceParameters, name));
         }
         return new BoundSql(builder.toString(), boundParameters);
+    }
+
+    static Object terminatedPublisher(Method method) {
+        return method.getReturnType() == Flux.class ? Flux.empty() : Mono.empty();
     }
 
     private Map<String, Object> methodParameters(Method method, Object[] arguments) {
@@ -558,7 +570,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         context.setStartTime(System.nanoTime());
 
-        return r2dbcUtil.update(context.getSql(), context.getParameters())
+        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
                 .doOnSuccess(r -> {
                     context.setResult(entity);
                     context.setEndTime(System.nanoTime());
@@ -614,7 +626,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         context.setStartTime(System.nanoTime());
 
-        return r2dbcUtil.update(context.getSql(), context.getParameters())
+        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
                 .doOnSuccess(r -> {
                     context.setResult(r);
                     context.setEndTime(System.nanoTime());
@@ -672,7 +684,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         context.setStartTime(System.nanoTime());
 
-        return r2dbcUtil.update(context.getSql(), context.getParameters())
+        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
                 .doOnSuccess(r -> {
                     context.setResult(r);
                     context.setEndTime(System.nanoTime());
@@ -719,7 +731,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         context.setStartTime(System.nanoTime());
 
-        return r2dbcUtil.queryOne(context.getSql(), context.getParameters(),
+        return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
                         (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
                 .doOnSuccess(r -> {
                     context.setResult(r);
@@ -763,7 +775,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         context.setStartTime(System.nanoTime());
 
-        return r2dbcUtil.query(context.getSql(), context.getParameters(),
+        return r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
                         (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
                 .doOnComplete(() -> {
                     context.setEndTime(System.nanoTime());
@@ -827,7 +839,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
         context.setStartTime(System.nanoTime());
 
-        return r2dbcUtil.queryOne(context.getSql(), context.getParameters(),
+        return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
                         (row, rowMetadata) -> numberValue(row).longValue())
                 .defaultIfEmpty(0L)
                 .doOnSuccess(r -> {
@@ -878,15 +890,19 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         if (queryWrapper == null || queryWrapper.limit() == null) {
             return "";
         }
-        String sql = " LIMIT " + queryWrapper.limit();
-        return queryWrapper.offset() == null ? sql : sql + " OFFSET " + queryWrapper.offset();
+        Long offset = queryWrapper.offset() == null ? null : queryWrapper.offset().longValue();
+        return paginationSql(queryWrapper.limit(), offset);
     }
 
     private String pageSql(Pageable pageable) {
         if (pageable.isUnpaged()) {
             return "";
         }
-        return " LIMIT " + pageable.getPageSize() + " OFFSET " + pageable.getOffset();
+        return paginationSql(pageable.getPageSize(), pageable.getOffset());
+    }
+
+    private String paginationSql(long limit, Long offset) {
+        return DialectPagination.render(dialect, limit, offset);
     }
 
     private String logicNotDeleteSql(String prefix) {

@@ -3,9 +3,9 @@ package com.wcdk.r2dbc.core;
 import com.wcdk.r2dbc.BaseRepository;
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
-import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
+import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import org.springframework.aop.framework.ProxyFactory;
 
 import java.lang.reflect.ParameterizedType;
@@ -26,13 +26,13 @@ public class RepositoryProxyFactory {
 
     private final RepositoryXmlRegistry repositoryXmlRegistry;
 
-    private final WcdkSpringR2dbcProperties springR2dbcProperties;
+    private final SnowflakeIdGenerator snowflakeIdGenerator;
 
-    public RepositoryProxyFactory(R2dbcUtil r2dbcUtil, WcdkR2dbcProperties properties, RepositoryXmlRegistry repositoryXmlRegistry, WcdkSpringR2dbcProperties springR2dbcProperties) {
+    public RepositoryProxyFactory(R2dbcUtil r2dbcUtil, WcdkR2dbcProperties properties, RepositoryXmlRegistry repositoryXmlRegistry) {
         this.r2dbcUtil = r2dbcUtil;
         this.properties = properties;
         this.repositoryXmlRegistry = repositoryXmlRegistry;
-        this.springR2dbcProperties = springR2dbcProperties;
+        this.snowflakeIdGenerator = properties.isSnowflakeId() ? new SnowflakeIdGenerator() : null;
     }
 
     public Object create(Class<?> repositoryInterface) {
@@ -40,7 +40,8 @@ public class RepositoryProxyFactory {
         RepositoryMetadata metadata = entityClass != null ? new RepositoryMetadata(entityClass, properties) : null;
         ProxyFactory proxyFactory = new ProxyFactory();
         proxyFactory.setInterfaces(repositoryInterface);
-        proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(r2dbcUtil, properties, metadata, repositoryInterface, repositoryXmlRegistry, springR2dbcProperties));
+        proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(
+                r2dbcUtil, properties, metadata, repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
     }
 

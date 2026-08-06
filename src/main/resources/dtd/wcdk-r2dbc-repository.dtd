@@ -1,22 +1,50 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!ELEMENT repository (select|insert|update|delete)*>
+<!ELEMENT repository (resultMap|select|insert|update|delete)*>
 <!ATTLIST repository
         namespace CDATA #REQUIRED>
 
-<!ELEMENT select (#PCDATA)>
+<!ENTITY % dynamic "#PCDATA|if|where|foreach">
+
+<!ELEMENT select (%dynamic;)*>
 <!ATTLIST select
         id CDATA #REQUIRED
-        resultType CDATA #IMPLIED>
+        resultType CDATA #IMPLIED
+        resultMap CDATA #IMPLIED>
 
-<!ELEMENT insert (#PCDATA)>
+<!ELEMENT insert (%dynamic;)*>
 <!ATTLIST insert
         id CDATA #REQUIRED>
 
-<!ELEMENT update (#PCDATA)>
+<!ELEMENT update (%dynamic;)*>
 <!ATTLIST update
         id CDATA #REQUIRED>
 
-<!ELEMENT delete (#PCDATA)>
+<!ELEMENT delete (%dynamic;)*>
 <!ATTLIST delete
         id CDATA #REQUIRED>
+
+<!ELEMENT if (%dynamic;)*>
+<!ATTLIST if test CDATA #REQUIRED>
+
+<!ELEMENT where (%dynamic;)*>
+
+<!ELEMENT foreach (%dynamic;)*>
+<!ATTLIST foreach
+        collection CDATA #REQUIRED
+        item CDATA #IMPLIED
+        index CDATA #IMPLIED
+        open CDATA #IMPLIED
+        separator CDATA #IMPLIED
+        close CDATA #IMPLIED>
+
+<!ELEMENT resultMap (id|result|discriminator)*>
+<!ATTLIST resultMap id CDATA #REQUIRED type CDATA #REQUIRED>
+<!ELEMENT id EMPTY>
+<!ATTLIST id column CDATA #REQUIRED property CDATA #REQUIRED>
+<!ELEMENT result EMPTY>
+<!ATTLIST result column CDATA #REQUIRED property CDATA #REQUIRED>
+<!ELEMENT discriminator (case*)>
+<!ATTLIST discriminator column CDATA #REQUIRED>
+<!ELEMENT case EMPTY>
+<!ATTLIST case value CDATA #REQUIRED resultMap CDATA #REQUIRED>

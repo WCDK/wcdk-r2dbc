@@ -151,16 +151,16 @@ public class RepositoryXmlRegistry {
         if (!StringUtils.hasText(id)) {
             id = element.getTagName();
         }
-        String sql = element.getTextContent();
-        if (!StringUtils.hasText(sql)) {
+        if (!StringUtils.hasText(element.getTextContent())) {
             throw new IllegalStateException("R2DBC XML SQL 不能为空：" + namespace + "." + id);
         }
+        DynamicSqlSource sqlSource = DynamicSqlSource.parse(element);
         String resultType = element.getAttribute("resultType");
         String resultMapId = element.getAttribute("resultMap");
         if (StringUtils.hasText(resultMapId) && !resultMapId.contains(".")) {
             resultMapId = namespace + "." + resultMapId;
         }
-        RepositoryStatement statement = new RepositoryStatement(namespace, id, commandType, sql.strip(),
+        RepositoryStatement statement = new RepositoryStatement(namespace, id, commandType, sqlSource,
                 StringUtils.hasText(resultType) ? resultType : null,
                 StringUtils.hasText(resultMapId) ? resultMapId : null);
         RepositoryStatement previous = statements.putIfAbsent(statement.statementId(), statement);

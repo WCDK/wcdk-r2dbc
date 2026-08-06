@@ -188,6 +188,20 @@ public class R2dbcQueryOperations {
         return query(sql, parameters, mapper).next();
     }
 
+    /** Executes an already intercepted repository query without invoking the lifecycle chain again. */
+    public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                              BiFunction<Row, RowMetadata, T> mapper) {
+        return Flux.deferContextual(contextView -> {
+            sqlLogger.logSql(contextView, sql, parameters);
+            return execute(sql, parameters).map(mapper).all();
+        });
+    }
+
+    public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                 BiFunction<Row, RowMetadata, T> mapper) {
+        return queryWithoutLifecycle(sql, parameters, mapper).next();
+    }
+
     private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters) {
         return parameterBinder.bind(databaseClient, sql, parameters);
     }

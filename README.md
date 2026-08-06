@@ -219,6 +219,7 @@ public class SysUserService {
 |------|------|--------|------|
 | `wcdk.r2dbc.enabled` | boolean | false | 启用WCDK R2DBC |
 | `wcdk.r2dbc.sql-log-enabled` | boolean | true | 启用SQL日志 |
+| `wcdk.r2dbc.snowflake-id` | boolean | false | 启用雪花ID生成 |
 | `wcdk.r2dbc.quote-identifier` | boolean | true | 标识符加引号 |
 | `wcdk.r2dbc.mapper-locations` | String | `classpath*:repository/**/*.xml` | XML映射文件位置 |
 | `wcdk.r2dbc.logic-delete-field` | String | `delFlg` | 逻辑删除字段 |
@@ -387,6 +388,18 @@ wcdk:
     </foreach>
 </delete>
 ```
+
+### 动态 SQL
+
+XML SQL 在 Repository 方法调用时根据实参动态渲染，当前支持以下节点：
+
+| 节点 | 作用 | 关键属性 |
+|------|------|----------|
+| `<if>` | 条件成立时输出内部 SQL | `test`，支持属性读取、`null` 判断及 `and`/`or` 表达式 |
+| `<where>` | 内容非空时生成 `WHERE`，并移除开头的 `AND`/`OR` | - |
+| `<foreach>` | 展开 `Iterable`、数组或 `Map`，每个元素生成独立绑定参数 | `collection`、`item`、`index`、`open`、`separator`、`close` |
+
+`foreach` 内可以使用简单元素 `#{item}`，也可以使用对象属性 `#{item.id}`。所有值都会转换成唯一的命名参数并交给 `DatabaseClient` 绑定，不会直接拼接到 SQL。空集合不会输出 `open` 和 `close`；如果空集合需要返回特定结果，应在外层使用 `<if>` 处理。
 
 ### resultType 详解
 
@@ -1001,10 +1014,12 @@ createTransaction()
 | 特性 | 达梦 | PostgreSQL | MySQL | Oracle |
 |------|------|------------|-------|--------|
 | 绑定参数风格 | `?` | `$1,$2` | `?` | `?` |
-| LIMIT/OFFSET | ✓ | ✓ | ✓ | ✓ |
+| 方言分页 | ✓ | ✓ | ✓ | ✓ |
 | RETURNING | ✓ | ✓ | ✗ | ✓ |
 | JSON类型 | ✓ | ✓ | ✓ | ✓ |
 | 数组类型 | ✗ | ✓ | ✗ | ✓ |
+
+Repository 的 `limit`、`offset` 和分页查询通过 Spring Data `R2dbcDialect` 生成语法；Oracle 会使用 `OFFSET ... ROWS FETCH ...`，不再硬编码 `LIMIT/OFFSET`。
 
 ## API文档
 
