@@ -51,7 +51,12 @@ public class TransactionTemplate {
                     Connection connection = ((ManualTransactionImpl) transaction).getConnection();
                     return Mono.from(action.apply(connection))
                             .flatMap(result -> transaction.commit().thenReturn(result))
-                            .onErrorResume(error -> transaction.rollback().then(Mono.error(error)));
+                            .onErrorResume(error -> transaction.rollback()
+                                    .onErrorResume(rollbackError -> {
+                                        error.addSuppressed(rollbackError);
+                                        return Mono.empty();
+                                    })
+                                    .then(Mono.error(error)));
                 });
     }
 
@@ -70,7 +75,12 @@ public class TransactionTemplate {
                     Connection connection = ((ManualTransactionImpl) transaction).getConnection();
                     return Mono.from(action.apply(connection))
                             .flatMap(result -> transaction.commit().thenReturn(result))
-                            .onErrorResume(error -> transaction.rollback().then(Mono.error(error)));
+                            .onErrorResume(error -> transaction.rollback()
+                                    .onErrorResume(rollbackError -> {
+                                        error.addSuppressed(rollbackError);
+                                        return Mono.empty();
+                                    })
+                                    .then(Mono.error(error)));
                 });
     }
 
@@ -95,7 +105,12 @@ public class TransactionTemplate {
                     return result
                             .collectList()
                             .flatMapMany(list -> transaction.commit().thenMany(Flux.fromIterable(list)))
-                            .onErrorResume(error -> transaction.rollback().thenMany(Flux.error(error)));
+                            .onErrorResume(error -> transaction.rollback()
+                                    .onErrorResume(rollbackError -> {
+                                        error.addSuppressed(rollbackError);
+                                        return Mono.empty();
+                                    })
+                                    .thenMany(Flux.error(error)));
                 });
     }
 

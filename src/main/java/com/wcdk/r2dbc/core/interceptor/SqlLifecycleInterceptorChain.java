@@ -46,15 +46,6 @@ public class SqlLifecycleInterceptorChain {
     }
 
     /**
-     * 兼容旧构造函数 - 仅同步拦截器。
-     *
-     * @param interceptors 同步拦截器列表
-     */
-    public SqlLifecycleInterceptorChain(List<SqlLifecycleInterceptor> interceptors) {
-        this(interceptors, null);
-    }
-
-    /**
      * 执行SQL编译前拦截（响应式）。
      *
      * @param context SQL执行上下文
@@ -121,101 +112,6 @@ public class SqlLifecycleInterceptorChain {
         return executeReactiveInterceptors(reactiveInterceptors,
                 interceptor -> interceptor.afterExecuteReactive(context), "afterExecuteReactive")
                 .then(Mono.fromRunnable(() -> executeSyncAfterExecute(syncInterceptors, context)));
-    }
-
-    /**
-     * 执行SQL编译前拦截（同步，兼容旧API）。
-     *
-     * @param context SQL执行上下文
-     * @return 是否终止后续执行
-     * @deprecated 使用 {@link #beforeCompileReactive(SqlExecutionContext)} 替代
-     */
-    @Deprecated
-    public boolean beforeCompile(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
-            try {
-                interceptor.beforeCompile(context);
-                if (context.isTerminated()) {
-                    log.debug("Interceptor [{}] terminated execution at beforeCompile: status={}, reason={}",
-                            interceptor.getClass().getSimpleName(),
-                            context.getStatus(),
-                            context.getStatusReason());
-                    return true;
-                }
-            } catch (Exception e) {
-                log.error("Interceptor [{}] error at beforeCompile", interceptor.getClass().getSimpleName(), e);
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 执行SQL编译后拦截（同步，兼容旧API）。
-     *
-     * @param context SQL执行上下文
-     * @return 是否终止后续执行
-     * @deprecated 使用 {@link #afterCompileReactive(SqlExecutionContext)} 替代
-     */
-    @Deprecated
-    public boolean afterCompile(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
-            try {
-                interceptor.afterCompile(context);
-                if (context.isTerminated()) {
-                    log.debug("Interceptor [{}] terminated execution at afterCompile: status={}, reason={}",
-                            interceptor.getClass().getSimpleName(),
-                            context.getStatus(),
-                            context.getStatusReason());
-                    return true;
-                }
-            } catch (Exception e) {
-                log.error("Interceptor [{}] error at afterCompile", interceptor.getClass().getSimpleName(), e);
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 执行SQL执行前拦截（同步，兼容旧API）。
-     *
-     * @param context SQL执行上下文
-     * @return 是否终止后续执行
-     * @deprecated 使用 {@link #beforeExecuteReactive(SqlExecutionContext)} 替代
-     */
-    @Deprecated
-    public boolean beforeExecute(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
-            try {
-                interceptor.beforeExecute(context);
-                if (context.isTerminated()) {
-                    log.debug("Interceptor [{}] terminated execution at beforeExecute: status={}, reason={}",
-                            interceptor.getClass().getSimpleName(),
-                            context.getStatus(),
-                            context.getStatusReason());
-                    return true;
-                }
-            } catch (Exception e) {
-                log.error("Interceptor [{}] error at beforeExecute", interceptor.getClass().getSimpleName(), e);
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 执行SQL执行后拦截（同步，兼容旧API）。
-     *
-     * @param context SQL执行上下文
-     * @deprecated 使用 {@link #afterExecuteReactive(SqlExecutionContext)} 替代
-     */
-    @Deprecated
-    public void afterExecute(SqlExecutionContext context) {
-        for (SqlLifecycleInterceptor interceptor : syncInterceptors) {
-            try {
-                interceptor.afterExecute(context);
-            } catch (Exception e) {
-                log.error("Interceptor [{}] error at afterExecute", interceptor.getClass().getSimpleName(), e);
-            }
-        }
     }
 
     /**

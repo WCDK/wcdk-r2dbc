@@ -150,49 +150,44 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         context.setSql(parsedMethod.sql());
         context.setParameters(parsedMethod.parameters());
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return terminatedPublisher(method);
-        }
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return terminatedPublisher(method);
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return terminatedPublisher(method);
-        }
-
-        context.setStartTime(System.nanoTime());
+        Mono<Boolean> lifecycle = chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(chain.afterCompileReactive(context))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context));
 
         if (parsedMethod.isQuery()) {
-            // 查询操作
-            Flux<?> flux = r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
-                    (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
-
-            return flux.doOnComplete(() -> {
-                context.setEndTime(System.nanoTime());
-                chain.afterExecute(context);
-            }).doOnError(e -> {
-                context.setError(e);
-                context.setEndTime(System.nanoTime());
-                chain.afterExecute(context);
-            });
-        } else {
-            // 更新操作
-            return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
-                    .doOnSuccess(r -> {
-                        context.setResult(r);
+            return lifecycle.filter(terminated -> !terminated)
+                    .thenMany(Flux.defer(() -> {
+                        context.setStartTime(System.nanoTime());
+                        return r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
+                                (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()));
+                    }))
+                    .doOnComplete(() -> {
                         context.setEndTime(System.nanoTime());
-                        chain.afterExecute(context);
+                        chain.afterExecuteReactive(context).subscribe();
                     })
                     .doOnError(e -> {
                         context.setError(e);
                         context.setEndTime(System.nanoTime());
-                        chain.afterExecute(context);
+                        chain.afterExecuteReactive(context).subscribe();
                     });
+        } else {
+            return lifecycle.filter(terminated -> !terminated)
+                    .then(Mono.defer(() -> {
+                        context.setStartTime(System.nanoTime());
+                        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                                .doOnSuccess(r -> {
+                                    context.setResult(r);
+                                    context.setEndTime(System.nanoTime());
+                                    chain.afterExecuteReactive(context).subscribe();
+                                })
+                                .doOnError(e -> {
+                                    context.setError(e);
+                                    context.setEndTime(System.nanoTime());
+                                    chain.afterExecuteReactive(context).subscribe();
+                                });
+                    }));
         }
     }
 
@@ -201,72 +196,66 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
         context.setParameters(methodParameters(method, arguments));
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return terminatedPublisher(method);
-        }
+        Mono<Boolean> lifecycle = chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .flatMap(terminated -> {
+                    DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getParameters());
+                    Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getParameters());
+                    sourceParameters.putAll(renderedSql.additionalParameters());
+                    BoundSql boundSql = bindSql(renderedSql.sql(), arguments, sourceParameters);
+                    context.setSql(boundSql.sql());
+                    context.setParameters(boundSql.parameters());
+                    return chain.afterCompileReactive(context);
+                })
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context));
 
-        DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getParameters());
-        Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getParameters());
-        sourceParameters.putAll(renderedSql.additionalParameters());
-        BoundSql boundSql = bindSql(renderedSql.sql(), arguments, sourceParameters);
-        context.setSql(boundSql.sql());
-        context.setParameters(boundSql.parameters());
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return terminatedPublisher(method);
-        }
-
-        // 使用可能被修改的SQL
         BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
 
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return terminatedPublisher(method);
-        }
+        return lifecycle
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    Object result;
+                    try {
+                        result = switch (statement.commandType()) {
+                            case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
+                            case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
+                        };
+                    } catch (Exception e) {
+                        context.setError(e);
+                        context.setEndTime(System.nanoTime());
+                        chain.afterExecuteReactive(context).subscribe();
+                        return Mono.error(e);
+                    }
 
-        context.setStartTime(System.nanoTime());
+                    if (result instanceof Mono<?> mono) {
+                        return mono.doOnSuccess(r -> {
+                            context.setResult(r);
+                            context.setEndTime(System.nanoTime());
+                            chain.afterExecuteReactive(context).subscribe();
+                        }).doOnError(e -> {
+                            context.setError(e);
+                            context.setEndTime(System.nanoTime());
+                            chain.afterExecuteReactive(context).subscribe();
+                        }).then();
+                    } else if (result instanceof Flux<?> flux) {
+                        return flux.doOnComplete(() -> {
+                            context.setEndTime(System.nanoTime());
+                            chain.afterExecuteReactive(context).subscribe();
+                        }).doOnError(e -> {
+                            context.setError(e);
+                            context.setEndTime(System.nanoTime());
+                            chain.afterExecuteReactive(context).subscribe();
+                        }).then();
+                    }
 
-        Object result;
-        try {
-            result = switch (statement.commandType()) {
-                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
-                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
-            };
-        } catch (Exception e) {
-            context.setError(e);
-            context.setEndTime(System.nanoTime());
-            chain.afterExecute(context);
-            throw e;
-        }
-
-        // 包装结果以捕获异步完成
-        if (result instanceof Mono<?> mono) {
-            return mono.doOnSuccess(r -> {
-                context.setResult(r);
-                context.setEndTime(System.nanoTime());
-                chain.afterExecute(context);
-            }).doOnError(e -> {
-                context.setError(e);
-                context.setEndTime(System.nanoTime());
-                chain.afterExecute(context);
-            });
-        } else if (result instanceof Flux<?> flux) {
-            return flux.doOnComplete(() -> {
-                context.setEndTime(System.nanoTime());
-                chain.afterExecute(context);
-            }).doOnError(e -> {
-                context.setError(e);
-                context.setEndTime(System.nanoTime());
-                chain.afterExecute(context);
-            });
-        }
-
-        context.setResult(result);
-        context.setEndTime(System.nanoTime());
-        chain.afterExecute(context);
-        return result;
+                    context.setResult(result);
+                    context.setEndTime(System.nanoTime());
+                    chain.afterExecuteReactive(context).subscribe();
+                    return Mono.empty();
+                }))
+                .thenReturn(finalBoundSql);
     }
 
     private Object executeXmlUpdate(BoundSql boundSql, Method method, Object[] arguments) {
@@ -525,63 +514,56 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("insert"), repositoryInterface, new Object[]{entity});
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return Mono.empty();
-        }
-
-        if (snowflakeIdEnabled) {
-            Object idValue = fieldValue(metadata.idColumn(), entity);
-            if (idValue == null || (idValue instanceof Number number && number.longValue() == 0)) {
-                long snowflakeId = snowflakeIdGenerator.nextId();
-                try {
-                    Field idField = metadata.idColumn().field();
-                    idField.setAccessible(true);
-                    if (idField.getType() == Long.class || idField.getType() == long.class) {
-                        idField.set(entity, snowflakeId);
-                    } else if (idField.getType() == String.class) {
-                        idField.set(entity, String.valueOf(snowflakeId));
+        return chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    if (snowflakeIdEnabled) {
+                        Object idValue = fieldValue(metadata.idColumn(), entity);
+                        if (idValue == null || (idValue instanceof Number number && number.longValue() == 0)) {
+                            long snowflakeId = snowflakeIdGenerator.nextId();
+                            try {
+                                Field idField = metadata.idColumn().field();
+                                idField.setAccessible(true);
+                                if (idField.getType() == Long.class || idField.getType() == long.class) {
+                                    idField.set(entity, snowflakeId);
+                                } else if (idField.getType() == String.class) {
+                                    idField.set(entity, String.valueOf(snowflakeId));
+                                }
+                            } catch (IllegalAccessException e) {
+                                throw new IllegalStateException("无法设置雪花ID到实体字段：" + metadata.idColumn().field().getName(), e);
+                            }
+                        }
                     }
-                } catch (IllegalAccessException e) {
-                    throw new IllegalStateException("无法设置雪花ID到实体字段：" + metadata.idColumn().field().getName(), e);
-                }
-            }
-        }
-        Map<String, Object> parameters = new LinkedHashMap<>();
-        String fields = metadata.columns().stream().map(FieldColumn::name).collect(Collectors.joining(", "));
-        String values = metadata.columns().stream()
-                .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
-                .map(column -> ":" + column.field().getName())
-                .collect(Collectors.joining(", "));
-        String sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
+                    Map<String, Object> parameters = new LinkedHashMap<>();
+                    String fields = metadata.columns().stream().map(FieldColumn::name).collect(Collectors.joining(", "));
+                    String values = metadata.columns().stream()
+                            .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
+                            .map(column -> ":" + column.field().getName())
+                            .collect(Collectors.joining(", "));
+                    String sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
 
-        context.setSql(sql);
-        context.setParameters(parameters);
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return Mono.empty();
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return Mono.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
-                .doOnSuccess(r -> {
-                    context.setResult(entity);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .thenReturn(entity);
+                    context.setSql(sql);
+                    context.setParameters(parameters);
+                    return chain.afterCompileReactive(context);
+                }))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context))
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                            .doOnSuccess(r -> {
+                                context.setResult(entity);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .thenReturn(entity);
+                }));
     }
 
     private Mono<Long> deleteById(Object id) {
@@ -589,54 +571,47 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("deleteById"), repositoryInterface, new Object[]{id});
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return Mono.empty();
-        }
+        return chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    FieldColumn logicDeleteColumn = metadata.logicDeleteColumn();
+                    String sql;
+                    Map<String, Object> parameters;
+                    if (logicDeleteColumn != null) {
+                        sql = "UPDATE " + metadata.tableName()
+                                + " SET " + logicDeleteColumn.name() + " = :logicDeleteValue"
+                                + " WHERE " + metadata.idColumn().name() + " = :id"
+                                + logicNotDeleteSql(" AND ");
+                        parameters = Map.of(
+                                "id", id,
+                                "logicDeleteValue", properties.getLogicDeleteValue(),
+                                "logicNotDeleteValue", properties.getLogicNotDeleteValue());
+                    } else {
+                        sql = "DELETE FROM " + metadata.tableName() + " WHERE " + metadata.idColumn().name() + " = :id";
+                        parameters = Map.of("id", id);
+                    }
 
-        FieldColumn logicDeleteColumn = metadata.logicDeleteColumn();
-        String sql;
-        Map<String, Object> parameters;
-        if (logicDeleteColumn != null) {
-            sql = "UPDATE " + metadata.tableName()
-                    + " SET " + logicDeleteColumn.name() + " = :logicDeleteValue"
-                    + " WHERE " + metadata.idColumn().name() + " = :id"
-                    + logicNotDeleteSql(" AND ");
-            parameters = Map.of(
-                    "id", id,
-                    "logicDeleteValue", properties.getLogicDeleteValue(),
-                    "logicNotDeleteValue", properties.getLogicNotDeleteValue());
-        } else {
-            sql = "DELETE FROM " + metadata.tableName() + " WHERE " + metadata.idColumn().name() + " = :id";
-            parameters = Map.of("id", id);
-        }
-
-        context.setSql(sql);
-        context.setParameters(parameters);
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return Mono.empty();
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return Mono.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
-                .doOnSuccess(r -> {
-                    context.setResult(r);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                });
+                    context.setSql(sql);
+                    context.setParameters(parameters);
+                    return chain.afterCompileReactive(context);
+                }))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context))
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
     }
 
     private Mono<Long> updateById(Object entity) {
@@ -644,57 +619,50 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("updateById"), repositoryInterface, new Object[]{entity});
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return Mono.empty();
-        }
+        return chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    Map<String, Object> parameters = new LinkedHashMap<>();
+                    String setSql = metadata.columns().stream()
+                            .filter(column -> column != metadata.idColumn())
+                            .filter(column -> fieldValue(column, entity) != null)
+                            .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
+                            .map(column -> column.name() + " = :" + column.field().getName())
+                            .collect(Collectors.joining(", "));
+                    if (setSql.isBlank()) {
+                        return Mono.<Boolean>just(false);
+                    }
+                    Object id = fieldValue(metadata.idColumn(), entity);
+                    parameters.put("id", id);
+                    if (metadata.logicDeleteColumn() != null) {
+                        parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
+                    }
+                    String sql = "UPDATE " + metadata.tableName()
+                            + " SET " + setSql
+                            + " WHERE " + metadata.idColumn().name() + " = :id"
+                            + logicNotDeleteSql(" AND ");
 
-        Map<String, Object> parameters = new LinkedHashMap<>();
-        String setSql = metadata.columns().stream()
-                .filter(column -> column != metadata.idColumn())
-                .filter(column -> fieldValue(column, entity) != null)
-                .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
-                .map(column -> column.name() + " = :" + column.field().getName())
-                .collect(Collectors.joining(", "));
-        if (setSql.isBlank()) {
-            return Mono.just(0L);
-        }
-        Object id = fieldValue(metadata.idColumn(), entity);
-        parameters.put("id", id);
-        if (metadata.logicDeleteColumn() != null) {
-            parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
-        }
-        String sql = "UPDATE " + metadata.tableName()
-                + " SET " + setSql
-                + " WHERE " + metadata.idColumn().name() + " = :id"
-                + logicNotDeleteSql(" AND ");
-
-        context.setSql(sql);
-        context.setParameters(parameters);
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return Mono.empty();
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return Mono.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
-                .doOnSuccess(r -> {
-                    context.setResult(r);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                });
+                    context.setSql(sql);
+                    context.setParameters(parameters);
+                    return chain.afterCompileReactive(context);
+                }))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context))
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
     }
 
     private Mono<?> selectById(Object id) {
@@ -702,47 +670,40 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("selectById"), repositoryInterface, new Object[]{id});
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return Mono.empty();
-        }
+        return chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
+                            + " WHERE " + metadata.idColumn().name() + " = :id"
+                            + logicNotDeleteSql(" AND ");
+                    Map<String, Object> parameters = new LinkedHashMap<>();
+                    parameters.put("id", id);
+                    if (metadata.logicDeleteColumn() != null) {
+                        parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
+                    }
 
-        String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
-                + " WHERE " + metadata.idColumn().name() + " = :id"
-                + logicNotDeleteSql(" AND ");
-        Map<String, Object> parameters = new LinkedHashMap<>();
-        parameters.put("id", id);
-        if (metadata.logicDeleteColumn() != null) {
-            parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
-        }
-
-        context.setSql(sql);
-        context.setParameters(parameters);
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return Mono.empty();
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return Mono.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
-                .doOnSuccess(r -> {
-                    context.setResult(r);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                });
+                    context.setSql(sql);
+                    context.setParameters(parameters);
+                    return chain.afterCompileReactive(context);
+                }))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context))
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                                    (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
     }
 
     private Flux<?> selectList(QueryWrapper<?> queryWrapper) {
@@ -750,42 +711,35 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("selectList"), repositoryInterface, new Object[]{queryWrapper});
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return Flux.empty();
-        }
+        return chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    SqlWhere where = buildWhere(queryWrapper);
+                    String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName() + where.sql()
+                            + orderBySql(queryWrapper)
+                            + limitSql(queryWrapper);
 
-        SqlWhere where = buildWhere(queryWrapper);
-        String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName() + where.sql()
-                + orderBySql(queryWrapper)
-                + limitSql(queryWrapper);
-
-        context.setSql(sql);
-        context.setParameters(where.parameters());
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return Flux.empty();
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return Flux.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
-                .doOnComplete(() -> {
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                });
+                    context.setSql(sql);
+                    context.setParameters(where.parameters());
+                    return chain.afterCompileReactive(context);
+                }))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context))
+                .filter(terminated -> !terminated)
+                .thenMany(Flux.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
+                                    (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
+                            .doOnComplete(() -> {
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
     }
 
     private Mono<?> selectOne(QueryWrapper<?> queryWrapper) {
@@ -816,42 +770,35 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("selectCount"), repositoryInterface, new Object[]{queryWrapper});
 
-        // beforeCompile
-        if (chain.beforeCompile(context)) {
-            return Mono.empty();
-        }
+        return chain.beforeCompileReactive(context)
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    SqlWhere where = buildWhere(queryWrapper);
+                    String sql = "SELECT COUNT(1) AS total FROM " + metadata.tableName() + where.sql();
 
-        SqlWhere where = buildWhere(queryWrapper);
-        String sql = "SELECT COUNT(1) AS total FROM " + metadata.tableName() + where.sql();
-
-        context.setSql(sql);
-        context.setParameters(where.parameters());
-
-        // afterCompile
-        if (chain.afterCompile(context)) {
-            return Mono.empty();
-        }
-
-        // beforeExecute
-        if (chain.beforeExecute(context)) {
-            return Mono.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> numberValue(row).longValue())
-                .defaultIfEmpty(0L)
-                .doOnSuccess(r -> {
-                    context.setResult(r);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    chain.afterExecute(context);
-                });
+                    context.setSql(sql);
+                    context.setParameters(where.parameters());
+                    return chain.afterCompileReactive(context);
+                }))
+                .filter(terminated -> !terminated)
+                .then(chain.beforeExecuteReactive(context))
+                .filter(terminated -> !terminated)
+                .then(Mono.defer(() -> {
+                    context.setStartTime(System.nanoTime());
+                    return r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                                    (row, rowMetadata) -> numberValue(row).longValue())
+                            .defaultIfEmpty(0L)
+                            .doOnSuccess(r -> {
+                                context.setResult(r);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            })
+                            .doOnError(e -> {
+                                context.setError(e);
+                                context.setEndTime(System.nanoTime());
+                                chain.afterExecuteReactive(context).subscribe();
+                            });
+                }));
     }
 
     private Mono<Boolean> exists(QueryWrapper<?> queryWrapper) {

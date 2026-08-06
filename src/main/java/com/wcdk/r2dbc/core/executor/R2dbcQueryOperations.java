@@ -62,31 +62,26 @@ public class R2dbcQueryOperations {
         SqlExecutionContext context = lifecycleExecutor.createContext("query", (Map<String, Object>) parameters);
         context.setSql(sql);
 
-        if (lifecycleExecutor.beforeCompile(chain, context)) {
-            return Flux.empty();
-        }
-
-        if (lifecycleExecutor.afterCompile(chain, context)) {
-            return Flux.empty();
-        }
-
-        if (lifecycleExecutor.beforeExecute(chain, context)) {
-            return Flux.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return Flux.deferContextual(contextView -> {
-            sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-            return execute(context.getSql(), context.getParameters()).fetch().all();
-        }).doOnComplete(() -> {
-            context.setEndTime(System.nanoTime());
-            lifecycleExecutor.afterExecute(chain, context);
-        }).doOnError(e -> {
-            context.setError(e);
-            context.setEndTime(System.nanoTime());
-            lifecycleExecutor.afterExecute(chain, context);
-        });
+        return lifecycleExecutor.beforeCompileReactive(chain, context)
+                .filter(terminated -> !terminated)
+                .then(lifecycleExecutor.afterCompileReactive(chain, context))
+                .filter(terminated -> !terminated)
+                .then(lifecycleExecutor.beforeExecuteReactive(chain, context))
+                .filter(terminated -> !terminated)
+                .thenMany(Flux.deferContextual(contextView -> {
+                    context.setStartTime(System.nanoTime());
+                    sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
+                    return execute(context.getSql(), context.getParameters()).fetch().all();
+                }))
+                .doOnComplete(() -> {
+                    context.setEndTime(System.nanoTime());
+                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
+                });
     }
 
     /**
@@ -115,31 +110,26 @@ public class R2dbcQueryOperations {
         SqlExecutionContext context = lifecycleExecutor.createContext("query", (Map<String, Object>) parameters);
         context.setSql(sql);
 
-        if (lifecycleExecutor.beforeCompile(chain, context)) {
-            return Flux.empty();
-        }
-
-        if (lifecycleExecutor.afterCompile(chain, context)) {
-            return Flux.empty();
-        }
-
-        if (lifecycleExecutor.beforeExecute(chain, context)) {
-            return Flux.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return Flux.deferContextual(contextView -> {
-            sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-            return execute(context.getSql(), context.getParameters()).map(mapper).all();
-        }).doOnComplete(() -> {
-            context.setEndTime(System.nanoTime());
-            lifecycleExecutor.afterExecute(chain, context);
-        }).doOnError(e -> {
-            context.setError(e);
-            context.setEndTime(System.nanoTime());
-            lifecycleExecutor.afterExecute(chain, context);
-        });
+        return lifecycleExecutor.beforeCompileReactive(chain, context)
+                .filter(terminated -> !terminated)
+                .then(lifecycleExecutor.afterCompileReactive(chain, context))
+                .filter(terminated -> !terminated)
+                .then(lifecycleExecutor.beforeExecuteReactive(chain, context))
+                .filter(terminated -> !terminated)
+                .thenMany(Flux.deferContextual(contextView -> {
+                    context.setStartTime(System.nanoTime());
+                    sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
+                    return execute(context.getSql(), context.getParameters()).map(mapper).all();
+                }))
+                .doOnComplete(() -> {
+                    context.setEndTime(System.nanoTime());
+                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
+                });
     }
 
     /**

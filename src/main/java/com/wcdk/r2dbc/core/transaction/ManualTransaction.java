@@ -1,5 +1,6 @@
 package com.wcdk.r2dbc.core.transaction;
 
+import io.r2dbc.spi.Connection;
 import reactor.core.publisher.Mono;
 
 /**
@@ -120,4 +121,11 @@ public interface ManualTransaction {
      * @param name 事务名称
      */
     void setName(String name);
+
+    /**
+     * 获取数据库连接。
+     *
+     * @return 数据库连接
+     */
+    Connection getConnection();
 }

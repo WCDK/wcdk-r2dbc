@@ -60,32 +60,27 @@ public class R2dbcUpdateOperations {
         SqlExecutionContext context = lifecycleExecutor.createContext("update", (Map<String, Object>) parameters);
         context.setSql(sql);
 
-        if (lifecycleExecutor.beforeCompile(chain, context)) {
-            return Mono.empty();
-        }
-
-        if (lifecycleExecutor.afterCompile(chain, context)) {
-            return Mono.empty();
-        }
-
-        if (lifecycleExecutor.beforeExecute(chain, context)) {
-            return Mono.empty();
-        }
-
-        context.setStartTime(System.nanoTime());
-
-        return Mono.deferContextual(contextView -> {
-            sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-            return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated();
-        }).doOnSuccess(r -> {
-            context.setResult(r);
-            context.setEndTime(System.nanoTime());
-            lifecycleExecutor.afterExecute(chain, context);
-        }).doOnError(e -> {
-            context.setError(e);
-            context.setEndTime(System.nanoTime());
-            lifecycleExecutor.afterExecute(chain, context);
-        });
+        return lifecycleExecutor.beforeCompileReactive(chain, context)
+                .filter(terminated -> !terminated)
+                .then(lifecycleExecutor.afterCompileReactive(chain, context))
+                .filter(terminated -> !terminated)
+                .then(lifecycleExecutor.beforeExecuteReactive(chain, context))
+                .filter(terminated -> !terminated)
+                .then(Mono.deferContextual(contextView -> {
+                    context.setStartTime(System.nanoTime());
+                    sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
+                    return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated();
+                }))
+                .doOnSuccess(r -> {
+                    context.setResult(r);
+                    context.setEndTime(System.nanoTime());
+                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
+                })
+                .doOnError(e -> {
+                    context.setError(e);
+                    context.setEndTime(System.nanoTime());
+                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
+                });
     }
 
     /** Executes an already intercepted repository update without invoking the lifecycle chain again. */

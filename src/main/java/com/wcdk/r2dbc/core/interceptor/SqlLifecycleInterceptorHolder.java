@@ -20,17 +20,6 @@ public final class SqlLifecycleInterceptorHolder {
     }
 
     /**
-     * 初始化拦截器链（仅同步拦截器）。
-     *
-     * @param interceptors 同步拦截器列表
-     * @deprecated 使用 {@link #init(List, List)} 替代
-     */
-    @Deprecated
-    public static void init(List<SqlLifecycleInterceptor> interceptors) {
-        init(interceptors, null);
-    }
-
-    /**
      * 初始化拦截器链（支持同步和异步拦截器）。
      *
      * @param syncInterceptors    同步拦截器列表

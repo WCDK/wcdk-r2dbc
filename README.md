@@ -70,7 +70,7 @@
 <dependency>
     <groupId>com.wcdk</groupId>
     <artifactId>wcdk-r2dbc</artifactId>
-    <version>1.0.0</version>
+    <version>3.5.16</version>
 </dependency>
 
 <!-- 数据库驱动 (按需选择) -->
@@ -687,6 +687,9 @@ context.isTerminated();        // 判断是否已终止
 | 适用场景 | 简单逻辑（日志、计时） | 需要异步操作（远程调用、数据库查询等） |
 | 阻塞风险 | 可能阻塞响应式流 | 不阻塞 |
 | 执行顺序 | 在异步拦截器之后执行 | 在同步拦截器之前执行 |
+| 推荐程度 | 支持但推荐使用异步版本 | **推荐使用** |
+
+> **推荐**：优先使用 `ReactiveSqlLifecycleInterceptor`，框架内部已统一使用响应式调用链。
 
 ### 响应式拦截器示例
 

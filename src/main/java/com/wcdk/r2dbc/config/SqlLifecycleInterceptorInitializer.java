@@ -29,7 +29,7 @@ public class SqlLifecycleInterceptorInitializer {
 
     @PostConstruct
     public void init() {
-        SqlLifecycleInterceptorHolder.init(interceptors);
+        SqlLifecycleInterceptorHolder.init(interceptors, null);
         if (interceptors != null && !interceptors.isEmpty()) {
             log.info("Initialized {} SQL lifecycle interceptors: {}",
                     interceptors.size(),

@@ -148,30 +148,6 @@ public class SqlExecutionContext {
     }
 
     /**
-     * 设置跳过状态（兼容旧API）。
-     *
-     * @param skipped 是否跳过
-     * @deprecated 使用 {@link #setStatus(SqlExecutionStatus)} 替代
-     */
-    @Deprecated
-    public void setSkipped(boolean skipped) {
-        if (skipped && this.status == SqlExecutionStatus.CONTINUE) {
-            this.status = SqlExecutionStatus.TERMINATED_AT_COMPILE;
-        }
-    }
-
-    /**
-     * 获取是否跳过（兼容旧API）。
-     *
-     * @return 是否跳过
-     * @deprecated 使用 {@link #getStatus()} 替代
-     */
-    @Deprecated
-    public boolean isSkipped() {
-        return status != null && status.isSkipped();
-    }
-
-    /**
      * 判断是否应该继续执行SQL。
      *
      * @return 是否继续执行
