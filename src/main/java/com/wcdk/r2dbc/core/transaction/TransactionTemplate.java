@@ -10,7 +10,7 @@ import java.util.Objects;
 import java.util.function.Function;
 
 /**
- * Executes reactive work with deterministic commit, rollback and connection cleanup.
+ * 执行响应式事务操作，并确保提交、回滚和连接清理具有确定性。
  */
 public class TransactionTemplate {
 

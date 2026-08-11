@@ -20,7 +20,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Compiles and renders the supported dynamic XML SQL nodes. */
+/**
+ * 编译并渲染支持的动态 XML SQL 节点。
+ *
+ * @author WCDK
+ **/
 public final class DynamicSqlSource {
 
     private static final Pattern PARAMETER_PATTERN = Pattern.compile("#\\{\\s*([a-zA-Z0-9_.$]+)\\s*}");

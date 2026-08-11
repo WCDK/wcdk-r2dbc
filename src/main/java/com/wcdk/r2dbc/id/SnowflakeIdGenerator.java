@@ -5,6 +5,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
+/**
+ * 雪花算法 ID 生成器。
+ *
+ * @author WCDK
+ **/
 public class SnowflakeIdGenerator {
 
     private static final long EPOCH = 1577808000000L;

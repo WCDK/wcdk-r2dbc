@@ -9,6 +9,7 @@ import java.util.Optional;
 
 /**
  * PostgreSQL R2DBC 方言提供者。
+ * @author wcdk
  */
 public class PostgresR2dbcDialectProvider implements DialectResolver.R2dbcDialectProvider {
 

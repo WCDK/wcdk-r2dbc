@@ -4,6 +4,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.context.ContextView;
 
+/**
+ * R2DBC 数据源上下文工具。
+ *
+ * @author WCDK
+ **/
 public final class R2dbcDataSourceContext {
 
     static final Class<R2dbcDataSourceContext> CONTEXT_KEY = R2dbcDataSourceContext.class;

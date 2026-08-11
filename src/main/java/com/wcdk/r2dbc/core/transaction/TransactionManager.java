@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
 import java.util.function.Consumer;
 
 /**
- * Creates active manual transactions. The caller owns the returned transaction and must close it.
+ * 创建活动的手动事务。调用方负责管理并关闭返回的事务。
  */
 public class TransactionManager {
 

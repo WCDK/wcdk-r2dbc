@@ -7,6 +7,7 @@ import org.springframework.r2dbc.core.binding.BindMarkersFactoryResolver;
 
 /**
  * PostgreSQL R2DBC 绑定标记提供者。
+ * @author wcdk
  */
 public class PostgresBindMarkersFactoryProvider implements BindMarkersFactoryResolver.BindMarkerFactoryProvider {
 

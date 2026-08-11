@@ -2,6 +2,11 @@ package com.wcdk.r2dbc.core;
 
 import org.springframework.data.r2dbc.dialect.R2dbcDialect;
 
+/**
+ * R2DBC 方言分页 SQL 工具。
+ *
+ * @author WCDK
+ **/
 final class DialectPagination {
 
     private DialectPagination() {

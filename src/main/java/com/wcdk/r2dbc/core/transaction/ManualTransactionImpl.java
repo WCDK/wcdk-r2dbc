@@ -13,6 +13,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * 手动事务实现。
+ *
+ * @author WCDK
+ **/
 class ManualTransactionImpl implements ManualTransaction {
 
     private final Connection connection;

@@ -4,6 +4,7 @@ import io.r2dbc.spi.ConnectionFactory;
 
 /**
  * MySQL R2DBC 识别工具。
+ * @author wcdk
  */
 final class MysqlR2dbcSupport {
 
