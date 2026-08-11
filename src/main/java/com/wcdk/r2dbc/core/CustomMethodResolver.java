@@ -2,6 +2,7 @@ package com.wcdk.r2dbc.core;
 
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata.FieldColumn;
+import com.wcdk.r2dbc.core.executor.SqlParameter;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -84,6 +85,11 @@ public class CustomMethodResolver {
         };
     }
 
+    public static boolean supports(Method method) {
+        Matcher matcher = METHOD_PATTERN.matcher(method.getName());
+        return matcher.matches() && matcher.group(2) == null;
+    }
+
     // ==================== find ====================
 
     private ParsedMethod resolveFind(Method method, String fieldPart, Object[] arguments) {
@@ -160,7 +166,7 @@ public class CustomMethodResolver {
                 + whereSql;
 
         Map<String, Object> parameters = buildParameters(conditions);
-        parameters.put("logicDeleteValue", logicDeleteValue);
+        parameters.put("logicDeleteValue", typed(logicDeleteColumn, logicDeleteValue));
         return new ParsedMethod(sql, parameters, SqlCommandType.UPDATE);
     }
 
@@ -203,11 +209,11 @@ public class CustomMethodResolver {
                 + " WHERE " + idColumn.name() + " = :id";
 
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("newValue", arguments[0]);
-        params.put("id", arguments[1]);
+        params.put("newValue", typed(fieldColumn, arguments[0]));
+        params.put("id", typed(idColumn, arguments[1]));
 
         if (metadata.logicDeleteColumn() != null) {
-            params.put("logicNotDeleteValue", logicNotDeleteValue);
+            params.put("logicNotDeleteValue", typed(metadata.logicDeleteColumn(), logicNotDeleteValue));
             sql += " AND " + metadata.logicDeleteColumn().name() + " = :logicNotDeleteValue";
         }
 
@@ -234,7 +240,7 @@ public class CustomMethodResolver {
             }
             String paramName = "set" + i;
             setClauses.add(fieldColumn.name() + " = :" + paramName);
-            parameters.put(paramName, arguments[i]);
+            parameters.put(paramName, typed(fieldColumn, arguments[i]));
         }
 
         sql.append(String.join(", ", setClauses));
@@ -456,17 +462,17 @@ public class CustomMethodResolver {
             if ("IN".equals(condition.operator()) || "NOT IN".equals(condition.operator())) {
                 putInParameters(parameters, condition, parameterName);
             } else if ("BETWEEN".equals(condition.operator())) {
-                parameters.put(parameterName + "Start", condition.value());
-                parameters.put(parameterName + "End", condition.secondValue());
+                parameters.put(parameterName + "Start", typed(condition.column(), condition.value()));
+                parameters.put(parameterName + "End", typed(condition.column(), condition.secondValue()));
             } else {
-                parameters.put(parameterName, condition.value());
+                parameters.put(parameterName, typed(condition.column(), condition.value()));
             }
         }
 
         if (metadata.logicDeleteColumn() != null
                 && conditions.stream().noneMatch(condition ->
                 condition.column().equals(metadata.logicDeleteColumn().name()))) {
-            parameters.put("logicNotDeleteValue", logicNotDeleteValue);
+            parameters.put("logicNotDeleteValue", typed(metadata.logicDeleteColumn(), logicNotDeleteValue));
         }
 
         return parameters;
@@ -477,16 +483,25 @@ public class CustomMethodResolver {
         if (value instanceof Collection<?> collection) {
             int idx = 0;
             for (Object item : collection) {
-                parameters.put(parameterName + "_in_" + idx++, item);
+                parameters.put(parameterName + "_in_" + idx++, typed(condition.column(), item));
             }
         } else if (value != null && value.getClass().isArray()) {
             int length = java.lang.reflect.Array.getLength(value);
             for (int i = 0; i < length; i++) {
-                parameters.put(parameterName + "_in_" + i, java.lang.reflect.Array.get(value, i));
+                parameters.put(parameterName + "_in_" + i,
+                        typed(condition.column(), java.lang.reflect.Array.get(value, i)));
             }
         } else {
-            parameters.put(parameterName, value);
+            parameters.put(parameterName, typed(condition.column(), value));
         }
+    }
+
+    private Object typed(String column, Object value) {
+        return typed(metadata.columnByName(column), value);
+    }
+
+    private Object typed(FieldColumn column, Object value) {
+        return value == null ? SqlParameter.nullOf(column.field().getType()) : value;
     }
 
     // ==================== OrderBy ====================

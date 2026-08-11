@@ -116,6 +116,33 @@ public class R2dbcUtil {
         this.transactionOperations = new R2dbcTransactionOperations(databaseClient, transactionalOperator, transactionManager);
     }
 
+    public R2dbcUtil(DatabaseClient databaseClient,
+                     R2dbcEntityTemplate entityTemplate,
+                     TransactionalOperator transactionalOperator,
+                     WcdkR2dbcProperties properties,
+                     WcdkSpringR2dbcProperties springR2dbcProperties,
+                     TransactionManager transactionManager,
+                     ParameterBinder parameterBinder,
+                     SqlLifecycleExecutor lifecycleExecutor,
+                     R2dbcRowMapper rowMapper,
+                     R2dbcSqlLogger sqlLogger,
+                     R2dbcDataSourceRouter dataSourceRouter) {
+        this.databaseClient = java.util.Objects.requireNonNull(databaseClient, "databaseClient");
+        this.entityTemplate = entityTemplate;
+        this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
+        this.springR2dbcProperties = springR2dbcProperties == null
+                ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
+        this.parameterBinder = java.util.Objects.requireNonNull(parameterBinder, "parameterBinder");
+        this.lifecycleExecutor = java.util.Objects.requireNonNull(lifecycleExecutor, "lifecycleExecutor");
+        this.rowMapper = java.util.Objects.requireNonNull(rowMapper, "rowMapper");
+        this.sqlLogger = java.util.Objects.requireNonNull(sqlLogger, "sqlLogger");
+        this.dataSourceRouter = java.util.Objects.requireNonNull(dataSourceRouter, "dataSourceRouter");
+        this.queryOperations = new R2dbcQueryOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.transactionOperations = new R2dbcTransactionOperations(
+                databaseClient, transactionalOperator, transactionManager);
+    }
+
     // ==================== 委托方法：查询执行 ====================
 
     public DatabaseClient databaseClient() {

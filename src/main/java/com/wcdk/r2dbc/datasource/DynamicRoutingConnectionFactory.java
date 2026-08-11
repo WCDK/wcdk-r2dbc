@@ -10,7 +10,10 @@ import reactor.util.context.ContextView;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @auther WCDK
@@ -22,6 +25,8 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
     private final String primary;
 
     private final Map<String, ConnectionFactory> connectionFactories;
+
+    private final AtomicBoolean disposed = new AtomicBoolean();
 
     public DynamicRoutingConnectionFactory(String primary, Map<String, ConnectionFactory> connectionFactories) {
         if (connectionFactories == null || connectionFactories.isEmpty()) {
@@ -57,19 +62,34 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
 
     @Override
     public void dispose() {
-        connectionFactories.values().forEach(connectionFactory -> {
-            if (connectionFactory instanceof Disposable disposable) {
-                disposable.dispose();
+        if (!disposed.compareAndSet(false, true)) {
+            return;
+        }
+        RuntimeException failure = null;
+        Set<ConnectionFactory> unique = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (ConnectionFactory connectionFactory : connectionFactories.values()) {
+            if (!unique.add(connectionFactory)) {
+                continue;
             }
-        });
+            if (connectionFactory instanceof Disposable disposable) {
+                try {
+                    disposable.dispose();
+                } catch (RuntimeException error) {
+                    if (failure == null) {
+                        failure = new IllegalStateException("Failed to dispose one or more R2DBC data sources");
+                    }
+                    failure.addSuppressed(error);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     @Override
     public boolean isDisposed() {
-        return connectionFactories.values().stream()
-                .filter(Disposable.class::isInstance)
-                .map(Disposable.class::cast)
-                .allMatch(Disposable::isDisposed);
+        return disposed.get();
     }
 
     private ConnectionFactory determineConnectionFactory(ContextView contextView) {
@@ -77,7 +97,8 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
         String key = dataSource == null || dataSource.isBlank() ? primary : dataSource;
         ConnectionFactory connectionFactory = connectionFactories.get(key);
         if (connectionFactory == null) {
-            throw new IllegalArgumentException("R2DBC data source does not exist: " + key);
+            throw new IllegalArgumentException("R2DBC data source does not exist: " + key
+                    + "; available keys: " + connectionFactories.keySet());
         }
         return connectionFactory;
     }

@@ -37,9 +37,17 @@ public class TransactionTemplate {
         Objects.requireNonNull(action, "action");
         Mono<T> execution = Mono.usingWhen(
                 resource,
-                transaction -> Mono.defer(() -> Mono.from(action.apply(transaction.getConnection())))
-                        .flatMap(value -> transaction.commit().thenReturn(value))
-                        .switchIfEmpty(Mono.defer(() -> transaction.commit().then(Mono.empty()))),
+                transaction -> Mono.defer(() -> Flux.from(action.apply(transaction.getConnection()))
+                                .take(2)
+                                .collectList())
+                        .flatMap(values -> {
+                            if (values.size() > 1) {
+                                return Mono.error(new IllegalStateException(
+                                        "Mono transaction action emitted more than one item; use executeInTransaction"));
+                            }
+                            return transaction.commit().then(Mono.just(values));
+                        })
+                        .flatMap(values -> values.isEmpty() ? Mono.empty() : Mono.just(values.getFirst())),
                 ManualTransaction::close,
                 this::rollbackAndClose,
                 ManualTransaction::close);
@@ -58,8 +66,11 @@ public class TransactionTemplate {
                         Objects.requireNonNull(action, "action");
                         result = result.concatWith(Flux.defer(() -> Flux.from(action.apply(connection))));
                     }
-                    return result.collectList()
-                            .flatMapMany(values -> transaction.commit().thenMany(Flux.fromIterable(values)));
+                    /*
+                     * Stream results with bounded memory. Completion is delayed until commit succeeds;
+                     * values may be observed before commit, matching standard reactive transaction semantics.
+                     */
+                    return result.concatWith(transaction.commit().thenMany(Flux.empty()));
                 },
                 ManualTransaction::close,
                 this::rollbackAndClose,

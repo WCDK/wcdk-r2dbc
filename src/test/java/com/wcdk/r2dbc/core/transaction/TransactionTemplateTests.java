@@ -9,6 +9,7 @@ import io.r2dbc.spi.ValidationDepth;
 import io.r2dbc.spi.TransactionDefinition;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -20,6 +21,33 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class TransactionTemplateTests {
+
+    @Test
+    void rejectsMultipleItemsFromMonoTransactionApi() {
+        Fixture fixture = fixture();
+
+        StepVerifier.create(fixture.template.execute(connection -> Flux.just("one", "two")))
+                .expectErrorMessage("Mono transaction action emitted more than one item; use executeInTransaction")
+                .verify();
+
+        verify(fixture.connection, never()).commitTransaction();
+        verify(fixture.connection).rollbackTransaction();
+        verify(fixture.connection).close();
+    }
+
+    @Test
+    void fluxTransactionStreamsLargeResultsWithoutCollectingThem() {
+        Fixture fixture = fixture();
+
+        StepVerifier.create(fixture.template.executeInTransaction(
+                        connection -> Flux.range(0, 100_000)))
+                .expectNextCount(100_000)
+                .verifyComplete();
+
+        verify(fixture.connection).commitTransaction();
+        verify(fixture.connection, never()).rollbackTransaction();
+        verify(fixture.connection).close();
+    }
 
     @Test
     void commitsSuccessfulWorkThenClosesConnection() {

@@ -59,16 +59,15 @@ public class R2dbcQueryOperations {
      * @return 查询结果
      */
     public Flux<Map<String, Object>> query(String sql, Map<?, ?> parameters) {
-        SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
-        SqlExecutionContext context = lifecycleExecutor.createContext("query", (Map<String, Object>) parameters);
-        context.setSql(sql);
-
-        Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
-        return lifecycleExecutor.executeFlux(chain, context, preparation,
-                () -> Flux.deferContextual(contextView -> {
-                    return withExecutionLog(execute(context.getSql(), context.getParameters()).fetch().all(),
-                            context.getSql(), context.getParameters());
-                }));
+        return Flux.deferContextual(ignored -> {
+            SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
+            SqlExecutionContext context = lifecycleExecutor.createContext("query", copyParameters(parameters));
+            context.setSql(sql);
+            Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
+            return lifecycleExecutor.executeFlux(chain, context, preparation,
+                    () -> withExecutionLog(execute(context.getSql(), context.getParameters()).fetch().all(),
+                            context.getSql(), context.getParameters()));
+        });
     }
 
     /**
@@ -93,16 +92,15 @@ public class R2dbcQueryOperations {
      * @return 查询结果
      */
     public <T> Flux<T> query(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) {
-        SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
-        SqlExecutionContext context = lifecycleExecutor.createContext("query", (Map<String, Object>) parameters);
-        context.setSql(sql);
-
-        Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
-        return lifecycleExecutor.executeFlux(chain, context, preparation,
-                () -> Flux.deferContextual(contextView -> {
-                    return withExecutionLog(execute(context.getSql(), context.getParameters()).map(mapper).all(),
-                            context.getSql(), context.getParameters());
-                }));
+        return Flux.deferContextual(ignored -> {
+            SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
+            SqlExecutionContext context = lifecycleExecutor.createContext("query", copyParameters(parameters));
+            context.setSql(sql);
+            Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
+            return lifecycleExecutor.executeFlux(chain, context, preparation,
+                    () -> withExecutionLog(execute(context.getSql(), context.getParameters()).map(mapper).all(),
+                            context.getSql(), context.getParameters()));
+        });
     }
 
     /**
@@ -174,5 +172,13 @@ public class R2dbcQueryOperations {
 
     private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters) {
         return parameterBinder.bind(databaseClient, sql, parameters);
+    }
+
+    private Map<String, Object> copyParameters(Map<?, ?> parameters) {
+        Map<String, Object> copy = new java.util.LinkedHashMap<>();
+        if (parameters != null) {
+            parameters.forEach((key, value) -> copy.put(String.valueOf(key), value));
+        }
+        return copy;
     }
 }

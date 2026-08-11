@@ -3,6 +3,7 @@ package com.wcdk.r2dbc.core.executor;
 import com.wcdk.r2dbc.core.interceptor.ReactiveSqlLifecycleInterceptor;
 import com.wcdk.r2dbc.core.interceptor.SqlExecutionContext;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
+import com.wcdk.r2dbc.core.xml.SqlCommandType;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -202,6 +203,7 @@ class SqlLifecycleExecutorTests {
     void recordsAffectedRowsForDataModificationMono() {
         SqlExecutionContext context = context();
         context.setSql("UPDATE users SET enabled = true");
+        context.setCommandType(SqlCommandType.UPDATE);
         SqlLifecycleInterceptorChain chain = chain(new ReactiveSqlLifecycleInterceptor() {
         });
 
@@ -212,6 +214,8 @@ class SqlLifecycleExecutorTests {
                 .verifyComplete();
 
         assertEquals(3, context.getResultCount());
+        assertEquals(3, context.getAffectedRowCount());
+        assertEquals(0, context.getReturnedRowCount());
     }
 
     @Test

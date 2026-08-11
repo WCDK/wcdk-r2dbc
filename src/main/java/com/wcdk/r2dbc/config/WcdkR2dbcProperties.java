@@ -18,6 +18,9 @@ public class WcdkR2dbcProperties {
 
     private boolean sqlLogEnabled = true;
 
+    /** Enables optional Micrometer observations when an ObservationRegistry bean is available. */
+    private boolean observabilityEnabled;
+
     private boolean snowflakeId;
 
     private boolean quoteIdentifier = true;

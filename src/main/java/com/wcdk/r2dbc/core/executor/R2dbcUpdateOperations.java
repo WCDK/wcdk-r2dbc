@@ -55,19 +55,22 @@ public class R2dbcUpdateOperations {
      * @return 影响行数
      */
     public Mono<Long> update(String sql, Map<?, ?> parameters) {
-        SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
-        SqlExecutionContext context = lifecycleExecutor.createContext("update", (Map<String, Object>) parameters);
-        context.setSql(sql);
-
-        Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
-        return lifecycleExecutor.executeMono(chain, context, preparation,
-                () -> Mono.deferContextual(contextView -> {
-                    return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated()
+        return Mono.deferContextual(ignored -> {
+            SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
+            Map<String, Object> parameterCopy = new java.util.LinkedHashMap<>();
+            if (parameters != null) {
+                parameters.forEach((key, value) -> parameterCopy.put(String.valueOf(key), value));
+            }
+            SqlExecutionContext context = lifecycleExecutor.createContext("update", parameterCopy);
+            context.setSql(sql);
+            Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
+            return lifecycleExecutor.executeMono(chain, context, preparation,
+                    () -> execute(context.getSql(), context.getParameters()).fetch().rowsUpdated()
                             .doOnSuccess(count -> sqlLogger.logExecution(context.getSql(), context.getParameters(),
                                     count == null ? 0 : count))
                             .doOnError(error -> sqlLogger.logExecution(
-                                    context.getSql(), context.getParameters(), "ERROR"));
-                }));
+                                    context.getSql(), context.getParameters(), error)));
+        });
     }
 
     /** Executes an already intercepted repository update without invoking the lifecycle chain again. */
@@ -75,7 +78,7 @@ public class R2dbcUpdateOperations {
         return Mono.deferContextual(contextView -> {
             return execute(sql, parameters).fetch().rowsUpdated()
                     .doOnSuccess(count -> sqlLogger.logExecution(sql, parameters, count == null ? 0 : count))
-                    .doOnError(error -> sqlLogger.logExecution(sql, parameters, "ERROR"));
+            .doOnError(error -> sqlLogger.logExecution(sql, parameters, error));
         });
     }
 

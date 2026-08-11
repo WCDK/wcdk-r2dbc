@@ -7,7 +7,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.util.context.ContextView;
 
+import java.lang.reflect.Array;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * R2DBC SQL日志记录器。
@@ -19,6 +23,10 @@ import java.util.Map;
 public class R2dbcSqlLogger {
 
     private static final Logger log = LoggerFactory.getLogger(R2dbcSqlLogger.class);
+    private static final Pattern SENSITIVE_KEY = Pattern.compile(
+            "(?i).*(password|passwd|pwd|token|secret|credential|certificate|cert|idcard|identity).*");
+    private static final int MAX_VALUE_LENGTH = 256;
+    private static final int MAX_COLLECTION_ITEMS = 20;
 
     private final WcdkR2dbcProperties properties;
 
@@ -51,7 +59,7 @@ public class R2dbcSqlLogger {
         log.info("=================R2DBC==========START==========");
         log.info("数据源：{}", dataSource);
         log.info("执行SQL：{}", normalizeSql(sql));
-        log.info("参数：{}", parameters);
+        log.info("参数：{}", sanitizeParameters(parameters));
     }
 
     /**
@@ -77,11 +85,71 @@ public class R2dbcSqlLogger {
             return;
         }
         log.info("=========r2dbc==start==========\n" +
+                        "executionId：{}\n" +
                         "excuteSQl：{}\n" +
                         "excuteParam：{}\n" +
                         "result：{}\n" +
                         "=========r2dbc==end==========",
-                normalizeSql(sql), parameters == null ? Map.of() : parameters, result);
+                UUID.randomUUID(), normalizeSql(sql), sanitizeParameters(parameters), describeResult(result));
+    }
+
+    public Map<String, Object> sanitizeParameters(Map<?, ?> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> sanitized = new LinkedHashMap<>();
+        parameters.forEach((key, value) -> {
+            String name = String.valueOf(key);
+            sanitized.put(name, SENSITIVE_KEY.matcher(name).matches() ? "[REDACTED]" : sanitizeValue(value));
+        });
+        return java.util.Collections.unmodifiableMap(sanitized);
+    }
+
+    private Object sanitizeValue(Object value) {
+        if (value == null || value instanceof Number || value instanceof Boolean) {
+            return value;
+        }
+        if (value instanceof byte[] bytes) {
+            return "[bytes:" + bytes.length + "]";
+        }
+        if (value instanceof Iterable<?> iterable) {
+            java.util.List<Object> values = new java.util.ArrayList<>();
+            int count = 0;
+            for (Object item : iterable) {
+                if (count++ == MAX_COLLECTION_ITEMS) {
+                    values.add("[truncated]");
+                    break;
+                }
+                values.add(sanitizeValue(item));
+            }
+            return values;
+        }
+        if (value.getClass().isArray()) {
+            int length = Array.getLength(value);
+            java.util.List<Object> values = new java.util.ArrayList<>();
+            for (int i = 0; i < Math.min(length, MAX_COLLECTION_ITEMS); i++) {
+                values.add(sanitizeValue(Array.get(value, i)));
+            }
+            if (length > MAX_COLLECTION_ITEMS) {
+                values.add("[truncated:" + length + "]");
+            }
+            return values;
+        }
+        return truncate(String.valueOf(value));
+    }
+
+    private Object describeResult(Object result) {
+        if (result instanceof Throwable error) {
+            return "ERROR(" + error.getClass().getSimpleName() + ": " + truncate(error.getMessage()) + ")";
+        }
+        return result;
+    }
+
+    private String truncate(String value) {
+        if (value == null || value.length() <= MAX_VALUE_LENGTH) {
+            return value;
+        }
+        return value.substring(0, MAX_VALUE_LENGTH) + "...[truncated]";
     }
 
     /**

@@ -78,7 +78,8 @@ public class RepositoryXmlRegistry {
             Document document = factory.newDocumentBuilder().parse(new InputSource(inputStream));
             Element root = document.getDocumentElement();
             if (root == null || !"repository".equals(root.getTagName())) {
-                return;
+                throw new IllegalStateException("R2DBC XML root element must be <repository>: "
+                        + resource.getDescription());
             }
             String namespace = root.getAttribute("namespace");
             if (!StringUtils.hasText(namespace)) {
@@ -96,8 +97,11 @@ public class RepositoryXmlRegistry {
                 if (node instanceof Element element) {
                     if ("resultMap".equals(element.getTagName())) {
                         registerResultMap(namespace, element, resource);
-                    } else {
+                    } else if (commandType(element.getTagName()) != null) {
                         register(namespace, element, resource);
+                    } else {
+                        throw new IllegalStateException("Unknown R2DBC XML element <" + element.getTagName()
+                                + "> in namespace " + namespace + ", resource: " + resource.getDescription());
                     }
                 }
             }
@@ -162,7 +166,8 @@ public class RepositoryXmlRegistry {
         }
         String id = element.getAttribute("id");
         if (!StringUtils.hasText(id)) {
-            id = element.getTagName();
+            throw new IllegalStateException("R2DBC XML statement <" + element.getTagName()
+                    + "> is missing id in namespace " + namespace + ", resource: " + resource.getDescription());
         }
         if (!StringUtils.hasText(element.getTextContent())) {
             throw new IllegalStateException("R2DBC XML SQL 不能为空：" + namespace + "." + id);
@@ -184,7 +189,8 @@ public class RepositoryXmlRegistry {
 
     private SqlCommandType commandType(String tagName) {
         try {
-            return SqlCommandType.valueOf(tagName.toUpperCase(Locale.ROOT));
+            SqlCommandType commandType = SqlCommandType.valueOf(tagName.toUpperCase(Locale.ROOT));
+            return commandType == SqlCommandType.UNKNOWN ? null : commandType;
         } catch (IllegalArgumentException e) {
             return null;
         }

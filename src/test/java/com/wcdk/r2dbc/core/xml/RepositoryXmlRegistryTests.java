@@ -52,6 +52,24 @@ class RepositoryXmlRegistryTests {
                 .hasStackTraceContaining("循环引用");
     }
 
+    @Test
+    void rejectsUnknownElementsAndStatementsWithoutIdsWithContext() {
+        String unknown = """
+                <repository namespace="%s"><unknown>SELECT 1</unknown></repository>
+                """.formatted(TestRepository.class.getName());
+        assertThatThrownBy(() -> registry(unknown))
+                .hasStackTraceContaining("Unknown R2DBC XML element")
+                .hasStackTraceContaining(TestRepository.class.getName())
+                .hasStackTraceContaining("test-mapper.xml");
+
+        String missingId = """
+                <repository namespace="%s"><select>SELECT 1</select></repository>
+                """.formatted(TestRepository.class.getName());
+        assertThatThrownBy(() -> registry(missingId))
+                .hasStackTraceContaining("missing id")
+                .hasStackTraceContaining(TestRepository.class.getName());
+    }
+
     private RepositoryXmlRegistry registry(String xml) throws Exception {
         ResourcePatternResolver resolver = mock(ResourcePatternResolver.class);
         Resource resource = new ByteArrayResource(xml.getBytes(StandardCharsets.UTF_8), "test-mapper.xml");

@@ -2,6 +2,7 @@ package com.wcdk.r2dbc.core.executor;
 
 import io.r2dbc.spi.Row;
 import org.springframework.data.annotation.Transient;
+import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.relational.core.mapping.Column;
 
 import java.lang.reflect.Field;
@@ -19,10 +20,12 @@ import java.time.ZoneId;
 import java.util.Date;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.WeakHashMap;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * R2DBC行映射器，负责将Row映射为实体对象。
@@ -33,7 +36,28 @@ import java.util.concurrent.ConcurrentMap;
  **/
 public class R2dbcRowMapper {
 
-    private final ConcurrentMap<Class<?>, MappingPlan> mappingPlans = new ConcurrentHashMap<>();
+    private final LongAdder mappingRequests = new LongAdder();
+    private final LongAdder planMisses = new LongAdder();
+    private final Map<Class<?>, Boolean> planOwners = java.util.Collections.synchronizedMap(new WeakHashMap<>());
+
+    /** ClassValue keeps plans scoped to this mapper without pinning reloadable entity ClassLoaders. */
+    private final ClassValue<MappingPlan> mappingPlans = new ClassValue<>() {
+        @Override
+        protected MappingPlan computeValue(Class<?> type) {
+            planMisses.increment();
+            planOwners.put(type, Boolean.TRUE);
+            return createPlan(type);
+        }
+    };
+    private final List<R2dbcValueConverter> converters;
+
+    public R2dbcRowMapper() {
+        this(List.of());
+    }
+
+    public R2dbcRowMapper(List<R2dbcValueConverter> converters) {
+        this.converters = converters == null ? List.of() : List.copyOf(converters);
+    }
 
     /**
      * 将Row映射为实体对象。
@@ -45,7 +69,8 @@ public class R2dbcRowMapper {
      */
     public <T> T map(Row row, Class<T> entityClass) {
         try {
-            MappingPlan plan = mappingPlans.computeIfAbsent(entityClass, this::createPlan);
+            mappingRequests.increment();
+            MappingPlan plan = mappingPlans.get(entityClass);
             return entityClass.cast(plan.map(row, rowColumns(row)));
         } catch (ReflectiveOperationException | RuntimeException e) {
             if (e instanceof IllegalStateException illegalStateException) {
@@ -53,6 +78,17 @@ public class R2dbcRowMapper {
             }
             throw new IllegalStateException("Map entity failed: " + entityClass.getName(), e);
         }
+    }
+
+    public CacheStats cacheStats() {
+        long requests = mappingRequests.sum();
+        long misses = planMisses.sum();
+        synchronized (planOwners) {
+            return new CacheStats(Math.max(0, requests - misses), misses, planOwners.size());
+        }
+    }
+
+    public record CacheStats(long hits, long misses, int size) {
     }
 
     private MappingPlan createPlan(Class<?> entityClass) {
@@ -71,34 +107,48 @@ public class R2dbcRowMapper {
                 return new ConstructorMappingPlan(constructor, List.copyOf(targets));
             }
 
+            Constructor<?>[] constructors = entityClass.getDeclaredConstructors();
+            List<Constructor<?>> selected = java.util.Arrays.stream(constructors)
+                    .filter(candidate -> candidate.isAnnotationPresent(PersistenceCreator.class))
+                    .toList();
+            if (selected.size() > 1) {
+                throw new IllegalStateException("Entity has multiple @PersistenceCreator constructors: "
+                        + entityClass.getName());
+            }
+            if (!selected.isEmpty()) {
+                return constructorPlan(entityClass, selected.getFirst());
+            }
+
             try {
                 Constructor<?> constructor = entityClass.getDeclaredConstructor();
                 constructor.setAccessible(true);
                 return new FieldMappingPlan(constructor, persistentFields(entityClass));
             } catch (NoSuchMethodException ignored) {
-                Constructor<?>[] constructors = entityClass.getDeclaredConstructors();
                 if (constructors.length != 1) {
                     throw new IllegalStateException("Entity requires a no-arg constructor or exactly one mapping constructor: "
                             + entityClass.getName());
                 }
-                Constructor<?> constructor = constructors[0];
-                constructor.setAccessible(true);
-                List<ValueTarget> targets = new ArrayList<>();
-                for (Parameter parameter : constructor.getParameters()) {
-                    Field field = findField(entityClass, parameter.getName());
-                    targets.add(new ValueTarget(parameter.getName(),
-                            field == null ? camelToUnderline(parameter.getName()) : columnName(field),
-                            parameter.getType()));
-                }
-                return new ConstructorMappingPlan(constructor, List.copyOf(targets));
+                return constructorPlan(entityClass, constructors[0]);
             }
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Create mapping plan failed: " + entityClass.getName(), e);
         }
     }
 
+    private ConstructorMappingPlan constructorPlan(Class<?> entityClass, Constructor<?> constructor) {
+        constructor.setAccessible(true);
+        List<ValueTarget> targets = new ArrayList<>();
+        for (Parameter parameter : constructor.getParameters()) {
+            Field field = findField(entityClass, parameter.getName());
+            targets.add(new ValueTarget(parameter.getName(),
+                    field == null ? camelToUnderline(parameter.getName()) : columnName(field),
+                    parameter.getType()));
+        }
+        return new ConstructorMappingPlan(constructor, List.copyOf(targets));
+    }
+
     private List<FieldTarget> persistentFields(Class<?> entityClass) {
-        List<FieldTarget> targets = new ArrayList<>();
+        Map<String, FieldTarget> targets = new LinkedHashMap<>();
         List<Class<?>> hierarchy = new ArrayList<>();
         for (Class<?> current = entityClass; current != null && current != Object.class;
              current = current.getSuperclass()) {
@@ -110,10 +160,10 @@ public class R2dbcRowMapper {
                     continue;
                 }
                 field.setAccessible(true);
-                targets.add(new FieldTarget(field, columnName(field)));
+                targets.put(field.getName(), new FieldTarget(field, columnName(field)));
             }
         }
-        return List.copyOf(targets);
+        return List.copyOf(targets.values());
     }
 
     private Field findField(Class<?> entityClass, String name) {
@@ -130,27 +180,23 @@ public class R2dbcRowMapper {
     private Object mappedValue(Row row, Set<String> rowColumns, ValueTarget target) {
         String actualColumn = actualColumnName(rowColumns, target.column());
         if (actualColumn == null) {
-            return primitiveDefault(target.type());
+            if (target.type().isPrimitive()) {
+                throw new IllegalStateException("Required primitive property '" + target.name()
+                        + "' is missing column '" + target.column() + "'");
+            }
+            return null;
         }
         try {
-            return convertValue(row.get(actualColumn), target.type());
+            Object value = row.get(actualColumn);
+            if (value == null && target.type().isPrimitive()) {
+                throw new IllegalStateException("SQL NULL cannot be assigned to primitive property '"
+                        + target.name() + "' from column '" + actualColumn + "'");
+            }
+            return convertValue(value, target.type());
         } catch (RuntimeException e) {
             throw new IllegalStateException("Cannot map column '" + actualColumn + "' to '"
                     + target.name() + "' (" + target.type().getName() + ")", e);
         }
-    }
-
-    private Object primitiveDefault(Class<?> type) {
-        if (!type.isPrimitive()) return null;
-        if (type == boolean.class) return false;
-        if (type == char.class) return '\0';
-        if (type == byte.class) return (byte) 0;
-        if (type == short.class) return (short) 0;
-        if (type == int.class) return 0;
-        if (type == long.class) return 0L;
-        if (type == float.class) return 0F;
-        if (type == double.class) return 0D;
-        return null;
     }
 
     /**
@@ -167,6 +213,16 @@ public class R2dbcRowMapper {
         Class<?> boxedType = boxedType(targetType);
         if (boxedType.isInstance(value)) {
             return value;
+        }
+        for (R2dbcValueConverter converter : converters) {
+            if (converter.supports(value.getClass(), boxedType)) {
+                Object converted = converter.convert(value, boxedType);
+                if (converted != null && !boxedType.isInstance(converted)) {
+                    throw new IllegalStateException("Converter " + converter.getClass().getName()
+                            + " returned " + converted.getClass().getName() + " for " + boxedType.getName());
+                }
+                return converted;
+            }
         }
         if (Number.class.isAssignableFrom(boxedType) && value instanceof Number number) {
             return convertNumber(number, boxedType);
@@ -359,6 +415,10 @@ public class R2dbcRowMapper {
             for (FieldTarget target : targets) {
                 String actualColumn = actualColumnName(rowColumns, target.column());
                 if (actualColumn == null) {
+                    if (target.field().getType().isPrimitive()) {
+                        throw new IllegalStateException("Required primitive property '" + target.field().getName()
+                                + "' is missing column '" + target.column() + "'");
+                    }
                     continue;
                 }
                 ValueTarget valueTarget = new ValueTarget(target.field().getName(),

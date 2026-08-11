@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WcdkSpringR2dbcPropertiesTests {
@@ -42,5 +43,17 @@ class WcdkSpringR2dbcPropertiesTests {
         pool.setAcquireRetry(-1);
         assertThatThrownBy(() -> pool.validate("reporting"))
                 .hasMessageContaining("acquire-retry");
+    }
+
+    @Test
+    void dataSourcePoolIsAnExplicitWholeObjectOverride() {
+        WcdkSpringR2dbcProperties.Pool global = new WcdkSpringR2dbcProperties.Pool();
+        WcdkSpringR2dbcProperties.Pool local = new WcdkSpringR2dbcProperties.Pool();
+        WcdkSpringR2dbcProperties.DataSourceProperties dataSource =
+                new WcdkSpringR2dbcProperties.DataSourceProperties();
+
+        assertThat(dataSource.effectivePool(global)).isSameAs(global);
+        dataSource.setPool(local);
+        assertThat(dataSource.effectivePool(global)).isSameAs(local);
     }
 }

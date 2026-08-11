@@ -10,6 +10,7 @@ import org.springframework.aop.framework.ProxyFactory;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.Map;
 
 /**
  * 仓储代理工厂。
@@ -39,35 +40,16 @@ public class RepositoryProxyFactory {
         Class<?> entityClass = resolveEntityClass(repositoryInterface);
         RepositoryMetadata metadata = entityClass != null ? new RepositoryMetadata(entityClass, properties) : null;
 
-        // 启动期校验派生方法
-        if (metadata != null) {
-            CustomMethodResolver resolver = new CustomMethodResolver(metadata,
-                    properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
-            for (java.lang.reflect.Method method : repositoryInterface.getMethods()) {
-                if (!isBaseMethod(method.getName())) {
-                    try {
-                        resolver.validateMethod(method);
-                    } catch (RuntimeException e) {
-                        throw new IllegalArgumentException("非法 Repository 方法："
-                                + repositoryInterface.getName() + "#" + method.toGenericString(), e);
-                    }
-                }
-            }
-        }
+        Map<java.lang.reflect.Method, RepositoryMethodPlan> methodPlans =
+                new RepositoryMethodPlanCompiler(repositoryInterface, metadata, repositoryXmlRegistry, properties)
+                        .compile();
 
         ProxyFactory proxyFactory = new ProxyFactory();
         proxyFactory.setInterfaces(repositoryInterface);
         proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(
-                r2dbcUtil, properties, metadata, repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator));
+                r2dbcUtil, properties, metadata, repositoryInterface, repositoryXmlRegistry,
+                snowflakeIdGenerator, methodPlans));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
-    }
-
-    private boolean isBaseMethod(String methodName) {
-        return switch (methodName) {
-            case "insert", "deleteById", "updateById", "selectById", "selectList", "selectPage",
-                 "selectOne", "selectCount", "exists", "toString", "hashCode", "equals" -> true;
-            default -> false;
-        };
     }
 
     private Class<?> resolveEntityClass(Class<?> repositoryInterface) {

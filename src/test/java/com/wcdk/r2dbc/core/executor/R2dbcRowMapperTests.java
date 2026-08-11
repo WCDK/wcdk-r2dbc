@@ -4,11 +4,14 @@ import io.r2dbc.spi.ColumnMetadata;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.annotation.PersistenceCreator;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
@@ -24,8 +27,10 @@ class R2dbcRowMapperTests {
                 List.of(7L, "alice", "ACTIVE", createdAt));
 
         UserRecord result = mapper.map(row, UserRecord.class);
+        mapper.map(row, UserRecord.class);
 
         assertThat(result).isEqualTo(new UserRecord(7L, "alice", Status.ACTIVE, createdAt));
+        assertThat(mapper.cacheStats()).isEqualTo(new R2dbcRowMapper.CacheStats(1, 1, 1));
     }
 
     @Test
@@ -39,6 +44,39 @@ class R2dbcRowMapperTests {
         ConstructorEntity constructor = mapper.map(constructorRow, ConstructorEntity.class);
         assertThat(constructor.userName).isEqualTo("bob");
         assertThat(constructor.age).isEqualTo(20);
+    }
+
+    @Test
+    void rejectsMissingOrNullPrimitiveColumns() {
+        assertThatThrownBy(() -> mapper.map(row(List.of("name"), List.of("alice")), PrimitiveEntity.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("primitive")
+                .hasMessageContaining("age");
+
+        assertThatThrownBy(() -> mapper.map(row(List.of("age"), Arrays.asList((Object) null)), PrimitiveEntity.class))
+                .isInstanceOf(IllegalStateException.class)
+                .hasStackTraceContaining("SQL NULL")
+                .hasStackTraceContaining("age");
+    }
+
+    @Test
+    void usesPersistenceCreatorAndCustomConverter() {
+        R2dbcValueConverter converter = new R2dbcValueConverter() {
+            @Override
+            public boolean supports(Class<?> sourceType, Class<?> targetType) {
+                return sourceType == String.class && targetType == Token.class;
+            }
+
+            @Override
+            public Object convert(Object source, Class<?> targetType) {
+                return new Token(source.toString());
+            }
+        };
+        CreatorEntity entity = new R2dbcRowMapper(List.of(converter))
+                .map(row(List.of("token"), List.of("abc")), CreatorEntity.class);
+
+        assertThat(entity.token.value()).isEqualTo("abc");
+        assertThat(entity.createdBy).isEqualTo("persistence-creator");
     }
 
     private Row row(List<String> names, List<Object> values) {
@@ -79,6 +117,28 @@ class R2dbcRowMapperTests {
         private ConstructorEntity(String userName, int age) {
             this.userName = userName;
             this.age = age;
+        }
+    }
+
+    private static class PrimitiveEntity {
+        private int age;
+    }
+
+    private record Token(String value) {
+    }
+
+    private static class CreatorEntity {
+        private Token token;
+        private String createdBy;
+
+        private CreatorEntity() {
+            this.createdBy = "default";
+        }
+
+        @PersistenceCreator
+        private CreatorEntity(Token token) {
+            this.token = token;
+            this.createdBy = "persistence-creator";
         }
     }
 }

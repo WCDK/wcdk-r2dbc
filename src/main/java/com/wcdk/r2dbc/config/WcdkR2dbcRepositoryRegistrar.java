@@ -34,8 +34,6 @@ import java.util.Set;
  **/
 public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, ResourceLoaderAware, BeanFactoryAware {
 
-    private static final String AUTO_CONFIGURATION_PACKAGES_BEAN_NAME = AutoConfigurationPackages.class.getName();
-
     private Environment environment;
 
     private ResourceLoader resourceLoader;
@@ -46,7 +44,7 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
 
     @Override
     public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
-        Set<String> packages = basePackages(importingClassMetadata, registry);
+        Set<String> packages = basePackages(importingClassMetadata);
         for (String basePackage : packages) {
             scanPackage(registry, basePackage);
         }
@@ -68,7 +66,7 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
         this.beanFactory = beanFactory;
     }
 
-    private Set<String> basePackages(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+    private Set<String> basePackages(AnnotationMetadata importingClassMetadata) {
         Set<String> result = new LinkedHashSet<>();
         AnnotationAttributes attributes = AnnotationAttributes.fromMap(
                 importingClassMetadata.getAnnotationAttributes(EnableWcdkR2dbcRepositories.class.getName(), false));
@@ -83,15 +81,6 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
         }
         if (environment != null) {
             result.addAll(List.of(environment.getProperty("wcdk.r2dbc.base-packages", String[].class, new String[0])));
-        }
-        if (registry.containsBeanDefinition(AUTO_CONFIGURATION_PACKAGES_BEAN_NAME)) {
-            Object value = registry.getBeanDefinition(AUTO_CONFIGURATION_PACKAGES_BEAN_NAME)
-                    .getConstructorArgumentValues()
-                    .getIndexedArgumentValue(0, String[].class)
-                    .getValue();
-            if (value instanceof String[] packageNames) {
-                result.addAll(List.of(packageNames));
-            }
         }
         if (beanFactory != null && AutoConfigurationPackages.has(beanFactory)) {
             result.addAll(AutoConfigurationPackages.get(beanFactory));

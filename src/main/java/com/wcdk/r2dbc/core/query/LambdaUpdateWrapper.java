@@ -8,7 +8,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /**
@@ -32,8 +31,6 @@ import java.util.function.Function;
  * @version 1.0
  **/
 public class LambdaUpdateWrapper<T> {
-
-    private static final Map<Class<?>, Map<String, String>> FIELD_CACHE = new ConcurrentHashMap<>();
 
     private final Class<T> entityClass;
 

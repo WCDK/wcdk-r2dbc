@@ -3,7 +3,10 @@ package com.wcdk.r2dbc.core.executor;
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.core.interceptor.SqlExecutionContext;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
+import com.wcdk.r2dbc.core.interceptor.SqlTerminationType;
 import org.reactivestreams.Publisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Signal;
@@ -28,14 +31,22 @@ import java.util.function.Supplier;
  **/
 public class SqlLifecycleExecutor {
 
+    private static final Logger log = LoggerFactory.getLogger(SqlLifecycleExecutor.class);
+
     private final SqlLifecycleInterceptorChain chain;
+    private final SqlExecutionObserver observer;
 
     public SqlLifecycleExecutor() {
-        this(new SqlLifecycleInterceptorChain(java.util.List.of(), java.util.List.of()));
+        this(new SqlLifecycleInterceptorChain(java.util.List.of(), java.util.List.of()), SqlExecutionObserver.NOOP);
     }
 
     public SqlLifecycleExecutor(SqlLifecycleInterceptorChain chain) {
+        this(chain, SqlExecutionObserver.NOOP);
+    }
+
+    public SqlLifecycleExecutor(SqlLifecycleInterceptorChain chain, SqlExecutionObserver observer) {
         this.chain = java.util.Objects.requireNonNull(chain);
+        this.observer = java.util.Objects.requireNonNull(observer);
     }
 
     /**
@@ -101,15 +112,16 @@ public class SqlLifecycleExecutor {
     public Mono<Boolean> prepare(SqlLifecycleInterceptorChain chain,
                                  SqlExecutionContext context,
                                  Supplier<? extends Mono<?>> compileAction) {
-        return chain.beforeCompileReactive(context)
+        return observe(SqlExecutionPhase.PREPARE, context, chain.beforeCompileReactive(context))
                 .flatMap(terminated -> terminated
                         ? Mono.just(true)
-                        : Mono.defer(compileAction).then(Mono.defer(() -> context.isTerminated()
+                        : observe(SqlExecutionPhase.COMPILE, context, Mono.defer(compileAction).then())
+                        .then(Mono.defer(() -> context.isTerminated()
                                 ? Mono.just(true)
-                                : chain.afterCompileReactive(context))))
+                                : observe(SqlExecutionPhase.REWRITE, context, chain.afterCompileReactive(context)))))
                 .flatMap(terminated -> terminated
                         ? Mono.just(true)
-                        : chain.beforeExecuteReactive(context));
+                        : observe(SqlExecutionPhase.VALIDATE, context, chain.beforeExecuteReactive(context)));
     }
 
     /** Executes a single-result statement and awaits afterExecute in the same chain. */
@@ -139,7 +151,7 @@ public class SqlLifecycleExecutor {
         AtomicLong resultCount = new AtomicLong();
         Mono<T> observed = Mono.defer(() -> {
                     context.setStartTime(System.nanoTime());
-                    return statement.get();
+                    return observe(SqlExecutionPhase.EXECUTE, context, statement.get());
                 })
                 .materialize()
                 .flatMap(signal -> finalizeMonoSignal(chain, context, signal, finalized, resultCount))
@@ -157,7 +169,7 @@ public class SqlLifecycleExecutor {
         AtomicLong resultCount = new AtomicLong();
         Flux<T> observed = Flux.defer(() -> {
                     context.setStartTime(System.nanoTime());
-                    return Flux.from(statement.get());
+                    return observer.observeFlux(SqlExecutionPhase.EXECUTE, context, Flux.from(statement.get()));
                 })
                 .doOnNext(ignored -> resultCount.incrementAndGet())
                 .materialize()
@@ -180,9 +192,16 @@ public class SqlLifecycleExecutor {
         if (signal.isOnNext()) {
             context.setResult(signal.get());
             resultCount.set(monoResultCount(context, signal.get()));
+            context.setEmittedItemCount(1);
+            if (isDataModification(context) && signal.get() instanceof Number number) {
+                context.setAffectedRowCount(number.longValue());
+            } else {
+                context.setReturnedRowCount(1);
+            }
         } else if (signal.isOnError()) {
             context.setError(signal.getThrowable());
         }
+        context.setTerminationType(signal.isOnError() ? SqlTerminationType.ERROR : SqlTerminationType.COMPLETE);
         context.setResultCount(resultCount.get());
         context.setEndTime(System.nanoTime());
         return runAfterExecute(chain, context, signal.getThrowable()).thenReturn(signal);
@@ -199,7 +218,10 @@ public class SqlLifecycleExecutor {
         if (signal.isOnError()) {
             context.setError(signal.getThrowable());
         }
+        context.setTerminationType(signal.isOnError() ? SqlTerminationType.ERROR : SqlTerminationType.COMPLETE);
         context.setResultCount(resultCount.get());
+        context.setEmittedItemCount(resultCount.get());
+        context.setReturnedRowCount(resultCount.get());
         context.setEndTime(System.nanoTime());
         return runAfterExecute(chain, context, signal.getThrowable()).thenReturn(signal);
     }
@@ -211,43 +233,55 @@ public class SqlLifecycleExecutor {
         if (!finalized.compareAndSet(false, true)) {
             return Mono.empty();
         }
+        context.setTerminationType(SqlTerminationType.CANCELLED);
         context.setResultCount(resultCount.get());
+        context.setEmittedItemCount(resultCount.get());
+        if (!isDataModification(context)) {
+            context.setReturnedRowCount(resultCount.get());
+        }
         context.setEndTime(System.nanoTime());
-        return runAfterExecute(chain, context, null);
+        return runAfterExecute(chain, context, null)
+                .doOnError(error -> log.error(
+                        "SQL cancellation cleanup failed: executionId={}, statementId={}, errorType={}",
+                        context.getExecutionId(), context.getStatementId(), error.getClass().getName(), error));
     }
 
     private long monoResultCount(SqlExecutionContext context, Object result) {
         if (result == null) {
             return 0;
         }
-        if (result instanceof Number number && isDataModification(context.getSql())) {
+        if (result instanceof Number number && isDataModification(context)) {
             return number.longValue();
         }
         return 1;
     }
 
-    private boolean isDataModification(String sql) {
-        if (sql == null) {
-            return false;
-        }
-        String normalized = sql.stripLeading().toUpperCase(java.util.Locale.ROOT);
-        return normalized.startsWith("INSERT ")
-                || normalized.startsWith("UPDATE ")
-                || normalized.startsWith("DELETE ")
-                || normalized.startsWith("MERGE ");
+    private boolean isDataModification(SqlExecutionContext context) {
+        return switch (context.getCommandType()) {
+            case INSERT, UPDATE, DELETE, MERGE -> true;
+            case SELECT, UNKNOWN -> false;
+        };
     }
 
     private Mono<Void> runAfterExecute(SqlLifecycleInterceptorChain chain,
                                        SqlExecutionContext context,
                                        Throwable businessError) {
-        return chain.afterExecuteReactive(context)
+        return observe(SqlExecutionPhase.FINALLY, context, chain.afterExecuteReactive(context))
                 .onErrorResume(afterError -> {
                     if (businessError != null) {
                         businessError.addSuppressed(afterError);
+                        log.warn("SQL finally error suppressed by business error: executionId={}, statementId={}, "
+                                        + "businessErrorType={}, suppressedErrorType={}",
+                                context.getExecutionId(), context.getStatementId(),
+                                businessError.getClass().getName(), afterError.getClass().getName(), afterError);
                         return Mono.error(businessError);
                     }
                     return Mono.error(afterError);
                 });
+    }
+
+    private <T> Mono<T> observe(SqlExecutionPhase phase, SqlExecutionContext context, Mono<T> action) {
+        return observer.observe(phase, context, action);
     }
 
     @SuppressWarnings("unchecked")

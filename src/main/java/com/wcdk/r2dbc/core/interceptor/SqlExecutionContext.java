@@ -1,7 +1,9 @@
 package com.wcdk.r2dbc.core.interceptor;
 
+import com.wcdk.r2dbc.core.xml.SqlCommandType;
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * SQL执行上下文，包含SQL执行过程中的所有信息。
@@ -31,6 +33,12 @@ public class SqlExecutionContext {
     private Object result;
 
     private long resultCount;
+    private long returnedRowCount;
+    private long affectedRowCount;
+    private long emittedItemCount;
+    private SqlCommandType commandType;
+    private final String executionId = UUID.randomUUID().toString();
+    private SqlTerminationType terminationType;
 
     /**
      * 执行状态 - 使用枚举替代简单的boolean，提供更清晰的语义
@@ -47,6 +55,7 @@ public class SqlExecutionContext {
         this.repositoryInterface = repositoryInterface;
         this.arguments = arguments;
         this.status = SqlExecutionStatus.CONTINUE;
+        this.commandType = inferCommandType(method.getName());
     }
 
     public Method getMethod() {
@@ -124,6 +133,71 @@ public class SqlExecutionContext {
 
     public void setResultCount(long resultCount) {
         this.resultCount = Math.max(0, resultCount);
+    }
+
+    public long getReturnedRowCount() {
+        return returnedRowCount;
+    }
+
+    public long getAffectedRowCount() {
+        return affectedRowCount;
+    }
+
+    public long getEmittedItemCount() {
+        return emittedItemCount;
+    }
+
+    public void setReturnedRowCount(long returnedRowCount) {
+        this.returnedRowCount = Math.max(0, returnedRowCount);
+    }
+
+    public void setAffectedRowCount(long affectedRowCount) {
+        this.affectedRowCount = Math.max(0, affectedRowCount);
+    }
+
+    public void setEmittedItemCount(long emittedItemCount) {
+        this.emittedItemCount = Math.max(0, emittedItemCount);
+    }
+
+    public SqlCommandType getCommandType() {
+        return commandType;
+    }
+
+    public void setCommandType(SqlCommandType commandType) {
+        this.commandType = commandType == null ? SqlCommandType.UNKNOWN : commandType;
+    }
+
+    public String getExecutionId() {
+        return executionId;
+    }
+
+    public String getStatementId() {
+        return repositoryInterface.getName() + "." + method.getName();
+    }
+
+    public SqlTerminationType getTerminationType() {
+        return terminationType;
+    }
+
+    public void setTerminationType(SqlTerminationType terminationType) {
+        this.terminationType = terminationType;
+    }
+
+    private boolean isDataModification() {
+        return commandType == SqlCommandType.INSERT || commandType == SqlCommandType.UPDATE
+                || commandType == SqlCommandType.DELETE || commandType == SqlCommandType.MERGE;
+    }
+
+    private SqlCommandType inferCommandType(String methodName) {
+        String normalized = methodName.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.startsWith("insert")) return SqlCommandType.INSERT;
+        if (normalized.startsWith("update")) return SqlCommandType.UPDATE;
+        if (normalized.startsWith("delete")) return SqlCommandType.DELETE;
+        if (normalized.startsWith("query") || normalized.startsWith("select")
+                || normalized.startsWith("find") || normalized.startsWith("exists")) {
+            return SqlCommandType.SELECT;
+        }
+        return SqlCommandType.UNKNOWN;
     }
 
     /**

@@ -89,6 +89,14 @@ public class WcdkSpringR2dbcProperties {
 
         private Map<String, String> properties = new LinkedHashMap<>();
 
+        /**
+         * Complete pool override for this data source. When non-null it replaces the global
+         * spring.r2dbc.pool object; fields are not merged.
+         */
         private Pool pool;
+
+        public Pool effectivePool(Pool globalPool) {
+            return pool == null ? globalPool : pool;
+        }
     }
 }

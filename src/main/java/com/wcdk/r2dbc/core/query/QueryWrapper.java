@@ -17,9 +17,9 @@ public class QueryWrapper<T> {
 
     private final List<OrderBy> orderByList = new ArrayList<>();
 
-    private Integer limit;
+    private Long limit;
 
-    private Integer offset;
+    private Long offset;
 
     public QueryWrapper() {
     }
@@ -67,7 +67,15 @@ public class QueryWrapper<T> {
         return condition(column, "IN", values);
     }
 
+    public QueryWrapper<T> inArray(String column, Object values) {
+        return condition(column, "IN", values);
+    }
+
     public QueryWrapper<T> notIn(String column, Iterable<?> values) {
+        return condition(column, "NOT IN", values);
+    }
+
+    public QueryWrapper<T> notInArray(String column, Object values) {
         return condition(column, "NOT IN", values);
     }
 
@@ -88,6 +96,10 @@ public class QueryWrapper<T> {
     }
 
     public QueryWrapper<T> limit(int limit) {
+        return limit((long) limit);
+    }
+
+    public QueryWrapper<T> limit(long limit) {
         if (limit <= 0) {
             throw new IllegalArgumentException("查询条数必须大于 0");
         }
@@ -96,6 +108,13 @@ public class QueryWrapper<T> {
     }
 
     public QueryWrapper<T> offset(Integer offset) {
+        if (offset == null) {
+            throw new IllegalArgumentException("Query offset must not be null");
+        }
+        return offset(offset.longValue());
+    }
+
+    public QueryWrapper<T> offset(long offset) {
         if (offset < 0) {
             throw new IllegalArgumentException("查询偏移量不能小于 0");
         }
@@ -104,11 +123,20 @@ public class QueryWrapper<T> {
     }
 
     public QueryWrapper<T> page(int pageNo, int pageSize) {
+        return page((long) pageNo, (long) pageSize);
+    }
+
+    public QueryWrapper<T> page(long pageNo, long pageSize) {
         if (pageNo <= 0) {
             throw new IllegalArgumentException("页码必须大于 0");
         }
         limit(pageSize);
-        return offset((pageNo - 1) * pageSize);
+        try {
+            return offset(Math.multiplyExact(pageNo - 1, pageSize));
+        } catch (ArithmeticException error) {
+            throw new IllegalArgumentException("Query page offset overflow: pageNo=" + pageNo
+                    + ", pageSize=" + pageSize, error);
+        }
     }
 
     public List<Condition> conditions() {
@@ -119,11 +147,11 @@ public class QueryWrapper<T> {
         return Collections.unmodifiableList(orderByList);
     }
 
-    public Integer limit() {
+    public Long limit() {
         return limit;
     }
 
-    public Integer offset() {
+    public Long offset() {
         return offset;
     }
 
@@ -131,7 +159,9 @@ public class QueryWrapper<T> {
         if (column == null || column.isBlank()) {
             throw new IllegalArgumentException("查询字段不能为空");
         }
-        conditions.add(new Condition(column, operator, value));
+        Object snapshot = ("IN".equals(operator) || "NOT IN".equals(operator))
+                ? snapshotCollection(value) : value;
+        conditions.add(new Condition(column, operator, snapshot));
         return this;
     }
 
@@ -139,8 +169,27 @@ public class QueryWrapper<T> {
         if (column == null || column.isBlank()) {
             throw new IllegalArgumentException("排序字段不能为空");
         }
+        orderByList.removeIf(existing -> existing.column().equalsIgnoreCase(column));
         orderByList.add(new OrderBy(column, asc));
         return this;
+    }
+
+    private Object snapshotCollection(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        List<Object> snapshot = new ArrayList<>();
+        if (value instanceof Iterable<?> iterable) {
+            iterable.forEach(snapshot::add);
+        } else if (value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            for (int i = 0; i < length; i++) {
+                snapshot.add(java.lang.reflect.Array.get(value, i));
+            }
+        } else {
+            throw new IllegalArgumentException("IN/NOT IN value must be an Iterable or array");
+        }
+        return Collections.unmodifiableList(snapshot);
     }
 
     public record Condition(String column, String operator, Object value) {

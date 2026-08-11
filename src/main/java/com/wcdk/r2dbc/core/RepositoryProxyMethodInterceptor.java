@@ -5,6 +5,7 @@ import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.core.interceptor.SqlExecutionContext;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
+import com.wcdk.r2dbc.core.executor.SqlParameter;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata.FieldColumn;
@@ -68,12 +69,17 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     private final boolean snowflakeIdEnabled;
 
+    private final CustomMethodResolver customMethodResolver;
+
+    private final Map<Method, RepositoryMethodPlan> methodPlans;
+
     RepositoryProxyMethodInterceptor(R2dbcUtil r2dbcUtil,
                                      WcdkR2dbcProperties properties,
                                      RepositoryMetadata metadata,
                                      Class<?> repositoryInterface,
                                      RepositoryXmlRegistry repositoryXmlRegistry,
-                                     SnowflakeIdGenerator snowflakeIdGenerator) {
+                                     SnowflakeIdGenerator snowflakeIdGenerator,
+                                     Map<Method, RepositoryMethodPlan> methodPlans) {
         this.r2dbcUtil = r2dbcUtil;
         this.properties = properties;
         this.metadata = metadata;
@@ -82,13 +88,56 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         this.dialect = DialectResolver.getDialect(r2dbcUtil.databaseClient().getConnectionFactory());
         this.snowflakeIdEnabled = properties.isSnowflakeId();
         this.snowflakeIdGenerator = snowflakeIdGenerator;
+        this.customMethodResolver = metadata == null ? null : new CustomMethodResolver(metadata,
+                properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
+        this.methodPlans = Map.copyOf(methodPlans);
     }
 
     @Override
     public Object invoke(MethodInvocation invocation) {
-        String methodName = invocation.getMethod().getName();
-        Object[] arguments = invocation.getArguments();
-        if (!isBaseMethod(methodName)) {
+        Method method = invocation.getMethod();
+        RepositoryMethodPlan plan = methodPlans.get(method);
+        if (plan == null) {
+            throw new IllegalStateException("Repository method was not compiled at startup: " + method);
+        }
+        if (method.getReturnType() == Mono.class) {
+            return Mono.defer(() -> {
+                Object result = invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+                return result instanceof Mono<?> mono ? mono : Mono.justOrEmpty(result);
+            });
+        }
+        if (method.getReturnType() == Flux.class) {
+            return Flux.defer(() -> {
+                Object result = invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+                if (result instanceof org.reactivestreams.Publisher<?> publisher) {
+                    @SuppressWarnings("unchecked")
+                    org.reactivestreams.Publisher<Object> typed =
+                            (org.reactivestreams.Publisher<Object>) publisher;
+                    return Flux.from(typed);
+                }
+                return Flux.just(result);
+            });
+        }
+        return invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+    }
+
+    /** Builds all mutable execution state for one subscription only. */
+    private Object invokeOnce(RepositoryInvocation invocation) {
+        RepositoryMethodPlan plan = invocation.plan();
+        Method method = plan.method();
+        String methodName = method.getName();
+        Object[] arguments = invocation.arguments();
+        if (plan.kind() == RepositoryMethodPlan.Kind.XML) {
+            return executeXmlStatement(plan.xmlStatement(), method, arguments);
+        }
+        if (plan.kind() == RepositoryMethodPlan.Kind.DERIVED) {
+            return executeCustomMethod(method, arguments);
+        }
+        if (plan.kind() == RepositoryMethodPlan.Kind.UNSUPPORTED) {
+            throw new UnsupportedOperationException("Unsupported repository method: " + method.toGenericString());
+        }
+        if (plan.kind() != RepositoryMethodPlan.Kind.CRUD
+                && plan.kind() != RepositoryMethodPlan.Kind.OBJECT) {
             // 1. 先尝试从XML注册表查找
             return repositoryXmlRegistry.find(repositoryInterface, methodName)
                     .map(statement -> executeXmlStatement(statement, invocation.getMethod(), arguments))
@@ -139,9 +188,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持自定义方法：" + method.getName());
         }
 
-        CustomMethodResolver resolver = new CustomMethodResolver(metadata,
-                properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
-        CustomMethodResolver.ParsedMethod parsedMethod = resolver.resolve(method, arguments);
+        CustomMethodResolver.ParsedMethod parsedMethod = customMethodResolver.resolve(method, arguments);
 
         if (parsedMethod == null) {
             throw new UnsupportedOperationException("暂不支持自定义仓储方法：" + method.getName());
@@ -151,6 +198,9 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
         context.setSql(parsedMethod.sql());
         context.setParameters(parsedMethod.parameters());
+        context.setCommandType(parsedMethod.commandType() == CustomMethodResolver.SqlCommandType.SELECT
+                ? com.wcdk.r2dbc.core.xml.SqlCommandType.SELECT
+                : com.wcdk.r2dbc.core.xml.SqlCommandType.UPDATE);
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context, Mono::empty);
 
@@ -220,13 +270,14 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
         context.setParameters(methodParameters(method, arguments));
+        context.setCommandType(statement.commandType());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
                     DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getParameters());
                     Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getParameters());
                     sourceParameters.putAll(renderedSql.additionalParameters());
-                    BoundSql boundSql = bindSql(renderedSql.sql(), arguments, sourceParameters);
+                    BoundSql boundSql = bindSql(renderedSql.sql(), method, arguments, sourceParameters);
                     context.setSql(boundSql.sql());
                     context.setParameters(boundSql.parameters());
                 }));
@@ -241,8 +292,9 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                         Object result;
                         try {
                             result = switch (statement.commandType()) {
-                                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
+                                case INSERT, UPDATE, DELETE, MERGE -> executeXmlUpdate(finalBoundSql, method, arguments);
                                 case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
+                                case UNKNOWN -> throw new IllegalStateException("Unknown XML SQL command type");
                             };
                         } catch (Exception e) {
                             return Flux.error(e);
@@ -264,8 +316,9 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                         Object result;
                         try {
                             result = switch (statement.commandType()) {
-                                case INSERT, UPDATE, DELETE -> executeXmlUpdate(finalBoundSql, method, arguments);
+                                case INSERT, UPDATE, DELETE, MERGE -> executeXmlUpdate(finalBoundSql, method, arguments);
                                 case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
+                                case UNKNOWN -> throw new IllegalStateException("Unknown XML SQL command type");
                             };
                         } catch (Exception e) {
                             return Mono.error(e);
@@ -274,7 +327,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                         if (result instanceof Mono<?> mono) {
                             return mono;
                         } else if (result instanceof Flux<?> flux) {
-                            return flux.collectList();
+                            return flux.singleOrEmpty();
                         }
                         return Mono.justOrEmpty(result);
                     }));
@@ -420,7 +473,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         return method.getReturnType();
     }
 
-    private BoundSql bindSql(String sql, Object[] arguments, Map<String, Object> sourceParameters) {
+    private BoundSql bindSql(String sql, Method method, Object[] arguments, Map<String, Object> sourceParameters) {
         Map<String, Object> boundParameters = new LinkedHashMap<>();
         List<String> parameterNames = new ArrayList<>();
         Matcher matcher = PARAMETER_PATTERN.matcher(sql);
@@ -433,13 +486,48 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         matcher.appendTail(builder);
         if ((arguments == null ? 0 : arguments.length) == 1 && parameterNames.size() == 1
                 && !sourceParameters.containsKey(parameterNames.get(0))) {
-            boundParameters.put(bindName(parameterNames.get(0)), arguments[0]);
+            boundParameters.put(bindName(parameterNames.get(0)), typedNull(arguments[0], method.getParameterTypes()[0]));
             return new BoundSql(builder.toString(), boundParameters);
         }
         for (String name : parameterNames) {
-            boundParameters.put(bindName(name), parameterValue(sourceParameters, name));
+            Object value = parameterValue(sourceParameters, name);
+            boundParameters.put(bindName(name), typedNull(value, parameterJavaType(method, name)));
         }
         return new BoundSql(builder.toString(), boundParameters);
+    }
+
+    private Object typedNull(Object value, Class<?> javaType) {
+        return value == null ? SqlParameter.nullOf(javaType == null ? Object.class : javaType) : value;
+    }
+
+    private Class<?> parameterJavaType(Method method, String name) {
+        String rootName = name.contains(".") ? name.substring(0, name.indexOf('.')) : name;
+        String[] discoveredNames = PARAMETER_NAME_DISCOVERER.getParameterNames(method);
+        for (int i = 0; i < method.getParameterCount(); i++) {
+            MethodParameter parameter = new MethodParameter(method, i);
+            Param annotation = parameter.getParameterAnnotation(Param.class);
+            boolean matches = rootName.equals("arg" + i) || rootName.equals("param" + (i + 1))
+                    || annotation != null && rootName.equals(annotation.value())
+                    || discoveredNames != null && rootName.equals(discoveredNames[i]);
+            if (!matches) {
+                continue;
+            }
+            Class<?> type = method.getParameterTypes()[i];
+            if (name.contains(".")) {
+                return field(type, name.substring(name.indexOf('.') + 1)).getType();
+            }
+            return type;
+        }
+        if (method.getParameterCount() == 1 && name.contains(".")) {
+            return field(method.getParameterTypes()[0], name.substring(name.indexOf('.') + 1)).getType();
+        }
+        if (method.getParameterCount() == 1) {
+            Field beanField = findField(method.getParameterTypes()[0], name);
+            if (beanField != null) {
+                return beanField.getType();
+            }
+        }
+        return Object.class;
     }
 
     static Object terminatedPublisher(Method method) {
@@ -559,7 +647,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     Map<String, Object> parameters = new LinkedHashMap<>();
                     String fields = metadata.columns().stream().map(FieldColumn::name).collect(Collectors.joining(", "));
                     String values = metadata.columns().stream()
-                            .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
+                            .peek(column -> parameters.put(column.field().getName(),
+                                    typedNull(fieldValue(column, entity), column.field().getType())))
                             .map(column -> ":" + column.field().getName())
                             .collect(Collectors.joining(", "));
                     String sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
@@ -767,14 +856,14 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 for (Object item : values) {
                     String parameterName = "p" + index++;
                     markers.add(":" + parameterName);
-                    parameters.put(parameterName, item);
+                    parameters.put(parameterName, typedNull(item, column.field().getType()));
                 }
                 builder.append(column.name()).append(" ").append(operator)
                         .append(" (").append(String.join(", ", markers)).append(")");
             } else {
                 String parameterName = "p" + index++;
                 builder.append(column.name()).append(" ").append(operator).append(" :").append(parameterName);
-                parameters.put(parameterName, value);
+                parameters.put(parameterName, typedNull(value, column.field().getType()));
             }
         }
         return new SqlWhere(builder.toString(), parameters);

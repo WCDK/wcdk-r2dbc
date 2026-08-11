@@ -2,9 +2,17 @@ package com.wcdk.r2dbc.config;
 
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.core.RepositoryProxyFactory;
+import com.wcdk.r2dbc.core.datasource.R2dbcDataSourceRouter;
+import com.wcdk.r2dbc.core.executor.ParameterBinder;
+import com.wcdk.r2dbc.core.executor.R2dbcRowMapper;
+import com.wcdk.r2dbc.core.executor.R2dbcValueConverter;
+import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
+import com.wcdk.r2dbc.core.executor.SqlExecutionObserver;
+import com.wcdk.r2dbc.core.executor.MicrometerSqlExecutionObserver;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptor;
 import com.wcdk.r2dbc.core.interceptor.ReactiveSqlLifecycleInterceptor;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
+import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
 import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
 import com.wcdk.r2dbc.core.transaction.TransactionalAspect;
@@ -28,7 +36,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Role;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
@@ -38,7 +45,9 @@ import org.springframework.r2dbc.connection.R2dbcTransactionManager;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.ReactiveTransactionManager;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
+import io.micrometer.observation.ObservationRegistry;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,7 +75,6 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
 @ConditionalOnClass(DatabaseClient.class)
 @EnableConfigurationProperties({WcdkR2dbcProperties.class, WcdkSpringR2dbcProperties.class})
 @ConditionalOnProperty(prefix = "wcdk.r2dbc", name = "enabled", havingValue = "true")
-@Primary
 public class WcdkR2dbcAutoConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(WcdkR2dbcAutoConfiguration.class);
@@ -82,6 +90,11 @@ public class WcdkR2dbcAutoConfiguration {
         Map<String, WcdkSpringR2dbcProperties.DataSourceProperties> dataSources = properties.getDataSources();
         if (dataSources == null || dataSources.isEmpty()) {
             throw new IllegalStateException("spring.r2dbc.data-sources must be configured when Spring R2DBC ConnectionFactory is missing");
+        }
+        if (!StringUtils.hasText(properties.getPrimary()) || !dataSources.containsKey(properties.getPrimary())) {
+            throw new IllegalArgumentException("spring.r2dbc.primary='" + properties.getPrimary()
+                    + "' does not match a configured spring.r2dbc.data-sources key; available: "
+                    + dataSources.keySet());
         }
         Map<String, ConnectionFactory> connectionFactories = new LinkedHashMap<>();
         dataSources.forEach((name, dataSourceProperties) -> connectionFactories.put(name, createConnectionFactory(name, dataSourceProperties, properties.getPool())));
@@ -104,6 +117,9 @@ public class WcdkR2dbcAutoConfiguration {
         
         if (r2dbcUrl == null || r2dbcUrl.isBlank()) {
             throw new IllegalArgumentException("spring.r2dbc.url must not be blank");
+        }
+        if (properties.getPool() != null && properties.getPool().isEnabled()) {
+            properties.getPool().validate("primary");
         }
 
         log.info("创建单数据源连接工厂，URL: {}, 数据库类型: {}", r2dbcUrl, databaseType);
@@ -158,6 +174,7 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(name = "connectionFactoryDisposer")
     @Role(ROLE_INFRASTRUCTURE)
     public DisposableBean connectionFactoryDisposer(ConnectionFactory connectionFactory) {
         return () -> {
@@ -190,6 +207,7 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(R2dbcUtil.class)
     @Role(ROLE_INFRASTRUCTURE)
     public R2dbcUtil r2dbcUtil(DatabaseClient databaseClient,
                                ObjectProvider<R2dbcEntityTemplate> entityTemplate,
@@ -197,9 +215,56 @@ public class WcdkR2dbcAutoConfiguration {
                                WcdkR2dbcProperties properties,
                                WcdkSpringR2dbcProperties springR2dbcProperties,
                                ObjectProvider<TransactionManager> transactionManagerProvider,
-                               SqlLifecycleInterceptorChain interceptorChain) {
-        return new R2dbcUtil(databaseClient, entityTemplate.getIfAvailable(), transactionalOperator.getIfAvailable(), 
-                properties, springR2dbcProperties, transactionManagerProvider.getIfAvailable(), interceptorChain);
+                               ParameterBinder parameterBinder,
+                               SqlLifecycleExecutor lifecycleExecutor,
+                               R2dbcRowMapper rowMapper,
+                               R2dbcSqlLogger sqlLogger,
+                               R2dbcDataSourceRouter dataSourceRouter) {
+        return new R2dbcUtil(databaseClient, entityTemplate.getIfAvailable(), transactionalOperator.getIfAvailable(),
+                properties, springR2dbcProperties, transactionManagerProvider.getIfAvailable(),
+                parameterBinder, lifecycleExecutor, rowMapper, sqlLogger, dataSourceRouter);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ParameterBinder parameterBinder() {
+        return new ParameterBinder();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public R2dbcRowMapper r2dbcRowMapper(ObjectProvider<R2dbcValueConverter> converters) {
+        return new R2dbcRowMapper(converters.orderedStream().toList());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public R2dbcSqlLogger r2dbcSqlLogger(WcdkR2dbcProperties properties,
+                                         WcdkSpringR2dbcProperties springProperties) {
+        return new R2dbcSqlLogger(properties, springProperties);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public R2dbcDataSourceRouter r2dbcDataSourceRouter() {
+        return new R2dbcDataSourceRouter();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public SqlLifecycleExecutor sqlLifecycleExecutor(SqlLifecycleInterceptorChain chain,
+                                                       SqlExecutionObserver observer) {
+        return new SqlLifecycleExecutor(chain, observer);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public SqlExecutionObserver sqlExecutionObserver(WcdkR2dbcProperties properties,
+                                                       ObjectProvider<ObservationRegistry> registry) {
+        ObservationRegistry available = registry.getIfAvailable();
+        return properties.isObservabilityEnabled() && available != null
+                ? new MicrometerSqlExecutionObserver(available)
+                : SqlExecutionObserver.NOOP;
     }
 
     @Bean
@@ -226,12 +291,14 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(RepositoryXmlRegistry.class)
     @Role(ROLE_INFRASTRUCTURE)
     public RepositoryXmlRegistry mapperXmlRegistry(ResourcePatternResolver resourcePatternResolver, WcdkR2dbcProperties properties) {
         return new RepositoryXmlRegistry(resourcePatternResolver, properties);
     }
 
     @Bean
+    @ConditionalOnMissingBean(RepositoryProxyFactory.class)
     @Role(ROLE_INFRASTRUCTURE)
     public RepositoryProxyFactory repositoryProxyFactory(R2dbcUtil r2dbcUtil,
                                                            WcdkR2dbcProperties properties,
@@ -240,6 +307,7 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(SqlLifecycleInterceptorChain.class)
     public SqlLifecycleInterceptorChain sqlLifecycleInterceptorChain(
             ObjectProvider<SqlLifecycleInterceptor> syncProvider,
             ObjectProvider<ReactiveSqlLifecycleInterceptor> reactiveProvider) {
@@ -263,8 +331,15 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     private ConnectionFactory createConnectionFactory(String name, WcdkSpringR2dbcProperties.DataSourceProperties dsProperties, WcdkSpringR2dbcProperties.Pool globalPool) {
+        if (!StringUtils.hasText(name)) {
+            throw new IllegalArgumentException("spring.r2dbc.data-sources contains a blank data source name");
+        }
         if (dsProperties == null || dsProperties.getUrl() == null || dsProperties.getUrl().isBlank()) {
-            throw new IllegalArgumentException("R2DBC data source url is blank: " + name);
+            throw new IllegalArgumentException("spring.r2dbc.data-sources." + name + ".url must not be blank");
+        }
+        WcdkSpringR2dbcProperties.Pool poolConfig = dsProperties.effectivePool(globalPool);
+        if (poolConfig != null && poolConfig.isEnabled()) {
+            poolConfig.validate(name);
         }
         ConnectionFactoryOptions.Builder builder = ConnectionFactoryOptions.builder()
                 .from(ConnectionFactoryOptions.parse(dsProperties.getUrl()));
@@ -288,7 +363,7 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     private ConnectionFactory poolConnectionFactory(String name, ConnectionFactory connectionFactory, WcdkSpringR2dbcProperties.DataSourceProperties dsProperties, WcdkSpringR2dbcProperties.Pool globalPool) {
-        WcdkSpringR2dbcProperties.Pool poolConfig = dsProperties.getPool() != null ? dsProperties.getPool() : globalPool;
+        WcdkSpringR2dbcProperties.Pool poolConfig = dsProperties.effectivePool(globalPool);
         return poolConnectionFactory(name, connectionFactory, poolConfig);
     }
 
@@ -296,7 +371,6 @@ public class WcdkR2dbcAutoConfiguration {
         if (poolConfig == null || !poolConfig.isEnabled()) {
             return connectionFactory;
         }
-        poolConfig.validate(name);
         ConnectionPoolConfiguration.Builder poolBuilder = ConnectionPoolConfiguration.builder(connectionFactory)
                 .name(name)
                 .maxSize(poolConfig.getMaxSize())

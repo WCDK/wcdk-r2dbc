@@ -15,5 +15,9 @@ public enum SqlCommandType {
 
     UPDATE,
 
-    DELETE
+    DELETE,
+
+    MERGE,
+
+    UNKNOWN
 }

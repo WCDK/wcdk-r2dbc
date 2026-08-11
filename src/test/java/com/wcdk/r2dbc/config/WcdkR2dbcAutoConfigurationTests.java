@@ -3,6 +3,7 @@ package com.wcdk.r2dbc.config;
 import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryMetadata;
+import com.wcdk.r2dbc.core.executor.ParameterBinder;
 import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -54,6 +55,34 @@ class WcdkR2dbcAutoConfigurationTests {
                 .run(context -> assertThat(managed.isDisposed()).isFalse());
 
         assertThat(managed.isDisposed()).isTrue();
+    }
+
+    @Test
+    void backsOffForUserProvidedInfrastructureComponents() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+        ParameterBinder supplied = new ParameterBinder();
+
+        runner.withBean(ConnectionFactory.class, () -> connectionFactory)
+                .withBean(ParameterBinder.class, () -> supplied)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(ParameterBinder.class);
+                    assertThat(context.getBean(ParameterBinder.class)).isSameAs(supplied);
+                });
+    }
+
+    @Test
+    void reportsInvalidPrimaryBeforeCreatingDataSources() {
+        runner.withPropertyValues(
+                        "spring.r2dbc.data-sources.master.url=r2dbc:postgresql://localhost/test",
+                        "spring.r2dbc.primary=missing")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasStackTraceContaining("spring.r2dbc.primary='missing'")
+                            .hasStackTraceContaining("available: [master]");
+                });
     }
 
     private static final class DisposableConnectionFactory implements ConnectionFactory, Disposable {
