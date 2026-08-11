@@ -45,14 +45,13 @@ public class R2dbcSqlLogger {
             log.info("=================R2DBC==========START==========");
             log.info("数据源：{}", dataSource);
             log.info("执行SQL：{}", normalizeSql(sql));
-            log.info("=================R2DBC==========END==========");
+
             return;
         }
         log.info("=================R2DBC==========START==========");
         log.info("数据源：{}", dataSource);
         log.info("执行SQL：{}", normalizeSql(sql));
         log.info("参数：{}", parameters);
-        log.info("=================R2DBC==========END==========");
     }
 
     /**
@@ -64,6 +63,25 @@ public class R2dbcSqlLogger {
         if (properties.isSqlLogEnabled()) {
             log.info("R2DBC执行结果，返回数量：{}", Math.max(0, resultCount));
         }
+    }
+
+    /**
+     * 将一次 SQL 执行作为单个日志事件输出，避免并发执行时多行内容互相穿插。
+     *
+     * @param sql        SQL语句
+     * @param parameters 参数
+     * @param result     返回数量或错误状态
+     */
+    public void logExecution(String sql, Map<?, ?> parameters, Object result) {
+        if (!properties.isSqlLogEnabled()) {
+            return;
+        }
+        log.info("=========r2dbc==start==========\n" +
+                        "excuteSQl：{}\n" +
+                        "excuteParam：{}\n" +
+                        "result：{}\n" +
+                        "=========r2dbc==end==========",
+                normalizeSql(sql), parameters == null ? Map.of() : parameters, result);
     }
 
     /**

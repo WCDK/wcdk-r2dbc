@@ -9,7 +9,6 @@ import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
-import reactor.util.context.ContextView;
 
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -67,8 +66,8 @@ public class R2dbcQueryOperations {
         Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
         return lifecycleExecutor.executeFlux(chain, context, preparation,
                 () -> Flux.deferContextual(contextView -> {
-                    sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-                    return withResultCount(execute(context.getSql(), context.getParameters()).fetch().all());
+                    return withExecutionLog(execute(context.getSql(), context.getParameters()).fetch().all(),
+                            context.getSql(), context.getParameters());
                 }));
     }
 
@@ -101,8 +100,8 @@ public class R2dbcQueryOperations {
         Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
         return lifecycleExecutor.executeFlux(chain, context, preparation,
                 () -> Flux.deferContextual(contextView -> {
-                    sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-                    return withResultCount(execute(context.getSql(), context.getParameters()).map(mapper).all());
+                    return withExecutionLog(execute(context.getSql(), context.getParameters()).map(mapper).all(),
+                            context.getSql(), context.getParameters());
                 }));
     }
 
@@ -156,20 +155,16 @@ public class R2dbcQueryOperations {
     public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
                                               BiFunction<Row, RowMetadata, T> mapper) {
         return Flux.deferContextual(contextView -> {
-            sqlLogger.logSql(contextView, sql, parameters);
-            return withResultCount(execute(sql, parameters).map(mapper).all());
+            return withExecutionLog(execute(sql, parameters).map(mapper).all(), sql, parameters);
         });
     }
 
-    private <T> Flux<T> withResultCount(Flux<T> results) {
+    private <T> Flux<T> withExecutionLog(Flux<T> results, String sql, Map<?, ?> parameters) {
         AtomicLong resultCount = new AtomicLong();
         return results
                 .doOnNext(ignored -> resultCount.incrementAndGet())
-                .doFinally(signal -> {
-                    if (signal == SignalType.ON_COMPLETE || signal == SignalType.CANCEL) {
-                        sqlLogger.logResultCount(resultCount.get());
-                    }
-                });
+                .doFinally(signal -> sqlLogger.logExecution(sql, parameters,
+                        signal == SignalType.ON_ERROR ? "ERROR" : resultCount.get()));
     }
 
     public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,

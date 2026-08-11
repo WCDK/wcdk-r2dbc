@@ -6,7 +6,6 @@ import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.util.context.ContextView;
 
 import java.util.List;
 import java.util.Map;
@@ -63,18 +62,20 @@ public class R2dbcUpdateOperations {
         Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
         return lifecycleExecutor.executeMono(chain, context, preparation,
                 () -> Mono.deferContextual(contextView -> {
-                    sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
                     return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated()
-                            .doOnNext(sqlLogger::logResultCount);
+                            .doOnSuccess(count -> sqlLogger.logExecution(context.getSql(), context.getParameters(),
+                                    count == null ? 0 : count))
+                            .doOnError(error -> sqlLogger.logExecution(
+                                    context.getSql(), context.getParameters(), "ERROR"));
                 }));
     }
 
     /** Executes an already intercepted repository update without invoking the lifecycle chain again. */
     public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return Mono.deferContextual(contextView -> {
-            sqlLogger.logSql(contextView, sql, parameters);
             return execute(sql, parameters).fetch().rowsUpdated()
-                    .doOnNext(sqlLogger::logResultCount);
+                    .doOnSuccess(count -> sqlLogger.logExecution(sql, parameters, count == null ? 0 : count))
+                    .doOnError(error -> sqlLogger.logExecution(sql, parameters, "ERROR"));
         });
     }
 
