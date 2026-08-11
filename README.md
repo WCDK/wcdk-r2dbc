@@ -36,6 +36,52 @@
 | **动态数据源切换** | 通过 AOP + 注解实现数据源动态切换 |
 | **SQL生命周期拦截** | 支持在SQL编译前/后、执行前/后自定义操作 |
 
+### 新增能力
+
+| 特性 | 说明 |
+|------|------|
+| **派生仓库方法编译** | 启动阶段预编译 `findBy`、`countBy`、`existsBy`、`deleteBy`、`updateBy` 等方法，减少运行期解析开销，并在启动时校验方法名、字段和参数数量。 |
+| **XML SQL 编译计划** | XML 语句在仓库代理创建阶段完成解析和校验，支持动态 SQL、`resultType`、`resultMap`、`discriminator` 与 `<foreach>`。 |
+| **类型化参数绑定** | 支持为参数声明 Java 类型和 R2DBC 数据库类型，正确处理 `null`、集合、数组以及数据库驱动的原生类型。 |
+| **统一结果映射** | 支持实体、记录类、基础类型、枚举和 Java 时间类型映射，并支持自定义 `R2dbcValueConverter`。 |
+| **SQL 执行观测** | 提供 SQL 生命周期状态、结果数量、耗时和错误观测扩展点，可接入 Micrometer，且不会记录原始参数。 |
+| **方言分页** | 根据 Spring Data R2DBC 方言生成 `limit`、`offset` 分页语法，兼容达梦、PostgreSQL、MySQL 和 Oracle。 |
+
+#### 派生方法示例
+
+```java
+public interface UserRepository extends BaseRepository<User, Long> {
+    Flux<User> findByStatus(Integer status);
+    Mono<Long> countByStatus(Integer status);
+    Mono<Boolean> existsByEmail(String email);
+    Mono<Integer> updateNameById(String name, Long id);
+}
+```
+
+框架会在启动时编译方法分发计划；不支持的方法名、未知字段或参数数量不匹配会在启动阶段提示，避免请求执行后才暴露问题。
+
+#### 类型化参数示例
+
+```java
+SqlParameter parameter = new SqlParameter(
+        null,
+        Instant.class,
+        R2dbcType.TIMESTAMP_WITH_TIME_ZONE
+);
+```
+
+`R2dbcValueConverter` 可用于扩展驱动类型到实体属性类型的转换。内置映射支持 `Instant`、`LocalDateTime`、`LocalDate`、`LocalTime` 与 `Date` 之间的常用转换。
+
+#### SQL 观测扩展
+
+```java
+@Bean
+SqlExecutionObserver sqlExecutionObserver() {
+    return new MicrometerSqlExecutionObserver(observationRegistry);
+}
+```
+
+观测器可获取 SQL 执行阶段、终止状态、结果数量和异常信息；敏感参数不会被作为观测标签输出。
 ### 开发特性
 
 | 特性 | 说明 |
@@ -769,7 +815,7 @@ public class InterceptorConfig {
 
 ## 自定义仓储方法
 
-> **实验性功能**：方法名派生查询当前处于实验阶段，API 可能在后续版本中调整。
+> 
 
 ### 方法名约定
 

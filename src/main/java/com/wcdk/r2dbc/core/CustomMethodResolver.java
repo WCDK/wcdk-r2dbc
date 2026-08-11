@@ -149,27 +149,25 @@ public class CustomMethodResolver {
     // ==================== delete ====================
 
     private ParsedMethod resolveDelete(Method method, String fieldPart, Object[] arguments) {
-        FieldColumn logicDeleteColumn = metadata.logicDeleteColumn();
-        if (logicDeleteColumn == null) {
-            throw new UnsupportedOperationException("实体未配置逻辑删除字段，不支持delete方法");
-        }
-
         if (fieldPart == null || fieldPart.isEmpty()) {
-            throw new UnsupportedOperationException("delete方法必须指定条件");
+            throw new UnsupportedOperationException("delete method must specify a condition");
         }
 
         List<Condition> conditions = parseConditions(fieldPart, method.getParameters(), arguments, 0, method.getName());
         String whereSql = buildWhereSql(conditions, false);
+        Map<String, Object> parameters = buildParameters(conditions);
+        FieldColumn logicDeleteColumn = metadata.logicDeleteColumn();
+        if (logicDeleteColumn == null) {
+            return new ParsedMethod("DELETE FROM " + metadata.tableName() + whereSql,
+                    parameters, SqlCommandType.DELETE);
+        }
 
         String sql = "UPDATE " + metadata.tableName()
                 + " SET " + logicDeleteColumn.name() + " = :logicDeleteValue"
                 + whereSql;
-
-        Map<String, Object> parameters = buildParameters(conditions);
         parameters.put("logicDeleteValue", typed(logicDeleteColumn, logicDeleteValue));
         return new ParsedMethod(sql, parameters, SqlCommandType.UPDATE);
     }
-
     // ==================== update ====================
 
     private ParsedMethod resolveUpdate(Method method, String fieldPart, Object[] arguments) {
@@ -613,9 +611,6 @@ public class CustomMethodResolver {
         String fieldPart = matcher.group(4);
 
         validateMethodNameLength(methodName);
-        if ("delete".equals(operation) && metadata.logicDeleteColumn() == null) {
-            throw new IllegalArgumentException("实体未配置逻辑删除字段，不支持派生 delete 方法：" + methodName);
-        }
         validateFieldPart(fieldPart == null ? null : conditionPart(fieldPart), methodName);
         if ("find".equals(operation)) {
             extractOrderBy(fieldPart);
