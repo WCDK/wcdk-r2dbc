@@ -40,7 +40,7 @@ public final class RepositoryMetadata {
                 .orElseGet(() -> columns.stream()
                         .filter(column -> "id".equals(column.field().getName()))
                         .findFirst()
-                        .orElseThrow(() -> new IllegalStateException("实体缺少主键字段：" + entityClass.getName())));
+                        .orElse(null));
         this.logicDeleteColumn = columns.stream()
                 .filter(column -> column.field().getName().equals(properties.getLogicDeleteField()))
                 .findFirst()
@@ -60,6 +60,17 @@ public final class RepositoryMetadata {
     }
 
     public FieldColumn idColumn() {
+        return idColumn;
+    }
+
+    public boolean hasIdColumn() {
+        return idColumn != null;
+    }
+
+    public FieldColumn requireIdColumn() {
+        if (idColumn == null) {
+            throw new UnsupportedOperationException("实体未定义主键，不支持按主键操作：" + entityClass.getName());
+        }
         return idColumn;
     }
 

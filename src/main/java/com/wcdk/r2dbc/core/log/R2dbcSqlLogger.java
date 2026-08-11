@@ -56,6 +56,17 @@ public class R2dbcSqlLogger {
     }
 
     /**
+     * 记录一次 SQL 执行实际返回或影响的行数。
+     *
+     * @param resultCount 返回或影响的行数
+     */
+    public void logResultCount(long resultCount) {
+        if (properties.isSqlLogEnabled()) {
+            log.info("R2DBC执行结果，返回数量：{}", Math.max(0, resultCount));
+        }
+    }
+
+    /**
      * 获取当前数据源名称。
      *
      * @param contextView 上下文视图

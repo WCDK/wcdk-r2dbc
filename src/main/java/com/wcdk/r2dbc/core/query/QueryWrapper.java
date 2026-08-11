@@ -21,6 +21,20 @@ public class QueryWrapper<T> {
 
     private Integer offset;
 
+    public QueryWrapper() {
+    }
+
+    private QueryWrapper(QueryWrapper<T> source) {
+        this.conditions.addAll(source.conditions);
+        this.orderByList.addAll(source.orderByList);
+        this.limit = source.limit;
+        this.offset = source.offset;
+    }
+
+    public QueryWrapper<T> copy() {
+        return new QueryWrapper<>(this);
+    }
+
     public QueryWrapper<T> eq(String column, Object value) {
         return condition(column, "=", value);
     }
@@ -47,6 +61,22 @@ public class QueryWrapper<T> {
 
     public QueryWrapper<T> like(String column, Object value) {
         return condition(column, "LIKE", value);
+    }
+
+    public QueryWrapper<T> in(String column, Iterable<?> values) {
+        return condition(column, "IN", values);
+    }
+
+    public QueryWrapper<T> notIn(String column, Iterable<?> values) {
+        return condition(column, "NOT IN", values);
+    }
+
+    public QueryWrapper<T> isNull(String column) {
+        return condition(column, "IS NULL", null);
+    }
+
+    public QueryWrapper<T> isNotNull(String column) {
+        return condition(column, "IS NOT NULL", null);
     }
 
     public QueryWrapper<T> orderByAsc(String column) {

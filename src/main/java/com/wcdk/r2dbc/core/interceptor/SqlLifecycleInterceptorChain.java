@@ -54,7 +54,7 @@ public class SqlLifecycleInterceptorChain {
     public Mono<Boolean> beforeCompileReactive(SqlExecutionContext context) {
         // 先执行异步拦截器
         return executeReactiveInterceptors(reactiveInterceptors,
-                interceptor -> interceptor.beforeCompileReactive(context), "beforeCompileReactive")
+                interceptor -> interceptor.beforeCompileReactive(context), "beforeCompileReactive", context)
                 .then(Mono.defer(() -> {
                     // 如果已终止，直接返回
                     if (context.isTerminated()) {
@@ -74,7 +74,7 @@ public class SqlLifecycleInterceptorChain {
      */
     public Mono<Boolean> afterCompileReactive(SqlExecutionContext context) {
         return executeReactiveInterceptors(reactiveInterceptors,
-                interceptor -> interceptor.afterCompileReactive(context), "afterCompileReactive")
+                interceptor -> interceptor.afterCompileReactive(context), "afterCompileReactive", context)
                 .then(Mono.defer(() -> {
                     if (context.isTerminated()) {
                         return Mono.just(true);
@@ -92,7 +92,7 @@ public class SqlLifecycleInterceptorChain {
      */
     public Mono<Boolean> beforeExecuteReactive(SqlExecutionContext context) {
         return executeReactiveInterceptors(reactiveInterceptors,
-                interceptor -> interceptor.beforeExecuteReactive(context), "beforeExecuteReactive")
+                interceptor -> interceptor.beforeExecuteReactive(context), "beforeExecuteReactive", context)
                 .then(Mono.defer(() -> {
                     if (context.isTerminated()) {
                         return Mono.just(true);
@@ -110,7 +110,7 @@ public class SqlLifecycleInterceptorChain {
      */
     public Mono<Void> afterExecuteReactive(SqlExecutionContext context) {
         return executeReactiveInterceptors(reactiveInterceptors,
-                interceptor -> interceptor.afterExecuteReactive(context), "afterExecuteReactive")
+                interceptor -> interceptor.afterExecuteReactive(context), "afterExecuteReactive", context)
                 .then(Mono.fromRunnable(() -> executeSyncAfterExecute(syncInterceptors, context)));
     }
 
@@ -119,7 +119,8 @@ public class SqlLifecycleInterceptorChain {
      */
     private Mono<Boolean> executeReactiveInterceptors(List<ReactiveSqlLifecycleInterceptor> interceptors,
                                                       ReactiveInterceptorAction action,
-                                                      String phase) {
+                                                      String phase,
+                                                      SqlExecutionContext context) {
         if (interceptors.isEmpty()) {
             return Mono.just(false);
         }
@@ -128,9 +129,10 @@ public class SqlLifecycleInterceptorChain {
                 .concatMap(interceptor -> action.execute(interceptor)
                         .doOnSubscribe(s -> log.trace("Executing interceptor [{}] {}", interceptor.getClass().getSimpleName(), phase))
                         .doOnError(e -> log.error("Interceptor [{}] error at {}", interceptor.getClass().getSimpleName(), phase, e))
-                        .then(Mono.fromSupplier(() -> false))
+                        .then(Mono.fromSupplier(context::isTerminated))
                 )
-                .then(Mono.fromCallable(() -> false));
+                .takeUntil(Boolean::booleanValue)
+                .then(Mono.fromSupplier(context::isTerminated));
     }
 
     /**
@@ -141,16 +143,12 @@ public class SqlLifecycleInterceptorChain {
                                             String phase,
                                             SqlExecutionContext context) {
         for (SqlLifecycleInterceptor interceptor : interceptors) {
-            try {
-                action.execute(interceptor, context);
-                if (context.isTerminated()) {
-                    log.debug("Interceptor [{}] terminated execution at {}: status={}, reason={}",
-                            interceptor.getClass().getSimpleName(), phase,
-                            context.getStatus(), context.getStatusReason());
-                    return true;
-                }
-            } catch (Exception e) {
-                log.error("Interceptor [{}] error at {}", interceptor.getClass().getSimpleName(), phase, e);
+            action.execute(interceptor, context);
+            if (context.isTerminated()) {
+                log.debug("Interceptor [{}] terminated execution at {}: status={}, reason={}",
+                        interceptor.getClass().getSimpleName(), phase,
+                        context.getStatus(), context.getStatusReason());
+                return true;
             }
         }
         return false;
@@ -161,11 +159,7 @@ public class SqlLifecycleInterceptorChain {
      */
     private void executeSyncAfterExecute(List<SqlLifecycleInterceptor> interceptors, SqlExecutionContext context) {
         for (SqlLifecycleInterceptor interceptor : interceptors) {
-            try {
-                interceptor.afterExecute(context);
-            } catch (Exception e) {
-                log.error("Interceptor [{}] error at afterExecute", interceptor.getClass().getSimpleName(), e);
-            }
+            interceptor.afterExecute(context);
         }
     }
 

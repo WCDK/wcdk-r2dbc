@@ -1,6 +1,7 @@
 package com.wcdk.r2dbc.core.transaction;
 
 import io.r2dbc.spi.Connection;
+import io.r2dbc.spi.IsolationLevel;
 import reactor.core.publisher.Mono;
 
 /**
@@ -108,6 +109,10 @@ public interface ManualTransaction {
      */
     void setTimeout(int timeoutSeconds);
 
+    IsolationLevel getIsolationLevel();
+
+    void setIsolationLevel(IsolationLevel isolationLevel);
+
     /**
      * 获取事务名称。
      *
@@ -128,4 +133,6 @@ public interface ManualTransaction {
      * @return 数据库连接
      */
     Connection getConnection();
+
+    Mono<Void> close();
 }

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DynamicSqlSourceTests {
 
@@ -72,6 +73,13 @@ class DynamicSqlSourceTests {
                 "users", List.of(new User(1L, "A"), new User(2L, "B"))));
 
         assertThat(rendered.additionalParameters().values()).containsExactly(1L, "A", 2L, "B");
+    }
+
+    @Test
+    void rejectsLiteralSubstitutionByDefault() {
+        assertThatThrownBy(() -> parse("<select>SELECT * FROM ${table}</select>"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not allow literal");
     }
 
     private static DynamicSqlSource parse(String xml) throws Exception {

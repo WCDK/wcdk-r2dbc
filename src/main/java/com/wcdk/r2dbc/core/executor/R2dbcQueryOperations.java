@@ -8,9 +8,11 @@ import io.r2dbc.spi.RowMetadata;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.util.context.ContextView;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 
 /**
@@ -62,26 +64,12 @@ public class R2dbcQueryOperations {
         SqlExecutionContext context = lifecycleExecutor.createContext("query", (Map<String, Object>) parameters);
         context.setSql(sql);
 
-        return lifecycleExecutor.beforeCompileReactive(chain, context)
-                .filter(terminated -> !terminated)
-                .then(lifecycleExecutor.afterCompileReactive(chain, context))
-                .filter(terminated -> !terminated)
-                .then(lifecycleExecutor.beforeExecuteReactive(chain, context))
-                .filter(terminated -> !terminated)
-                .thenMany(Flux.deferContextual(contextView -> {
-                    context.setStartTime(System.nanoTime());
+        Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
+        return lifecycleExecutor.executeFlux(chain, context, preparation,
+                () -> Flux.deferContextual(contextView -> {
                     sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-                    return execute(context.getSql(), context.getParameters()).fetch().all();
-                }))
-                .doOnComplete(() -> {
-                    context.setEndTime(System.nanoTime());
-                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
-                });
+                    return withResultCount(execute(context.getSql(), context.getParameters()).fetch().all());
+                }));
     }
 
     /**
@@ -110,26 +98,12 @@ public class R2dbcQueryOperations {
         SqlExecutionContext context = lifecycleExecutor.createContext("query", (Map<String, Object>) parameters);
         context.setSql(sql);
 
-        return lifecycleExecutor.beforeCompileReactive(chain, context)
-                .filter(terminated -> !terminated)
-                .then(lifecycleExecutor.afterCompileReactive(chain, context))
-                .filter(terminated -> !terminated)
-                .then(lifecycleExecutor.beforeExecuteReactive(chain, context))
-                .filter(terminated -> !terminated)
-                .thenMany(Flux.deferContextual(contextView -> {
-                    context.setStartTime(System.nanoTime());
+        Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
+        return lifecycleExecutor.executeFlux(chain, context, preparation,
+                () -> Flux.deferContextual(contextView -> {
                     sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-                    return execute(context.getSql(), context.getParameters()).map(mapper).all();
-                }))
-                .doOnComplete(() -> {
-                    context.setEndTime(System.nanoTime());
-                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
-                });
+                    return withResultCount(execute(context.getSql(), context.getParameters()).map(mapper).all());
+                }));
     }
 
     /**
@@ -183,8 +157,19 @@ public class R2dbcQueryOperations {
                                               BiFunction<Row, RowMetadata, T> mapper) {
         return Flux.deferContextual(contextView -> {
             sqlLogger.logSql(contextView, sql, parameters);
-            return execute(sql, parameters).map(mapper).all();
+            return withResultCount(execute(sql, parameters).map(mapper).all());
         });
+    }
+
+    private <T> Flux<T> withResultCount(Flux<T> results) {
+        AtomicLong resultCount = new AtomicLong();
+        return results
+                .doOnNext(ignored -> resultCount.incrementAndGet())
+                .doFinally(signal -> {
+                    if (signal == SignalType.ON_COMPLETE || signal == SignalType.CANCEL) {
+                        sqlLogger.logResultCount(resultCount.get());
+                    }
+                });
     }
 
     public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,

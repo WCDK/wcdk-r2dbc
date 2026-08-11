@@ -107,6 +107,12 @@ public final class DynamicSqlSource {
     }
 
     private record TextSqlNode(String text) implements SqlNode {
+        private TextSqlNode {
+            if (text.contains("${")) {
+                throw new IllegalArgumentException("Dynamic SQL does not allow literal ${} substitution; use #{} binding");
+            }
+        }
+
         @Override
         public void apply(RenderContext context, StringBuilder sql) {
             Matcher matcher = PARAMETER_PATTERN.matcher(text);

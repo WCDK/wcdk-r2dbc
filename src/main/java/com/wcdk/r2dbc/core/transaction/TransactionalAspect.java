@@ -1,5 +1,7 @@
 package com.wcdk.r2dbc.core.transaction;
 
+import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
+
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -60,6 +62,9 @@ public class TransactionalAspect {
     public Object handleTransaction(ProceedingJoinPoint joinPoint) throws Throwable {
         Method method = resolveMethod(joinPoint);
         Transactional transactional = AnnotationUtils.findAnnotation(method, Transactional.class);
+        if (transactional == null) {
+            transactional = AnnotationUtils.findAnnotation(method.getDeclaringClass(), Transactional.class);
+        }
 
         if (transactional == null) {
             return joinPoint.proceed();
@@ -113,7 +118,7 @@ public class TransactionalAspect {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
         }
 
-        return wrapped;
+        return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
     }
 
     /**
@@ -122,13 +127,15 @@ public class TransactionalAspect {
      * 事务在订阅时开始，所有元素完成后提交，异常时回滚。
      */
     private Flux<?> wrapFlux(Flux<?> flux, boolean readOnly, int timeout, String transactionName) {
-        Flux<?> wrapped = transactionalOperator.transactional(flux);
+        Flux<?> wrapped = readOnly
+                ? transactionTemplate.wrapReadOnly(flux)
+                : transactionalOperator.transactional(flux);
 
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
         }
 
-        return wrapped;
+        return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
     }
 
     /**
@@ -160,7 +167,7 @@ public class TransactionalAspect {
             mono = mono.timeout(Duration.ofSeconds(timeout));
         }
 
-        return mono;
+        return R2dbcDataSourceContext.pinTransactionDataSource(mono);
     }
 
     private boolean hasTimeout(int timeout) {

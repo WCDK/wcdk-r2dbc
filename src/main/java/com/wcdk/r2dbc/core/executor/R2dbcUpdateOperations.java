@@ -60,34 +60,21 @@ public class R2dbcUpdateOperations {
         SqlExecutionContext context = lifecycleExecutor.createContext("update", (Map<String, Object>) parameters);
         context.setSql(sql);
 
-        return lifecycleExecutor.beforeCompileReactive(chain, context)
-                .filter(terminated -> !terminated)
-                .then(lifecycleExecutor.afterCompileReactive(chain, context))
-                .filter(terminated -> !terminated)
-                .then(lifecycleExecutor.beforeExecuteReactive(chain, context))
-                .filter(terminated -> !terminated)
-                .then(Mono.deferContextual(contextView -> {
-                    context.setStartTime(System.nanoTime());
+        Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
+        return lifecycleExecutor.executeMono(chain, context, preparation,
+                () -> Mono.deferContextual(contextView -> {
                     sqlLogger.logSql(contextView, context.getSql(), context.getParameters());
-                    return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated();
-                }))
-                .doOnSuccess(r -> {
-                    context.setResult(r);
-                    context.setEndTime(System.nanoTime());
-                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
-                })
-                .doOnError(e -> {
-                    context.setError(e);
-                    context.setEndTime(System.nanoTime());
-                    lifecycleExecutor.afterExecuteReactive(chain, context).subscribe();
-                });
+                    return execute(context.getSql(), context.getParameters()).fetch().rowsUpdated()
+                            .doOnNext(sqlLogger::logResultCount);
+                }));
     }
 
     /** Executes an already intercepted repository update without invoking the lifecycle chain again. */
     public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return Mono.deferContextual(contextView -> {
             sqlLogger.logSql(contextView, sql, parameters);
-            return execute(sql, parameters).fetch().rowsUpdated();
+            return execute(sql, parameters).fetch().rowsUpdated()
+                    .doOnNext(sqlLogger::logResultCount);
         });
     }
 

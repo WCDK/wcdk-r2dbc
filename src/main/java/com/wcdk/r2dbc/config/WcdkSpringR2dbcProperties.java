@@ -50,6 +50,32 @@ public class WcdkSpringR2dbcProperties {
         private int initialSize = 10;
 
         private String validationQuery;
+
+        void validate(String dataSource) {
+            if (maxSize <= 0) {
+                throw invalid(dataSource, "max-size must be greater than zero");
+            }
+            if (initialSize < 0 || initialSize > maxSize) {
+                throw invalid(dataSource, "initial-size must be between zero and max-size");
+            }
+            if (acquireRetry < 0) {
+                throw invalid(dataSource, "acquire-retry must not be negative");
+            }
+            requireNonNegative(dataSource, "max-idle-time", maxIdleTime);
+            requireNonNegative(dataSource, "max-life-time", maxLifeTime);
+            requireNonNegative(dataSource, "max-acquire-time", maxAcquireTime);
+            requireNonNegative(dataSource, "max-create-connection-time", maxCreateConnectionTime);
+        }
+
+        private void requireNonNegative(String dataSource, String property, Duration value) {
+            if (value == null || value.isNegative()) {
+                throw invalid(dataSource, property + " must be a non-negative duration");
+            }
+        }
+
+        private IllegalArgumentException invalid(String dataSource, String message) {
+            return new IllegalArgumentException("Invalid R2DBC pool configuration for '" + dataSource + "': " + message);
+        }
     }
 
     @Data

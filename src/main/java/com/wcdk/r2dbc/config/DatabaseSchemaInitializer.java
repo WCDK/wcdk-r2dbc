@@ -115,7 +115,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
         executeSqlResources(sqlResources, initConfig.isIgnoreErrors(), initConfig.isExecuteInTransaction())
                 .doOnSuccess(v -> log.info("数据库Schema初始化完成"))
                 .doOnError(e -> log.error("数据库Schema初始化失败", e))
-                .subscribe();
+                .block();
     }
 
     /**

@@ -32,9 +32,11 @@ public class SqlPerformanceInterceptor implements SqlLifecycleInterceptor {
     public void afterExecute(SqlExecutionContext context) {
         long durationMs = context.getDuration() / 1_000_000;
         if (durationMs > SLOW_SQL_THRESHOLD_MS) {
-            log.warn("Slow SQL detected ({}ms): {}", durationMs, context.getSql());
+            log.warn("Slow SQL detected ({}ms, resultCount={}): {}",
+                    durationMs, context.getResultCount(), context.getSql());
         } else {
-            log.debug("SQL executed in {}ms: {}", durationMs, context.getSql());
+            log.debug("SQL executed in {}ms, resultCount={}: {}",
+                    durationMs, context.getResultCount(), context.getSql());
         }
 
         if (context.hasError()) {

@@ -45,7 +45,12 @@ public class RepositoryProxyFactory {
                     properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
             for (java.lang.reflect.Method method : repositoryInterface.getMethods()) {
                 if (!isBaseMethod(method.getName())) {
-                    resolver.validateMethod(method);
+                    try {
+                        resolver.validateMethod(method);
+                    } catch (RuntimeException e) {
+                        throw new IllegalArgumentException("非法 Repository 方法："
+                                + repositoryInterface.getName() + "#" + method.toGenericString(), e);
+                    }
                 }
             }
         }

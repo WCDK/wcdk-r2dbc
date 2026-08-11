@@ -93,7 +93,8 @@ public class CustomMethodResolver {
             return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
         }
 
-        List<Condition> conditions = parseConditions(fieldPart, method.getParameters(), arguments, 0, method.getName());
+        String conditionPart = conditionPart(fieldPart);
+        List<Condition> conditions = parseConditions(conditionPart, method.getParameters(), arguments, 0, method.getName());
         String orderBySql = extractOrderBy(fieldPart);
         String whereSql = buildWhereSql(conditions, true);
 
@@ -186,6 +187,7 @@ public class CustomMethodResolver {
     }
 
     private ParsedMethod resolveUpdateById(Method method, String fieldName, Object[] arguments) {
+        FieldColumn idColumn = metadata.requireIdColumn();
         FieldColumn fieldColumn = findColumn(fieldName);
         if (fieldColumn == null) {
             throw new IllegalArgumentException("实体字段不存在：" + fieldName);
@@ -198,7 +200,7 @@ public class CustomMethodResolver {
 
         String sql = "UPDATE " + metadata.tableName()
                 + " SET " + fieldColumn.name() + " = :newValue"
-                + " WHERE " + metadata.idColumn().name() + " = :id";
+                + " WHERE " + idColumn.name() + " = :id";
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("newValue", arguments[0]);
@@ -268,14 +270,31 @@ public class CustomMethodResolver {
                 logicalOperator = "Or";
             }
 
-            if (part.startsWith("OrderBy")) {
-                break;
-            }
-
             String operator = "=";
             String fieldName = part;
 
-            if (part.endsWith("Like")) {
+            if (part.endsWith("IsNotNull")) {
+                operator = "IS NOT NULL";
+                fieldName = part.substring(0, part.length() - 9);
+            } else if (part.endsWith("IsNull")) {
+                operator = "IS NULL";
+                fieldName = part.substring(0, part.length() - 6);
+            } else if (part.endsWith("GreaterThanEqual")) {
+                operator = ">=";
+                fieldName = part.substring(0, part.length() - 16);
+            } else if (part.endsWith("LessThanEqual")) {
+                operator = "<=";
+                fieldName = part.substring(0, part.length() - 13);
+            } else if (part.endsWith("GreaterThan")) {
+                operator = ">";
+                fieldName = part.substring(0, part.length() - 11);
+            } else if (part.endsWith("LessThan")) {
+                operator = "<";
+                fieldName = part.substring(0, part.length() - 8);
+            } else if (part.endsWith("NotIn")) {
+                operator = "NOT IN";
+                fieldName = part.substring(0, part.length() - 5);
+            } else if (part.endsWith("Like")) {
                 operator = "LIKE";
                 fieldName = part.substring(0, part.length() - 4);
             } else if (part.endsWith("In")) {
@@ -284,12 +303,9 @@ public class CustomMethodResolver {
             } else if (part.endsWith("Between")) {
                 operator = "BETWEEN";
                 fieldName = part.substring(0, part.length() - 7);
-            } else if (part.endsWith("IsNull")) {
-                operator = "IS NULL";
-                fieldName = part.substring(0, part.length() - 6);
-            } else if (part.endsWith("IsNotNull")) {
-                operator = "IS NOT NULL";
-                fieldName = part.substring(0, part.length() - 9);
+            } else if (part.endsWith("Not")) {
+                operator = "<>";
+                fieldName = part.substring(0, part.length() - 3);
             } else if (part.endsWith("Asc") || part.endsWith("Desc")) {
                 continue;
             }
@@ -356,101 +372,120 @@ public class CustomMethodResolver {
         StringBuilder where = new StringBuilder(" WHERE (");
         for (int i = 0; i < conditions.size(); i++) {
             Condition condition = conditions.get(i);
+            String parameterName = "p" + i;
             if (i > 0) {
                 where.append(" ").append(condition.logicalOperator()).append(" ");
             }
 
-            if ("IS NULL".equals(condition.operator()) || "IS NOT NULL".equals(condition.operator())) {
+            if (("=".equals(condition.operator()) || "<>".equals(condition.operator()))
+                    && condition.value() == null) {
+                where.append(condition.column()).append(" ")
+                        .append("=".equals(condition.operator()) ? "IS NULL" : "IS NOT NULL");
+            } else if ("IS NULL".equals(condition.operator()) || "IS NOT NULL".equals(condition.operator())) {
                 where.append(condition.column()).append(" ").append(condition.operator());
-            } else if ("IN".equals(condition.operator())) {
-                appendInClause(where, condition);
+            } else if ("IN".equals(condition.operator()) || "NOT IN".equals(condition.operator())) {
+                appendInClause(where, condition, parameterName);
             } else if ("BETWEEN".equals(condition.operator())) {
-                where.append(condition.column()).append(" BETWEEN :").append(condition.column())
-                        .append("Start AND :").append(condition.column()).append("End");
+                where.append(condition.column()).append(" BETWEEN :").append(parameterName)
+                        .append("Start AND :").append(parameterName).append("End");
             } else {
                 where.append(condition.column()).append(" ").append(condition.operator())
-                        .append(" :").append(condition.column());
+                        .append(" :").append(parameterName);
             }
         }
 
         where.append(")");
 
-        if (addLogicDelete && metadata.logicDeleteColumn() != null) {
+        if (addLogicDelete && metadata.logicDeleteColumn() != null
+                && conditions.stream().noneMatch(condition ->
+                condition.column().equals(metadata.logicDeleteColumn().name()))) {
             where.append(" AND ").append(metadata.logicDeleteColumn().name()).append(" = :logicNotDeleteValue");
         }
 
         return where.toString();
     }
 
-    private void appendInClause(StringBuilder where, Condition condition) {
+    private void appendInClause(StringBuilder where, Condition condition, String parameterName) {
         Object value = condition.value();
+        boolean negated = "NOT IN".equals(condition.operator());
         if (value instanceof Collection<?> collection) {
             if (collection.isEmpty()) {
-                where.append("1 = 0");
+                where.append(negated ? "1 = 1" : "1 = 0");
             } else {
                 StringBuilder placeholders = new StringBuilder();
                 int idx = 0;
                 for (Object item : collection) {
                     if (idx > 0) placeholders.append(", ");
-                    placeholders.append(":").append(condition.column()).append("_in_").append(idx++);
+                    placeholders.append(":").append(parameterName).append("_in_").append(idx++);
                 }
-                where.append(condition.column()).append(" IN (").append(placeholders).append(")");
+                where.append(condition.column()).append(negated ? " NOT IN (" : " IN (")
+                        .append(placeholders).append(")");
             }
         } else if (value != null && value.getClass().isArray()) {
             int length = java.lang.reflect.Array.getLength(value);
             if (length == 0) {
-                where.append("1 = 0");
+                where.append(negated ? "1 = 1" : "1 = 0");
             } else {
                 StringBuilder placeholders = new StringBuilder();
                 for (int i = 0; i < length; i++) {
                     if (i > 0) placeholders.append(", ");
-                    placeholders.append(":").append(condition.column()).append("_in_").append(i);
+                    placeholders.append(":").append(parameterName).append("_in_").append(i);
                 }
-                where.append(condition.column()).append(" IN (").append(placeholders).append(")");
+                where.append(condition.column()).append(negated ? " NOT IN (" : " IN (")
+                        .append(placeholders).append(")");
             }
         } else {
-            where.append(condition.column()).append(" IN (").append(":").append(condition.column()).append(")");
+            where.append(condition.column()).append(negated ? " NOT IN (:" : " IN (:")
+                    .append(parameterName).append(")");
         }
     }
 
     private Map<String, Object> buildParameters(List<Condition> conditions) {
         Map<String, Object> parameters = new LinkedHashMap<>();
 
-        for (Condition condition : conditions) {
+        for (int i = 0; i < conditions.size(); i++) {
+            Condition condition = conditions.get(i);
+            String parameterName = "p" + i;
             if ("IS NULL".equals(condition.operator()) || "IS NOT NULL".equals(condition.operator())) {
                 continue;
             }
-            if ("IN".equals(condition.operator())) {
-                putInParameters(parameters, condition);
+            if (condition.value() == null
+                    && ("=".equals(condition.operator()) || "<>".equals(condition.operator()))) {
+                continue;
+            }
+            if ("IN".equals(condition.operator()) || "NOT IN".equals(condition.operator())) {
+                putInParameters(parameters, condition, parameterName);
             } else if ("BETWEEN".equals(condition.operator())) {
-                parameters.put(condition.column() + "Start", condition.value());
-                parameters.put(condition.column() + "End", condition.secondValue());
+                parameters.put(parameterName + "Start", condition.value());
+                parameters.put(parameterName + "End", condition.secondValue());
             } else {
-                parameters.put(condition.column(), condition.value());
+                parameters.put(parameterName, condition.value());
             }
         }
 
-        if (metadata.logicDeleteColumn() != null) {
+        if (metadata.logicDeleteColumn() != null
+                && conditions.stream().noneMatch(condition ->
+                condition.column().equals(metadata.logicDeleteColumn().name()))) {
             parameters.put("logicNotDeleteValue", logicNotDeleteValue);
         }
 
         return parameters;
     }
 
-    private void putInParameters(Map<String, Object> parameters, Condition condition) {
+    private void putInParameters(Map<String, Object> parameters, Condition condition, String parameterName) {
         Object value = condition.value();
         if (value instanceof Collection<?> collection) {
             int idx = 0;
             for (Object item : collection) {
-                parameters.put(condition.column() + "_in_" + idx++, item);
+                parameters.put(parameterName + "_in_" + idx++, item);
             }
         } else if (value != null && value.getClass().isArray()) {
             int length = java.lang.reflect.Array.getLength(value);
             for (int i = 0; i < length; i++) {
-                parameters.put(condition.column() + "_in_" + i, java.lang.reflect.Array.get(value, i));
+                parameters.put(parameterName + "_in_" + i, java.lang.reflect.Array.get(value, i));
             }
         } else {
-            parameters.put(condition.column(), value);
+            parameters.put(parameterName, value);
         }
     }
 
@@ -501,6 +536,11 @@ public class CustomMethodResolver {
         }
 
         return " ORDER BY " + String.join(", ", orderClauses);
+    }
+
+    private String conditionPart(String fieldPart) {
+        int orderByIndex = fieldPart.indexOf("OrderBy");
+        return orderByIndex < 0 ? fieldPart : fieldPart.substring(0, orderByIndex);
     }
 
     // ==================== 工具方法 ====================
@@ -558,7 +598,13 @@ public class CustomMethodResolver {
         String fieldPart = matcher.group(4);
 
         validateMethodNameLength(methodName);
-        validateFieldPart(fieldPart, methodName);
+        if ("delete".equals(operation) && metadata.logicDeleteColumn() == null) {
+            throw new IllegalArgumentException("实体未配置逻辑删除字段，不支持派生 delete 方法：" + methodName);
+        }
+        validateFieldPart(fieldPart == null ? null : conditionPart(fieldPart), methodName);
+        if ("find".equals(operation)) {
+            extractOrderBy(fieldPart);
+        }
         validateReturnType(method, operation);
     }
 
@@ -602,16 +648,28 @@ public class CustomMethodResolver {
     }
 
     private String extractFieldNameForValidation(String part) {
-        if (part.endsWith("Like")) {
+        if (part.endsWith("IsNotNull")) {
+            return part.substring(0, part.length() - 9);
+        } else if (part.endsWith("IsNull")) {
+            return part.substring(0, part.length() - 6);
+        } else if (part.endsWith("GreaterThanEqual")) {
+            return part.substring(0, part.length() - 16);
+        } else if (part.endsWith("LessThanEqual")) {
+            return part.substring(0, part.length() - 13);
+        } else if (part.endsWith("GreaterThan")) {
+            return part.substring(0, part.length() - 11);
+        } else if (part.endsWith("LessThan")) {
+            return part.substring(0, part.length() - 8);
+        } else if (part.endsWith("NotIn")) {
+            return part.substring(0, part.length() - 5);
+        } else if (part.endsWith("Like")) {
             return part.substring(0, part.length() - 4);
         } else if (part.endsWith("In")) {
             return part.substring(0, part.length() - 2);
         } else if (part.endsWith("Between")) {
             return part.substring(0, part.length() - 7);
-        } else if (part.endsWith("IsNull")) {
-            return part.substring(0, part.length() - 6);
-        } else if (part.endsWith("IsNotNull")) {
-            return part.substring(0, part.length() - 9);
+        } else if (part.endsWith("Not")) {
+            return part.substring(0, part.length() - 3);
         } else if (part.endsWith("Asc")) {
             return part.substring(0, part.length() - 3);
         } else if (part.endsWith("Desc")) {
@@ -633,70 +691,44 @@ public class CustomMethodResolver {
     }
 
     private void validateFindReturnType(Class<?> returnType, Class<?> genericType, String methodName) {
-        if (returnType == Flux.class) {
+        if ((returnType == Flux.class || returnType == Mono.class)
+                && genericType != null && metadata.entityClass().isAssignableFrom(genericType)) {
             return;
         }
-        if (returnType == Mono.class) {
-            return;
-        }
-        if (returnType == List.class) {
-            return;
-        }
-        if (returnType == Void.class || returnType == void.class) {
-            throw new IllegalArgumentException("find方法不支持void返回类型：" + methodName);
-        }
-        if (isSimpleType(returnType)) {
-            return;
-        }
-        if (metadata != null && metadata.entityClass().isAssignableFrom(returnType)) {
-            return;
-        }
-        throw new IllegalArgumentException("find方法不支持的返回类型：" + returnType.getName() + "（方法：" + methodName + "）");
+        throw new IllegalArgumentException("find方法必须返回 Mono<" + metadata.entityClass().getSimpleName()
+                + "> 或 Flux<" + metadata.entityClass().getSimpleName() + ">：" + methodName);
     }
 
     private void validateCountReturnType(Class<?> returnType, Class<?> genericType, String methodName) {
         if (returnType == Mono.class) {
-            if (genericType == null || genericType == Long.class || genericType == long.class
+            if (genericType == Long.class || genericType == long.class
                     || genericType == Integer.class || genericType == int.class) {
                 return;
             }
             throw new IllegalArgumentException("count方法的Mono泛型必须是Long或Integer：" + methodName);
-        }
-        if (returnType == Long.class || returnType == long.class
-                || returnType == Integer.class || returnType == int.class) {
-            return;
         }
         throw new IllegalArgumentException("count方法不支持的返回类型：" + returnType.getName() + "（方法：" + methodName + "）");
     }
 
     private void validateExistsReturnType(Class<?> returnType, Class<?> genericType, String methodName) {
         if (returnType == Mono.class) {
-            if (genericType == null || genericType == Boolean.class || genericType == boolean.class) {
+            if (genericType == Boolean.class || genericType == boolean.class) {
                 return;
             }
             throw new IllegalArgumentException("exists方法的Mono泛型必须是Boolean：" + methodName);
-        }
-        if (returnType == Boolean.class || returnType == boolean.class) {
-            return;
         }
         throw new IllegalArgumentException("exists方法不支持的返回类型：" + returnType.getName() + "（方法：" + methodName + "）");
     }
 
     private void validateUpdateReturnType(Class<?> returnType, Class<?> genericType, String methodName) {
         if (returnType == Mono.class) {
-            if (genericType == null || genericType == Long.class || genericType == long.class
+            if (genericType == Long.class || genericType == long.class
                     || genericType == Integer.class || genericType == int.class
                     || genericType == Boolean.class || genericType == boolean.class
                     || genericType == Void.class || genericType == void.class) {
                 return;
             }
             throw new IllegalArgumentException("update/delete方法的Mono泛型必须是Long、Integer、Boolean或Void：" + methodName);
-        }
-        if (returnType == Long.class || returnType == long.class
-                || returnType == Integer.class || returnType == int.class
-                || returnType == Boolean.class || returnType == boolean.class
-                || returnType == Void.class || returnType == void.class) {
-            return;
         }
         throw new IllegalArgumentException("update/delete方法不支持的返回类型：" + returnType.getName() + "（方法：" + methodName + "）");
     }

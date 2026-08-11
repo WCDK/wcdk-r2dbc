@@ -9,6 +9,7 @@ import com.wcdk.r2dbc.core.executor.R2dbcRowMapper;
 import com.wcdk.r2dbc.core.executor.R2dbcTransactionOperations;
 import com.wcdk.r2dbc.core.executor.R2dbcUpdateOperations;
 import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
 import com.wcdk.r2dbc.core.transaction.ManualTransaction;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
@@ -76,22 +77,8 @@ public class R2dbcUtil {
                      TransactionalOperator transactionalOperator,
                      WcdkR2dbcProperties properties,
                      WcdkSpringR2dbcProperties springR2dbcProperties) {
-        this.databaseClient = databaseClient;
-        this.entityTemplate = entityTemplate;
-        this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
-        this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
-
-        // 初始化基础组件
-        this.parameterBinder = new ParameterBinder();
-        this.lifecycleExecutor = new SqlLifecycleExecutor();
-        this.rowMapper = new R2dbcRowMapper();
-        this.sqlLogger = new R2dbcSqlLogger(this.properties, this.springR2dbcProperties);
-        this.dataSourceRouter = new R2dbcDataSourceRouter();
-
-        // 初始化操作组件
-        this.queryOperations = new R2dbcQueryOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
-        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
-        this.transactionOperations = new R2dbcTransactionOperations(databaseClient, transactionalOperator);
+        this(databaseClient, entityTemplate, transactionalOperator, properties, springR2dbcProperties,
+                null, new SqlLifecycleInterceptorChain(List.of(), List.of()));
     }
 
     public R2dbcUtil(DatabaseClient databaseClient,
@@ -100,6 +87,17 @@ public class R2dbcUtil {
                      WcdkR2dbcProperties properties,
                      WcdkSpringR2dbcProperties springR2dbcProperties,
                      TransactionManager transactionManager) {
+        this(databaseClient, entityTemplate, transactionalOperator, properties, springR2dbcProperties,
+                transactionManager, new SqlLifecycleInterceptorChain(List.of(), List.of()));
+    }
+
+    public R2dbcUtil(DatabaseClient databaseClient,
+                     R2dbcEntityTemplate entityTemplate,
+                     TransactionalOperator transactionalOperator,
+                     WcdkR2dbcProperties properties,
+                     WcdkSpringR2dbcProperties springR2dbcProperties,
+                     TransactionManager transactionManager,
+                     SqlLifecycleInterceptorChain interceptorChain) {
         this.databaseClient = databaseClient;
         this.entityTemplate = entityTemplate;
         this.properties = properties == null ? new WcdkR2dbcProperties() : properties;
@@ -107,7 +105,7 @@ public class R2dbcUtil {
 
         // 初始化基础组件
         this.parameterBinder = new ParameterBinder();
-        this.lifecycleExecutor = new SqlLifecycleExecutor();
+        this.lifecycleExecutor = new SqlLifecycleExecutor(interceptorChain);
         this.rowMapper = new R2dbcRowMapper();
         this.sqlLogger = new R2dbcSqlLogger(this.properties, this.springR2dbcProperties);
         this.dataSourceRouter = new R2dbcDataSourceRouter();

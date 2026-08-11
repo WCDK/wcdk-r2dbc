@@ -4,6 +4,7 @@ import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryMetadata;
 import org.reactivestreams.Publisher;
+import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.util.context.ContextView;
 
@@ -16,7 +17,7 @@ import java.util.Map;
  * @date 2026/7/27
  * @version 1.0
  **/
-public class DynamicRoutingConnectionFactory implements ConnectionFactory {
+public class DynamicRoutingConnectionFactory implements ConnectionFactory, Disposable {
 
     private final String primary;
 
@@ -52,6 +53,23 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory {
 
     public String getPrimary() {
         return primary;
+    }
+
+    @Override
+    public void dispose() {
+        connectionFactories.values().forEach(connectionFactory -> {
+            if (connectionFactory instanceof Disposable disposable) {
+                disposable.dispose();
+            }
+        });
+    }
+
+    @Override
+    public boolean isDisposed() {
+        return connectionFactories.values().stream()
+                .filter(Disposable.class::isInstance)
+                .map(Disposable.class::cast)
+                .allMatch(Disposable::isDisposed);
     }
 
     private ConnectionFactory determineConnectionFactory(ContextView contextView) {

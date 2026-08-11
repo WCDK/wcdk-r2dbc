@@ -3,7 +3,8 @@ package com.wcdk.r2dbc.config;
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.core.RepositoryProxyFactory;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptor;
-import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorHolder;
+import com.wcdk.r2dbc.core.interceptor.ReactiveSqlLifecycleInterceptor;
+import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
 import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
 import com.wcdk.r2dbc.core.transaction.TransactionalAspect;
@@ -15,10 +16,10 @@ import io.r2dbc.pool.ConnectionPoolConfiguration;
 import io.r2dbc.spi.ConnectionFactories;
 import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryOptions;
-import io.r2dbc.spi.ConnectionFactoryProvider;
 import io.r2dbc.spi.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -37,6 +38,7 @@ import org.springframework.r2dbc.connection.R2dbcTransactionManager;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.ReactiveTransactionManager;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.core.Disposable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -76,7 +78,7 @@ public class WcdkR2dbcAutoConfiguration {
     @Conditional(WcdkR2dbcDataSourcesCondition.class)
     @ConditionalOnMissingBean(ConnectionFactory.class)
     @Role(ROLE_INFRASTRUCTURE)
-    public ConnectionFactory connectionFactory(WcdkSpringR2dbcProperties properties) {
+    public DynamicRoutingConnectionFactory connectionFactory(WcdkSpringR2dbcProperties properties) {
         Map<String, WcdkSpringR2dbcProperties.DataSourceProperties> dataSources = properties.getDataSources();
         if (dataSources == null || dataSources.isEmpty()) {
             throw new IllegalStateException("spring.r2dbc.data-sources must be configured when Spring R2DBC ConnectionFactory is missing");
@@ -90,6 +92,7 @@ public class WcdkR2dbcAutoConfiguration {
      * 单数据源配置 - 基于 spring.r2dbc.url 配置
      */
     @Bean
+    @ConditionalOnProperty(prefix = "spring.r2dbc", name = "url")
     @ConditionalOnMissingBean(ConnectionFactory.class)
     @Role(ROLE_INFRASTRUCTURE)
     public ConnectionFactory singleConnectionFactory(
@@ -99,9 +102,8 @@ public class WcdkR2dbcAutoConfiguration {
             @Value("${spring.r2dbc.password:}") String password,
             @Value("${database.type:}") String databaseType) {
         
-        // 如果没有配置 spring.r2dbc.url，跳过创建
         if (r2dbcUrl == null || r2dbcUrl.isBlank()) {
-            return null;
+            throw new IllegalArgumentException("spring.r2dbc.url must not be blank");
         }
 
         log.info("创建单数据源连接工厂，URL: {}, 数据库类型: {}", r2dbcUrl, databaseType);
@@ -121,71 +123,31 @@ public class WcdkR2dbcAutoConfiguration {
             builder.option(PASSWORD, password);
         }
         
-        ConnectionFactory connectionFactory;
         try {
-            // 尝试使用 SPI 机制创建
-            connectionFactory = ConnectionFactories.get(builder.build());
-        } catch (Exception e) {
-            log.warn("SPI机制创建连接工厂失败，尝试直接加载驱动类: {}", e.getMessage());
-            // 直接使用驱动类创建
-            connectionFactory = createConnectionFactoryByDriver(builder.build(), databaseType);
+            ConnectionFactory connectionFactory = ConnectionFactories.get(builder.build());
+            return poolConnectionFactory("primary", connectionFactory, properties.getPool());
+        } catch (IllegalStateException e) {
+            String driver = databaseType == null || databaseType.isBlank()
+                    ? options.getRequiredValue(ConnectionFactoryOptions.DRIVER).toString()
+                    : databaseType;
+            throw missingDriver(driver, e);
         }
         
-        // 配置连接池
-        WcdkSpringR2dbcProperties.Pool poolConfig = properties.getPool();
-        if (poolConfig != null && poolConfig.isEnabled()) {
-            ConnectionPoolConfiguration.Builder poolBuilder = ConnectionPoolConfiguration.builder(connectionFactory)
-                    .name("primary")
-                    .maxSize(poolConfig.getMaxSize())
-                    .maxIdleTime(poolConfig.getMaxIdleTime())
-                    .maxLifeTime(poolConfig.getMaxLifeTime())
-                    .maxAcquireTime(poolConfig.getMaxAcquireTime())
-                    .acquireRetry(poolConfig.getAcquireRetry())
-                    .maxCreateConnectionTime(poolConfig.getMaxCreateConnectionTime())
-                    .initialSize(poolConfig.getInitialSize());
-            if (poolConfig.getValidationQuery() != null && !poolConfig.getValidationQuery().isBlank()) {
-                poolBuilder.validationQuery(poolConfig.getValidationQuery());
-            }
-            connectionFactory = new ConnectionPool(poolBuilder.build());
-        }
-        
-        return connectionFactory;
     }
 
     /**
-     * 根据数据库类型直接创建连接工厂
+     * 构造缺失 R2DBC SPI 驱动时的可操作错误信息。
      */
-    private ConnectionFactory createConnectionFactoryByDriver(ConnectionFactoryOptions options, String databaseType) {
-        String driverClass;
-        switch (databaseType.toLowerCase()) {
-            case "dm":
-                driverClass = "dm.r2dbc.DmConnectionFactoryProvider";
-                break;
-            case "postgresql":
-                driverClass = "io.r2dbc.postgresql.PostgresqlConnectionFactoryProvider";
-                break;
-            case "mysql":
-                driverClass = "io.asyncer.r2dbc.mysql.MySqlConnectionFactoryProvider";
-                break;
-            case "oracle":
-                driverClass = "io.r2dbc.oracle.OracleConnectionFactoryProvider";
-                break;
-            default:
-                throw new IllegalArgumentException("不支持的数据库类型: " + databaseType);
-        }
-        
-        try {
-            Class<?> clazz = Class.forName(driverClass);
-            Object provider = clazz.getDeclaredConstructor().newInstance();
-            if (provider instanceof ConnectionFactoryProvider) {
-                return ((ConnectionFactoryProvider) provider).create(options);
-            }
-            throw new IllegalStateException("驱动类不是 ConnectionFactoryProvider: " + driverClass);
-        } catch (ClassNotFoundException e) {
-            throw new IllegalStateException("找不到数据库驱动类: " + driverClass + "，请确保已添加对应依赖", e);
-        } catch (Exception e) {
-            throw new IllegalStateException("创建连接工厂失败: " + databaseType, e);
-        }
+    private IllegalStateException missingDriver(String driver, RuntimeException cause) {
+        String coordinates = switch (driver.toLowerCase()) {
+            case "dm" -> "com.dameng:dm-r2dbc";
+            case "postgres", "postgresql" -> "org.postgresql:r2dbc-postgresql";
+            case "mysql" -> "io.asyncer:r2dbc-mysql";
+            case "oracle" -> "com.oracle.database.r2dbc:oracle-r2dbc";
+            default -> "an R2DBC driver that supports '" + driver + "'";
+        };
+        return new IllegalStateException("No R2DBC SPI provider found for database '" + driver
+                + "'. Add Maven dependency " + coordinates + ".", cause);
     }
 
     @Bean
@@ -193,6 +155,16 @@ public class WcdkR2dbcAutoConfiguration {
     @Role(ROLE_INFRASTRUCTURE)
     public DatabaseClient databaseClient(ConnectionFactory connectionFactory) {
         return DatabaseClient.create(connectionFactory);
+    }
+
+    @Bean
+    @Role(ROLE_INFRASTRUCTURE)
+    public DisposableBean connectionFactoryDisposer(ConnectionFactory connectionFactory) {
+        return () -> {
+            if (connectionFactory instanceof Disposable disposable) {
+                disposable.dispose();
+            }
+        };
     }
 
     @Bean
@@ -224,9 +196,10 @@ public class WcdkR2dbcAutoConfiguration {
                                ObjectProvider<TransactionalOperator> transactionalOperator,
                                WcdkR2dbcProperties properties,
                                WcdkSpringR2dbcProperties springR2dbcProperties,
-                               ObjectProvider<TransactionManager> transactionManagerProvider) {
+                               ObjectProvider<TransactionManager> transactionManagerProvider,
+                               SqlLifecycleInterceptorChain interceptorChain) {
         return new R2dbcUtil(databaseClient, entityTemplate.getIfAvailable(), transactionalOperator.getIfAvailable(), 
-                properties, springR2dbcProperties, transactionManagerProvider.getIfAvailable());
+                properties, springR2dbcProperties, transactionManagerProvider.getIfAvailable(), interceptorChain);
     }
 
     @Bean
@@ -267,9 +240,15 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
-    public SqlLifecycleInterceptorInitializer sqlLifecycleInterceptorInitializer(
-            ObjectProvider<List<SqlLifecycleInterceptor>> interceptorsProvider) {
-        return new SqlLifecycleInterceptorInitializer(interceptorsProvider.getIfAvailable());
+    public SqlLifecycleInterceptorChain sqlLifecycleInterceptorChain(
+            ObjectProvider<SqlLifecycleInterceptor> syncProvider,
+            ObjectProvider<ReactiveSqlLifecycleInterceptor> reactiveProvider) {
+        List<SqlLifecycleInterceptor> sync = syncProvider.orderedStream().toList();
+        List<ReactiveSqlLifecycleInterceptor> reactive = reactiveProvider.orderedStream().toList();
+        log.info("Initialized SQL lifecycle interceptor chain: reactive={}, sync={}",
+                reactive.stream().map(i -> i.getClass().getName()).toList(),
+                sync.stream().map(i -> i.getClass().getName()).toList());
+        return new SqlLifecycleInterceptorChain(sync, reactive);
     }
 
     @Bean
@@ -298,15 +277,26 @@ public class WcdkR2dbcAutoConfiguration {
         if (dsProperties.getProperties() != null) {
             dsProperties.getProperties().forEach((key, value) -> builder.option(Option.valueOf(key), value));
         }
-        ConnectionFactory connectionFactory = ConnectionFactories.get(builder.build());
+        ConnectionFactory connectionFactory;
+        try {
+            connectionFactory = ConnectionFactories.get(builder.build());
+        } catch (IllegalStateException e) {
+            Object driver = builder.build().getRequiredValue(ConnectionFactoryOptions.DRIVER);
+            throw missingDriver(driver.toString(), e);
+        }
         return poolConnectionFactory(name, connectionFactory, dsProperties, globalPool);
     }
 
     private ConnectionFactory poolConnectionFactory(String name, ConnectionFactory connectionFactory, WcdkSpringR2dbcProperties.DataSourceProperties dsProperties, WcdkSpringR2dbcProperties.Pool globalPool) {
         WcdkSpringR2dbcProperties.Pool poolConfig = dsProperties.getPool() != null ? dsProperties.getPool() : globalPool;
+        return poolConnectionFactory(name, connectionFactory, poolConfig);
+    }
+
+    private ConnectionFactory poolConnectionFactory(String name, ConnectionFactory connectionFactory, WcdkSpringR2dbcProperties.Pool poolConfig) {
         if (poolConfig == null || !poolConfig.isEnabled()) {
             return connectionFactory;
         }
+        poolConfig.validate(name);
         ConnectionPoolConfiguration.Builder poolBuilder = ConnectionPoolConfiguration.builder(connectionFactory)
                 .name(name)
                 .maxSize(poolConfig.getMaxSize())

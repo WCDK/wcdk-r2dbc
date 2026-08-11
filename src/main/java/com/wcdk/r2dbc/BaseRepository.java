@@ -23,6 +23,8 @@ public interface BaseRepository<T> {
 
     Mono<T> selectById(Object id);
 
+    Flux<T> findAll();
+
     Flux<T> selectList(QueryWrapper<T> queryWrapper);
 
     Mono<Page<T>> selectPage(Pageable pageable, QueryWrapper<T> queryWrapper);

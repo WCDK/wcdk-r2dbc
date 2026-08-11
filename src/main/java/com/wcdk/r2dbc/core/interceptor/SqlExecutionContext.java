@@ -30,6 +30,8 @@ public class SqlExecutionContext {
 
     private Object result;
 
+    private long resultCount;
+
     /**
      * 执行状态 - 使用枚举替代简单的boolean，提供更清晰的语义
      */
@@ -109,6 +111,19 @@ public class SqlExecutionContext {
 
     public void setResult(Object result) {
         this.result = result;
+    }
+
+    /**
+     * 获取本次执行实际返回或影响的行数。
+     *
+     * @return 返回或影响的行数
+     */
+    public long getResultCount() {
+        return resultCount;
+    }
+
+    public void setResultCount(long resultCount) {
+        this.resultCount = Math.max(0, resultCount);
     }
 
     /**

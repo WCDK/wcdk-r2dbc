@@ -41,7 +41,8 @@ public record ResultMapDefinition(String id, String type, Map<String, String> id
         }
 
         public ResultMapDefinition build() {
-            return new ResultMapDefinition(id, type, idMappings, discriminatorColumn, discriminatorMappings);
+            return new ResultMapDefinition(id, type, Map.copyOf(idMappings),
+                    discriminatorColumn, Map.copyOf(discriminatorMappings));
         }
     }
 }
