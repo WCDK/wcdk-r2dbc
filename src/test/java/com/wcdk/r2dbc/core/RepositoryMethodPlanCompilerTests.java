@@ -39,6 +39,16 @@ class RepositoryMethodPlanCompilerTests {
         assertThat(plans.get(insert).kind()).isEqualTo(RepositoryMethodPlan.Kind.CRUD);
         assertThat(plans.get(toString).kind()).isEqualTo(RepositoryMethodPlan.Kind.OBJECT);
         assertThatThrownByMutation(plans, derived);
+        assertThat(plans.get(derived).statementDefinition().kind())
+                .isEqualTo(RepositoryMethodPlan.Kind.DERIVED);
+        assertThat(plans.get(derived).parameterPlan().parameters()).hasSize(1);
+        assertThat(plans.get(derived).parameterPlan().parameters().get(0).type())
+                .isEqualTo(String.class);
+        assertThat(plans.get(derived).resultMappingPlan().reactiveElementType())
+                .isEqualTo(User.class);
+        assertThat(plans.get(derived).resultMappingPlan().entityType())
+                .isEqualTo(User.class);
+        assertThat(plans.get(derived).sqlPlan().deferred()).isTrue();
     }
 
     private void assertThatThrownByMutation(Map<Method, RepositoryMethodPlan> plans, Method method) {

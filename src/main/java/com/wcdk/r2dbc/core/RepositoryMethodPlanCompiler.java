@@ -8,14 +8,14 @@ import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
+/***
  * 在创建代理时一次性编译仓库方法分类。
- *
- * @author WCDK
- **/
+ * @author wcdk
+ */
 public final class RepositoryMethodPlanCompiler {
 
     private final Class<?> repositoryInterface;
+    private final RepositoryMetadata metadata;
     private final CrudStatementCompiler crudCompiler;
     private final XmlStatementCompiler xmlCompiler;
     private final DerivedMethodCompiler derivedCompiler;
@@ -24,6 +24,7 @@ public final class RepositoryMethodPlanCompiler {
                                         RepositoryXmlRegistry xmlRegistry, WcdkR2dbcProperties properties) {
         this.repositoryInterface = java.util.Objects.requireNonNull(repositoryInterface);
         java.util.Objects.requireNonNull(xmlRegistry);
+        this.metadata = metadata;
         this.crudCompiler = new CrudStatementCompiler(repositoryInterface, metadata);
         this.xmlCompiler = new XmlStatementCompiler(repositoryInterface, xmlRegistry);
         this.derivedCompiler = new DerivedMethodCompiler(repositoryInterface, metadata, properties);
@@ -32,18 +33,22 @@ public final class RepositoryMethodPlanCompiler {
     public Map<Method, RepositoryMethodPlan> compile() {
         Map<Method, RepositoryMethodPlan> plans = new LinkedHashMap<>();
         for (Method method : repositoryInterface.getMethods()) {
-            plans.put(method, compile(method));
+            plans.put(method, enrich(compile(method)));
         }
         try {
             for (Method method : new Method[]{Object.class.getMethod("toString"),
                     Object.class.getMethod("hashCode"), Object.class.getMethod("equals", Object.class)}) {
-                plans.putIfAbsent(method, new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.OBJECT,
-                        null, repositoryInterface.getName() + "." + method.getName()));
+                plans.putIfAbsent(method, enrich(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.OBJECT,
+                        null, repositoryInterface.getName() + "." + method.getName())));
             }
         } catch (NoSuchMethodException impossible) {
             throw new IllegalStateException("JDK Object methods are unavailable", impossible);
         }
         return Map.copyOf(plans);
+    }
+
+    private RepositoryMethodPlan enrich(RepositoryMethodPlan plan) {
+        return RepositoryMethodPlan.enrich(plan, metadata == null ? null : metadata.entityClass());
     }
 
     private RepositoryMethodPlan compile(Method method) {
