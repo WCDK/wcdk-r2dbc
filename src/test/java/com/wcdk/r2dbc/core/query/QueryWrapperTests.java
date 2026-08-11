@@ -67,4 +67,17 @@ class QueryWrapperTests {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("overflow");
     }
-}
+
+    @Test
+    void buildsNestedPredicateAst() {
+        QueryWrapper<Object> wrapper = new QueryWrapper<>()
+                .eq("status", 1)
+                .or(nested -> nested.like("name", "a").eq("type", 2));
+
+        assertThat(wrapper.expression()).isInstanceOf(SqlExpression.Logical.class);
+        SqlExpression.Logical root = (SqlExpression.Logical) wrapper.expression();
+        assertThat(root.operator()).isEqualTo(SqlExpression.Operator.OR);
+        assertThat(root.operands().get(1)).isInstanceOf(SqlExpression.Logical.class);
+        assertThat(((SqlExpression.Logical) root.operands().get(1)).operator())
+                .isEqualTo(SqlExpression.Operator.AND);
+    }}
