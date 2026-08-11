@@ -25,22 +25,22 @@ public class SqlPerformanceInterceptor implements SqlLifecycleInterceptor {
 
     @Override
     public void afterCompile(SqlExecutionContext context) {
-        log.debug("SQL compiled: {}", context.getSql());
+        log.debug("SQL已编译: {}", context.getSql());
     }
 
     @Override
     public void afterExecute(SqlExecutionContext context) {
         long durationMs = context.getDuration() / 1_000_000;
         if (durationMs > SLOW_SQL_THRESHOLD_MS) {
-            log.warn("Slow SQL detected ({}ms, resultCount={}): {}",
+            log.warn("检测到慢SQL ({}ms, resultCount={}): {}",
                     durationMs, context.getResultCount(), context.getSql());
         } else {
-            log.debug("SQL executed in {}ms, resultCount={}: {}",
+            log.debug("SQL执行耗时 {}ms, resultCount={}: {}",
                     durationMs, context.getResultCount(), context.getSql());
         }
 
         if (context.hasError()) {
-            log.error("SQL execution failed: {}", context.getSql(), context.getError());
+            log.error("SQL执行失败: {}", context.getSql(), context.getError());
         }
     }
 

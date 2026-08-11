@@ -331,7 +331,7 @@ public class SqlLifecycleExecutor {
             try {
                 return R2dbcUtil.class.getDeclaredMethod(methodName, String.class, Map.class);
             } catch (NoSuchMethodException ex) {
-                throw new IllegalStateException("Method not found: " + methodName, ex);
+                throw new IllegalStateException("方法未找到: " + methodName, ex);
             }
         }
     }

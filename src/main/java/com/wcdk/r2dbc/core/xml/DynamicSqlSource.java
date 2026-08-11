@@ -77,7 +77,7 @@ public final class DynamicSqlSource {
                         element.getAttribute("separator"),
                         element.getAttribute("close"),
                         contents);
-                default -> throw new IllegalArgumentException("Unsupported dynamic SQL element: " + element.getTagName());
+                default -> throw new IllegalArgumentException("不支持的动态SQL元素: " + element.getTagName());
             });
         }
         return new MixedSqlNode(nodes);
@@ -86,7 +86,7 @@ public final class DynamicSqlSource {
     private static String requiredAttribute(Element element, String name) {
         String value = element.getAttribute(name);
         if (!StringUtils.hasText(value)) {
-            throw new IllegalArgumentException("Dynamic SQL element <" + element.getTagName() + "> requires attribute " + name);
+            throw new IllegalArgumentException("动态SQL元素 <" + element.getTagName() + "> 需要属性 " + name);
         }
         return value;
     }
@@ -113,7 +113,7 @@ public final class DynamicSqlSource {
     private record TextSqlNode(String text) implements SqlNode {
         private TextSqlNode {
             if (text.contains("${")) {
-                throw new IllegalArgumentException("Dynamic SQL does not allow literal ${} substitution; use #{} binding");
+                throw new IllegalArgumentException("动态SQL不允许使用字面量 ${} 替换；请使用 #{} 绑定");
             }
         }
 
@@ -197,7 +197,7 @@ public final class DynamicSqlSource {
                     result.add(new Iteration(i, Array.get(source, i)));
                 }
             } else {
-                throw new IllegalArgumentException("Dynamic SQL foreach collection is not iterable: " + source.getClass().getName());
+                throw new IllegalArgumentException("动态SQL foreach集合不可迭代: " + source.getClass().getName());
             }
             return result;
         }

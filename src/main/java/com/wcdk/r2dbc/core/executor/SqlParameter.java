@@ -13,8 +13,8 @@ public record SqlParameter(Object value, Class<?> javaType, Type databaseType) {
     public SqlParameter {
         Objects.requireNonNull(javaType, "javaType");
         if (value != null && !javaType.isInstance(value) && !boxed(javaType).isInstance(value)) {
-            throw new IllegalArgumentException("Parameter value type " + value.getClass().getName()
-                    + " is not assignable to " + javaType.getName());
+            throw new IllegalArgumentException("参数值类型 " + value.getClass().getName()
+                    + " 无法赋值给 " + javaType.getName());
         }
     }
 

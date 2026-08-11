@@ -124,7 +124,7 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
             return ClassUtils.forName(className, classLoader);
         }
         catch (ClassNotFoundException ex) {
-            throw new IllegalStateException("Repository interface class not found: " + className, ex);
+            throw new IllegalStateException("未找到Repository接口类: " + className, ex);
         }
     }
 }

@@ -13,6 +13,8 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.ReactiveTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -48,13 +50,10 @@ public class TransactionalAspect {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionalAspect.class);
 
-    private final TransactionalOperator transactionalOperator;
+    private final ReactiveTransactionManager transactionManager;
 
-    private final TransactionTemplate transactionTemplate;
-
-    public TransactionalAspect(TransactionalOperator transactionalOperator, TransactionTemplate transactionTemplate) {
-        this.transactionalOperator = transactionalOperator;
-        this.transactionTemplate = transactionTemplate;
+    public TransactionalAspect(ReactiveTransactionManager transactionManager) {
+        this.transactionManager = transactionManager;
     }
 
     @Around("@annotation(org.springframework.transaction.annotation.Transactional) || " +
@@ -70,10 +69,9 @@ public class TransactionalAspect {
             return joinPoint.proceed();
         }
 
-        if (isUnsupportedPropagation(transactional.propagation())) {
-            log.debug("Propagation {} not supported in R2DBC, proceeding without transaction",
-                    transactional.propagation());
-            return joinPoint.proceed();
+        if (!Publisher.class.isAssignableFrom(method.getReturnType())) {
+            throw new IllegalStateException("响应式事务方法必须返回Publisher: "
+                    + method.toGenericString());
         }
 
         boolean readOnly = transactional.readOnly();
@@ -81,23 +79,19 @@ public class TransactionalAspect {
         String transactionName = method.getDeclaringClass().getSimpleName() + "." + method.getName();
 
         if (log.isDebugEnabled()) {
-            log.debug("Starting {}transaction for {}",
-                    readOnly ? "read-only " : "", transactionName);
+            log.debug("开始{}事务 {}",
+                    readOnly ? "只读 " : "", transactionName);
         }
 
-        Object result = joinPoint.proceed();
+        TransactionalOperator operator = operator(transactional);
 
-        if (result instanceof Mono<?> mono) {
-            return wrapMono(mono, readOnly, timeout, transactionName);
+        if (Mono.class.isAssignableFrom(method.getReturnType())) {
+            return wrapMono(invokeMono(joinPoint, method), operator, timeout);
         }
-        if (result instanceof Flux<?> flux) {
-            return wrapFlux(flux, readOnly, timeout, transactionName);
+        if (Flux.class.isAssignableFrom(method.getReturnType())) {
+            return wrapFlux(invokeFlux(joinPoint, method), operator, timeout);
         }
-        if (result instanceof Publisher<?> publisher) {
-            return wrapFlux(Flux.from(publisher), readOnly, timeout, transactionName);
-        }
-
-        return wrapBlocking(result, readOnly, timeout, transactionName);
+        return wrapFlux(invokeFlux(joinPoint, method), operator, timeout);
     }
 
     /**
@@ -105,14 +99,39 @@ public class TransactionalAspect {
      * <p>
      * 事务在订阅时开始，完成时提交，异常时回滚。
      */
-    private Mono<?> wrapMono(Mono<?> mono, boolean readOnly, int timeout, String transactionName) {
-        Mono<?> wrapped;
+    /**
+     * Invoke the intercepted method only when the returned publisher is subscribed.
+     */
+    private Mono<?> invokeMono(ProceedingJoinPoint joinPoint, Method method) {
+        return Mono.defer(() -> {
+            try {
+                return Mono.from(toPublisher(joinPoint.proceed(), method));
+            } catch (Throwable error) {
+                return Mono.error(error);
+            }
+        });
+    }
 
-        if (readOnly) {
-            wrapped = transactionTemplate.wrapReadOnly(mono);
-        } else {
-            wrapped = transactionalOperator.transactional(mono);
+    private Flux<?> invokeFlux(ProceedingJoinPoint joinPoint, Method method) {
+        return Flux.defer(() -> {
+            try {
+                return Flux.from(toPublisher(joinPoint.proceed(), method));
+            } catch (Throwable error) {
+                return Flux.error(error);
+            }
+        });
+    }
+
+    private Publisher<?> toPublisher(Object result, Method method) {
+        if (result instanceof Publisher<?> publisher) {
+
+            return publisher;
         }
+        throw new IllegalStateException("Reactive transactional method must return Publisher: " + method.toGenericString());
+    }
+
+    private Mono<?> wrapMono(Mono<?> mono, TransactionalOperator operator, int timeout) {
+        Mono<?> wrapped = operator.transactional(mono);
 
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
@@ -126,10 +145,8 @@ public class TransactionalAspect {
      * <p>
      * 事务在订阅时开始，所有元素完成后提交，异常时回滚。
      */
-    private Flux<?> wrapFlux(Flux<?> flux, boolean readOnly, int timeout, String transactionName) {
-        Flux<?> wrapped = readOnly
-                ? transactionTemplate.wrapReadOnly(flux)
-                : transactionalOperator.transactional(flux);
+    private Flux<?> wrapFlux(Flux<?> flux, TransactionalOperator operator, int timeout) {
+        Flux<?> wrapped = operator.transactional(flux);
 
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
@@ -150,35 +167,17 @@ public class TransactionalAspect {
      * @param transactionName  事务名称
      * @return 包装后的 Mono
      */
-    private Mono<?> wrapBlocking(Object result, boolean readOnly, int timeout, String transactionName) {
-        if (result == null) {
-            return Mono.empty();
-        }
-
-        Mono<?> mono = Mono.just(result);
-
-        if (readOnly) {
-            mono = transactionTemplate.wrapReadOnly(mono);
-        } else {
-            mono = transactionalOperator.transactional(mono);
-        }
-
-        if (hasTimeout(timeout)) {
-            mono = mono.timeout(Duration.ofSeconds(timeout));
-        }
-
-        return R2dbcDataSourceContext.pinTransactionDataSource(mono);
+    private TransactionalOperator operator(Transactional transactional) {
+        DefaultTransactionDefinition definition = new DefaultTransactionDefinition();
+        definition.setPropagationBehavior(transactional.propagation().value());
+        definition.setIsolationLevel(transactional.isolation().value());
+        definition.setReadOnly(transactional.readOnly());
+        definition.setTimeout(transactional.timeout());
+        return TransactionalOperator.create(transactionManager, definition);
     }
 
     private boolean hasTimeout(int timeout) {
         return timeout > 0 && timeout != org.springframework.transaction.TransactionDefinition.TIMEOUT_DEFAULT;
-    }
-
-    private boolean isUnsupportedPropagation(org.springframework.transaction.annotation.Propagation propagation) {
-        return switch (propagation) {
-            case NOT_SUPPORTED, MANDATORY, NEVER -> true;
-            default -> false;
-        };
     }
 
     private Method resolveMethod(ProceedingJoinPoint joinPoint) {

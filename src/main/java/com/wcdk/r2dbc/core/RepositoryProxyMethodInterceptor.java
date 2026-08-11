@@ -98,7 +98,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         Method method = invocation.getMethod();
         RepositoryMethodPlan plan = methodPlans.get(method);
         if (plan == null) {
-            throw new IllegalStateException("Repository method was not compiled at startup: " + method);
+            throw new IllegalStateException("Repository方法未在启动时编译: " + method);
         }
         if (method.getReturnType() == Mono.class) {
             return Mono.defer(() -> {
@@ -134,7 +134,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             return executeCustomMethod(method, arguments);
         }
         if (plan.kind() == RepositoryMethodPlan.Kind.UNSUPPORTED) {
-            throw new UnsupportedOperationException("Unsupported repository method: " + method.toGenericString());
+            throw new UnsupportedOperationException("不支持的Repository方法: " + method.toGenericString());
         }
         if (plan.kind() != RepositoryMethodPlan.Kind.CRUD
                 && plan.kind() != RepositoryMethodPlan.Kind.OBJECT) {
@@ -294,7 +294,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                             result = switch (statement.commandType()) {
                                 case INSERT, UPDATE, DELETE, MERGE -> executeXmlUpdate(finalBoundSql, method, arguments);
                                 case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
-                                case UNKNOWN -> throw new IllegalStateException("Unknown XML SQL command type");
+                                case UNKNOWN -> throw new IllegalStateException("未知的XML SQL命令类型");
                             };
                         } catch (Exception e) {
                             return Flux.error(e);
@@ -318,7 +318,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                             result = switch (statement.commandType()) {
                                 case INSERT, UPDATE, DELETE, MERGE -> executeXmlUpdate(finalBoundSql, method, arguments);
                                 case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
-                                case UNKNOWN -> throw new IllegalStateException("Unknown XML SQL command type");
+                                case UNKNOWN -> throw new IllegalStateException("未知的XML SQL命令类型");
                             };
                         } catch (Exception e) {
                             return Mono.error(e);
@@ -944,7 +944,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             // fallback to Object methods
             return Object.class.getMethod(methodName);
         } catch (NoSuchMethodException e) {
-            throw new IllegalStateException("Method not found: " + methodName, e);
+            throw new IllegalStateException("方法未找到: " + methodName, e);
         }
     }
 

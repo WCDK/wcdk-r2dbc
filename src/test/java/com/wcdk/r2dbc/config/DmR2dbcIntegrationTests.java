@@ -88,7 +88,7 @@ class DmR2dbcIntegrationTests {
         if (environment != null && !environment.isBlank()) {
             return environment;
         }
-        throw new IllegalStateException("Missing Dameng integration test setting: set -D" + propertyName
-                + " or environment variable " + environmentName);
+        throw new IllegalStateException("缺少达梦集成测试配置：请设置 -D" + propertyName
+                + " 或环境变量 " + environmentName);
     }
 }

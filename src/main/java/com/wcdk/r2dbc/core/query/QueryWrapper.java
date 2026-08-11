@@ -109,7 +109,7 @@ public class QueryWrapper<T> {
 
     public QueryWrapper<T> offset(Integer offset) {
         if (offset == null) {
-            throw new IllegalArgumentException("Query offset must not be null");
+            throw new IllegalArgumentException("查询偏移量不能为空");
         }
         return offset(offset.longValue());
     }
@@ -134,7 +134,7 @@ public class QueryWrapper<T> {
         try {
             return offset(Math.multiplyExact(pageNo - 1, pageSize));
         } catch (ArithmeticException error) {
-            throw new IllegalArgumentException("Query page offset overflow: pageNo=" + pageNo
+            throw new IllegalArgumentException("查询页码偏移量溢出: pageNo=" + pageNo
                     + ", pageSize=" + pageSize, error);
         }
     }
@@ -187,7 +187,7 @@ public class QueryWrapper<T> {
                 snapshot.add(java.lang.reflect.Array.get(value, i));
             }
         } else {
-            throw new IllegalArgumentException("IN/NOT IN value must be an Iterable or array");
+            throw new IllegalArgumentException("IN/NOT IN值必须是可迭代对象或数组");
         }
         return Collections.unmodifiableList(snapshot);
     }

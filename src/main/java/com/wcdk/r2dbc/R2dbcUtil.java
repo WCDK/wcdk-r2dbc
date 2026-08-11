@@ -151,7 +151,7 @@ public class R2dbcUtil {
 
     public R2dbcEntityTemplate entityTemplate() {
         if (entityTemplate == null) {
-            throw new IllegalStateException("R2DBC entity template is missing");
+            throw new IllegalStateException("R2DBC实体模板缺失");
         }
         return entityTemplate;
     }

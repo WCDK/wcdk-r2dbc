@@ -30,13 +30,13 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
 
     public DynamicRoutingConnectionFactory(String primary, Map<String, ConnectionFactory> connectionFactories) {
         if (connectionFactories == null || connectionFactories.isEmpty()) {
-            throw new IllegalArgumentException("R2DBC data sources must not be empty");
+            throw new IllegalArgumentException("R2DBC数据源不能为空");
         }
         if (primary == null || primary.isBlank()) {
-            throw new IllegalArgumentException("R2DBC primary data source key is blank");
+            throw new IllegalArgumentException("R2DBC主数据源键为空");
         }
         if (!connectionFactories.containsKey(primary)) {
-            throw new IllegalArgumentException("R2DBC primary data source does not exist: " + primary);
+            throw new IllegalArgumentException("R2DBC主数据源不存在: " + primary);
         }
         this.primary = primary;
         this.connectionFactories = Collections.unmodifiableMap(new LinkedHashMap<>(connectionFactories));
@@ -76,7 +76,7 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
                     disposable.dispose();
                 } catch (RuntimeException error) {
                     if (failure == null) {
-                        failure = new IllegalStateException("Failed to dispose one or more R2DBC data sources");
+                        failure = new IllegalStateException("释放一个或多个R2DBC数据源失败");
                     }
                     failure.addSuppressed(error);
                 }
@@ -97,8 +97,8 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
         String key = dataSource == null || dataSource.isBlank() ? primary : dataSource;
         ConnectionFactory connectionFactory = connectionFactories.get(key);
         if (connectionFactory == null) {
-            throw new IllegalArgumentException("R2DBC data source does not exist: " + key
-                    + "; available keys: " + connectionFactories.keySet());
+            throw new IllegalArgumentException("R2DBC数据源不存在: " + key
+                    + "; 可用键: " + connectionFactories.keySet());
         }
         return connectionFactory;
     }

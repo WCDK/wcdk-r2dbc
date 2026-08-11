@@ -100,8 +100,8 @@ public class RepositoryXmlRegistry {
                     } else if (commandType(element.getTagName()) != null) {
                         register(namespace, element, resource);
                     } else {
-                        throw new IllegalStateException("Unknown R2DBC XML element <" + element.getTagName()
-                                + "> in namespace " + namespace + ", resource: " + resource.getDescription());
+                        throw new IllegalStateException("未知的R2DBC XML元素 <" + element.getTagName()
+                                + ">，命名空间 " + namespace + "，资源: " + resource.getDescription());
                     }
                 }
             }

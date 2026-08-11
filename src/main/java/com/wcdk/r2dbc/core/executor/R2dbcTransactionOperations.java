@@ -50,7 +50,7 @@ public class R2dbcTransactionOperations {
      */
     public <T> Flux<T> transaction(Function<DatabaseClient, Publisher<T>> action) {
         if (transactionalOperator == null) {
-            throw new IllegalStateException("R2DBC transactional operator is missing");
+            throw new IllegalStateException("R2DBC事务操作符缺失");
         }
         return transactionalOperator.transactional(Flux.from(action.apply(databaseClient)));
     }
@@ -62,7 +62,7 @@ public class R2dbcTransactionOperations {
      */
     public Mono<ManualTransaction> createManualTransaction() {
         if (transactionManager == null) {
-            throw new IllegalStateException("TransactionManager is not configured");
+            throw new IllegalStateException("TransactionManager未配置");
         }
         return transactionManager.createTransaction();
     }
@@ -75,7 +75,7 @@ public class R2dbcTransactionOperations {
      */
     public Mono<ManualTransaction> createManualTransaction(String transactionName) {
         if (transactionManager == null) {
-            throw new IllegalStateException("TransactionManager is not configured");
+            throw new IllegalStateException("TransactionManager未配置");
         }
         return transactionManager.createTransaction(transactionName);
     }
@@ -89,7 +89,7 @@ public class R2dbcTransactionOperations {
      */
     public <T> Mono<T> executeInTransaction(Function<Connection, Publisher<T>> action) {
         if (transactionTemplate == null) {
-            throw new IllegalStateException("TransactionTemplate is not configured");
+            throw new IllegalStateException("TransactionTemplate未配置");
         }
         return transactionTemplate.execute(action);
     }
@@ -104,7 +104,7 @@ public class R2dbcTransactionOperations {
      */
     public <T> Mono<T> executeInTransaction(String transactionName, Function<Connection, Publisher<T>> action) {
         if (transactionTemplate == null) {
-            throw new IllegalStateException("TransactionTemplate is not configured");
+            throw new IllegalStateException("TransactionTemplate未配置");
         }
         return transactionTemplate.execute(transactionName, action);
     }
@@ -118,7 +118,7 @@ public class R2dbcTransactionOperations {
      */
     public <T> Mono<T> executeInReadOnlyTransaction(Function<Connection, Publisher<T>> action) {
         if (transactionTemplate == null) {
-            throw new IllegalStateException("TransactionTemplate is not configured");
+            throw new IllegalStateException("TransactionTemplate未配置");
         }
         return transactionTemplate.executeReadOnly(action);
     }

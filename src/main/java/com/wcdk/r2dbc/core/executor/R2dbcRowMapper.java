@@ -76,7 +76,7 @@ public class R2dbcRowMapper {
             if (e instanceof IllegalStateException illegalStateException) {
                 throw illegalStateException;
             }
-            throw new IllegalStateException("Map entity failed: " + entityClass.getName(), e);
+            throw new IllegalStateException("实体映射失败: " + entityClass.getName(), e);
         }
     }
 
@@ -112,7 +112,7 @@ public class R2dbcRowMapper {
                     .filter(candidate -> candidate.isAnnotationPresent(PersistenceCreator.class))
                     .toList();
             if (selected.size() > 1) {
-                throw new IllegalStateException("Entity has multiple @PersistenceCreator constructors: "
+                throw new IllegalStateException("实体有多个@PersistenceCreator构造函数: "
                         + entityClass.getName());
             }
             if (!selected.isEmpty()) {
@@ -125,13 +125,13 @@ public class R2dbcRowMapper {
                 return new FieldMappingPlan(constructor, persistentFields(entityClass));
             } catch (NoSuchMethodException ignored) {
                 if (constructors.length != 1) {
-                    throw new IllegalStateException("Entity requires a no-arg constructor or exactly one mapping constructor: "
+                    throw new IllegalStateException("实体需要无参构造函数或恰好一个映射构造函数: "
                             + entityClass.getName());
                 }
                 return constructorPlan(entityClass, constructors[0]);
             }
         } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Create mapping plan failed: " + entityClass.getName(), e);
+            throw new IllegalStateException("创建映射计划失败: " + entityClass.getName(), e);
         }
     }
 
@@ -181,20 +181,20 @@ public class R2dbcRowMapper {
         String actualColumn = actualColumnName(rowColumns, target.column());
         if (actualColumn == null) {
             if (target.type().isPrimitive()) {
-                throw new IllegalStateException("Required primitive property '" + target.name()
-                        + "' is missing column '" + target.column() + "'");
+                throw new IllegalStateException("必需的基本类型属性 '" + target.name()
+                        + "' 缺少列 '" + target.column() + "'");
             }
             return null;
         }
         try {
             Object value = row.get(actualColumn);
             if (value == null && target.type().isPrimitive()) {
-                throw new IllegalStateException("SQL NULL cannot be assigned to primitive property '"
-                        + target.name() + "' from column '" + actualColumn + "'");
+                throw new IllegalStateException("SQL NULL无法赋值给基本类型属性 '"
+                        + target.name() + "'，列 '" + actualColumn + "'");
             }
             return convertValue(value, target.type());
         } catch (RuntimeException e) {
-            throw new IllegalStateException("Cannot map column '" + actualColumn + "' to '"
+            throw new IllegalStateException("无法将列 '" + actualColumn + "' 映射到 '"
                     + target.name() + "' (" + target.type().getName() + ")", e);
         }
     }
@@ -218,8 +218,8 @@ public class R2dbcRowMapper {
             if (converter.supports(value.getClass(), boxedType)) {
                 Object converted = converter.convert(value, boxedType);
                 if (converted != null && !boxedType.isInstance(converted)) {
-                    throw new IllegalStateException("Converter " + converter.getClass().getName()
-                            + " returned " + converted.getClass().getName() + " for " + boxedType.getName());
+                    throw new IllegalStateException("转换器 " + converter.getClass().getName()
+                            + " 对 " + boxedType.getName() + " 返回了 " + converted.getClass().getName());
                 }
                 return converted;
             }
@@ -430,8 +430,8 @@ public class R2dbcRowMapper {
                 String actualColumn = actualColumnName(rowColumns, target.column());
                 if (actualColumn == null) {
                     if (target.field().getType().isPrimitive()) {
-                        throw new IllegalStateException("Required primitive property '" + target.field().getName()
-                                + "' is missing column '" + target.column() + "'");
+                        throw new IllegalStateException("必需的基本类型属性 '" + target.field().getName()
+                                + "' 缺少列 '" + target.column() + "'");
                     }
                     continue;
                 }

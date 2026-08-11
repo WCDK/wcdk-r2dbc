@@ -28,7 +28,7 @@ public final class CrudStatementCompiler {
             return Optional.empty();
         }
         if (metadata == null) {
-            throw new IllegalArgumentException("Base CRUD method requires BaseRepository entity metadata: "
+            throw new IllegalArgumentException("基础CRUD方法需要BaseRepository实体元数据: "
                     + method.toGenericString());
         }
         return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.CRUD, null, id));

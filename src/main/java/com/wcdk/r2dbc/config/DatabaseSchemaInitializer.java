@@ -108,7 +108,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
 
         String databaseType = detectDatabaseType(initConfig.getDatabaseType());
         if ("embedded".equals(mode) && !isEmbedded(databaseType)) {
-            log.info("Schema initialization mode is embedded, but database '{}' is not embedded; skipping", databaseType);
+            log.info("Schema初始化模式为嵌入式，但数据库 '{}' 不是嵌入式；跳过", databaseType);
             return;
         }
         log.info("检测到数据库类型: {}", databaseType);
@@ -156,7 +156,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
         }
 
         log.warn("无法识别数据库类型，默认使用dm");
-        throw new IllegalStateException("Unable to determine database type from configuration or R2DBC metadata");
+        throw new IllegalStateException("无法从配置或R2DBC元数据中确定数据库类型");
     }
 
     /**
@@ -212,7 +212,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
     private Mono<Void> executeSqlResources(List<Resource> resources, boolean ignoreErrors, boolean executeInTransaction) {
         Flux<String> statements = Flux.fromIterable(resources)
                 .concatMap(resource -> Mono.fromCallable(() -> {
-                            log.info("Executing SQL resource: {}", resource.getDescription());
+                            log.info("执行SQL资源: {}", resource.getDescription());
                             return readSqlContent(resource);
                         })
                         .subscribeOn(Schedulers.boundedElastic()))
@@ -355,7 +355,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
                 if (current.toString().isBlank() && line.regionMatches(true, 0, "DELIMITER ", 0, 10)) {
                     delimiter = line.substring(10).strip();
                     if (delimiter.isEmpty()) {
-                        throw new IllegalArgumentException("SQL DELIMITER must not be empty");
+                        throw new IllegalArgumentException("SQL分隔符不能为空");
                     }
                     i = lineEnd;
                     continue;
@@ -444,7 +444,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
             }
         }
         if (singleQuote || doubleQuote || dollarTag != null || blockComment) {
-            throw new IllegalArgumentException("Unterminated quote or comment in SQL script");
+            throw new IllegalArgumentException("SQL脚本中存在未闭合的引号或注释");
         }
         addStatement(statements, current);
         return statements;
@@ -471,7 +471,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
     private String normalizeMode(String mode) {
         String normalized = mode == null ? "always" : mode.strip().toLowerCase(java.util.Locale.ROOT);
         if (!java.util.Set.of("always", "never", "embedded").contains(normalized)) {
-            throw new IllegalArgumentException("Invalid wcdk.r2dbc.database-initializer.mode: " + mode);
+            throw new IllegalArgumentException("无效的wcdk.r2dbc.database-initializer.mode: " + mode);
         }
         return normalized;
     }
@@ -488,7 +488,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
                 return embedded;
             }
         }
-        throw new IllegalStateException("Unsupported database type: " + value);
+        throw new IllegalStateException("不支持的数据库类型: " + value);
     }
 
     private boolean isEmbedded(String databaseType) {

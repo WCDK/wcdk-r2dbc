@@ -197,7 +197,7 @@ class ManualTransactionImpl implements ManualTransaction {
     public void setTimeout(int timeoutSeconds) {
         ensureNew();
         if (timeoutSeconds < 0) {
-            throw new IllegalArgumentException("Timeout must be non-negative, got: " + timeoutSeconds);
+            throw new IllegalArgumentException("超时时间必须是非负数，当前值: " + timeoutSeconds);
         }
         this.timeoutSeconds = timeoutSeconds;
     }
@@ -215,7 +215,7 @@ class ManualTransactionImpl implements ManualTransaction {
 
     private void ensureNew() {
         if (status.get() != TransactionStatus.NEW) {
-            throw new IllegalStateException("Transaction properties can only be changed before begin");
+            throw new IllegalStateException("事务属性只能在开始前修改");
         }
     }
 
@@ -228,7 +228,7 @@ class ManualTransactionImpl implements ManualTransaction {
     public void setName(String name) {
         ensureNew();
         if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("Transaction name must not be blank");
+            throw new IllegalArgumentException("事务名称不能为空");
         }
         this.name = name;
     }

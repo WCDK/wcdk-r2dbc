@@ -150,7 +150,7 @@ public class CustomMethodResolver {
 
     private ParsedMethod resolveDelete(Method method, String fieldPart, Object[] arguments) {
         if (fieldPart == null || fieldPart.isEmpty()) {
-            throw new UnsupportedOperationException("delete method must specify a condition");
+            throw new UnsupportedOperationException("delete方法必须指定条件");
         }
 
         List<Condition> conditions = parseConditions(fieldPart, method.getParameters(), arguments, 0, method.getName());

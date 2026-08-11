@@ -37,7 +37,7 @@ public class ParameterBinder {
         if (parameters == null || parameters.isEmpty()) {
             Set<String> required = namedParameters(requiredSql);
             if (!required.isEmpty()) {
-                throw new IllegalArgumentException("Missing SQL parameters " + required + " for SQL: " + requiredSql);
+                throw new IllegalArgumentException("缺少SQL参数 " + required + "，SQL: " + requiredSql);
             }
             return spec;
         }
@@ -49,7 +49,7 @@ public class ParameterBinder {
             if (key instanceof Number numberKey) {
                 int index = numberKey.intValue();
                 if (index < 0) {
-                    throw new IllegalArgumentException("SQL parameter index must not be negative: " + index
+                    throw new IllegalArgumentException("SQL参数索引不能为负数: " + index
                             + ", SQL: " + requiredSql);
                 }
                 spec = bind(spec, index, value);
@@ -63,12 +63,12 @@ public class ParameterBinder {
         Set<String> missing = new LinkedHashSet<>(required);
         missing.removeAll(supplied);
         if (!missing.isEmpty()) {
-            throw new IllegalArgumentException("Missing SQL parameters " + missing + " for SQL: " + requiredSql);
+            throw new IllegalArgumentException("缺少SQL参数 " + missing + "，SQL: " + requiredSql);
         }
         Set<String> unused = new LinkedHashSet<>(supplied);
         unused.removeAll(required);
         if (!unused.isEmpty() && !required.isEmpty()) {
-            throw new IllegalArgumentException("Unused SQL parameters " + unused + " for SQL: " + requiredSql);
+            throw new IllegalArgumentException("未使用的SQL参数 " + unused + "，SQL: " + requiredSql);
         }
         return spec;
     }
@@ -83,7 +83,7 @@ public class ParameterBinder {
      */
     public DatabaseClient.GenericExecuteSpec bind(DatabaseClient.GenericExecuteSpec spec, int index, Object value) {
         if (index < 0) {
-            throw new IllegalArgumentException("SQL parameter index must not be negative: " + index);
+            throw new IllegalArgumentException("SQL参数索引不能为负数: " + index);
         }
         if (value instanceof SqlParameter parameter) {
             if (parameter.databaseType() != null) {
@@ -96,8 +96,7 @@ public class ParameterBinder {
                     : spec.bind(index, normalizeParameterValue(parameter.value()));
         }
         if (value == null) {
-            throw new IllegalArgumentException("Null SQL parameter at index " + index
-                    + " requires SqlParameter.nullOf(type)");
+            throw new IllegalArgumentException("索引 " + index + " 处的空SQL参数需要使用SqlParameter.nullOf(type)");
         }
         return spec.bind(index, normalizeParameterValue(value));
     }
@@ -123,8 +122,8 @@ public class ParameterBinder {
                     : spec.bind(identifier, normalizeParameterValue(parameter.value()));
         }
         if (value == null) {
-            throw new IllegalArgumentException("Null SQL parameter '" + identifier
-                    + "' requires SqlParameter.nullOf(type)");
+            throw new IllegalArgumentException("空SQL参数 '" + identifier
+                    + "' 需要使用SqlParameter.nullOf(type)");
         }
         return spec.bind(identifier, normalizeParameterValue(value));
     }
@@ -151,18 +150,18 @@ public class ParameterBinder {
     }
     private String requireSql(String sql) {
         if (sql == null || sql.isBlank()) {
-            throw new IllegalArgumentException("R2DBC SQL is blank");
+            throw new IllegalArgumentException("R2DBC SQL为空");
         }
         return sql;
     }
 
     private void requireIdentifier(String identifier, String sql) {
         if (identifier == null || identifier.isBlank()) {
-            throw new IllegalArgumentException("SQL parameter name must not be blank"
+            throw new IllegalArgumentException("SQL参数名不能为空"
                     + (sql == null ? "" : ", SQL: " + sql));
         }
         if (!identifier.matches("[A-Za-z_][A-Za-z0-9_]*")) {
-            throw new IllegalArgumentException("Invalid SQL parameter name '" + identifier + "'"
+            throw new IllegalArgumentException("无效的SQL参数名 '" + identifier + "'"
                     + (sql == null ? "" : ", SQL: " + sql));
         }
     }

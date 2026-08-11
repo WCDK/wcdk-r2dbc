@@ -29,7 +29,7 @@ public final class DerivedMethodCompiler {
         try {
             resolver.validateMethod(method);
         } catch (RuntimeException error) {
-            throw new IllegalArgumentException("Invalid derived repository method: "
+            throw new IllegalArgumentException("无效的派生仓库方法: "
                     + method.toGenericString(), error);
         }
         return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.DERIVED, null,

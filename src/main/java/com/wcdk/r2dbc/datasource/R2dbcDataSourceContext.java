@@ -58,7 +58,7 @@ public final class R2dbcDataSourceContext {
 
     static String requireDataSource(String dataSource) {
         if (dataSource == null || dataSource.isBlank()) {
-            throw new IllegalArgumentException("R2DBC data source key is blank");
+            throw new IllegalArgumentException("R2DBC数据源键为空");
         }
         return dataSource;
     }
@@ -66,8 +66,8 @@ public final class R2dbcDataSourceContext {
     private static void assertTransactionDataSource(ContextView context, String requested) {
         String pinned = context.getOrDefault(TRANSACTION_KEY, null);
         if (pinned != null && !pinned.equals(requested)) {
-            throw new IllegalStateException("Cannot switch R2DBC data source from "
-                    + pinned + " to " + requested + " after a transaction has started");
+            throw new IllegalStateException("事务开始后无法将R2DBC数据源从 "
+                    + pinned + " 切换到 " + requested);
         }
     }
 }

@@ -128,7 +128,7 @@ public class SqlLifecycleInterceptorChain {
         return Flux.fromIterable(interceptors)
                 .concatMap(interceptor -> action.execute(interceptor)
                         .doOnSubscribe(s -> log.trace("Executing interceptor [{}] {}", interceptor.getClass().getSimpleName(), phase))
-                        .doOnError(e -> log.error("Interceptor [{}] error at {}", interceptor.getClass().getSimpleName(), phase, e))
+                        .doOnError(e -> log.error("拦截器 [{}] 在 {} 阶段出错", interceptor.getClass().getSimpleName(), phase, e))
                         .then(Mono.fromSupplier(context::isTerminated))
                 )
                 .takeUntil(Boolean::booleanValue)
@@ -145,7 +145,7 @@ public class SqlLifecycleInterceptorChain {
         for (SqlLifecycleInterceptor interceptor : interceptors) {
             action.execute(interceptor, context);
             if (context.isTerminated()) {
-                log.debug("Interceptor [{}] terminated execution at {}: status={}, reason={}",
+                log.debug("拦截器 [{}] 在 {} 阶段终止执行: status={}, reason={}",
                         interceptor.getClass().getSimpleName(), phase,
                         context.getStatus(), context.getStatusReason());
                 return true;

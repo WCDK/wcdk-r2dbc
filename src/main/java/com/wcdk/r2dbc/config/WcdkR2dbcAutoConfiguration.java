@@ -89,11 +89,11 @@ public class WcdkR2dbcAutoConfiguration {
     public DynamicRoutingConnectionFactory connectionFactory(WcdkSpringR2dbcProperties properties) {
         Map<String, WcdkSpringR2dbcProperties.DataSourceProperties> dataSources = properties.getDataSources();
         if (dataSources == null || dataSources.isEmpty()) {
-            throw new IllegalStateException("spring.r2dbc.data-sources must be configured when Spring R2DBC ConnectionFactory is missing");
+            throw new IllegalStateException("当Spring R2DBC ConnectionFactory缺失时，必须配置spring.r2dbc.data-sources");
         }
         if (!StringUtils.hasText(properties.getPrimary()) || !dataSources.containsKey(properties.getPrimary())) {
             throw new IllegalArgumentException("spring.r2dbc.primary='" + properties.getPrimary()
-                    + "' does not match a configured spring.r2dbc.data-sources key; available: "
+                    + "' 与配置的spring.r2dbc.data-sources键不匹配；可用键："
                     + dataSources.keySet());
         }
         Map<String, ConnectionFactory> connectionFactories = new LinkedHashMap<>();
@@ -116,7 +116,7 @@ public class WcdkR2dbcAutoConfiguration {
             @Value("${database.type:}") String databaseType) {
         
         if (r2dbcUrl == null || r2dbcUrl.isBlank()) {
-            throw new IllegalArgumentException("spring.r2dbc.url must not be blank");
+            throw new IllegalArgumentException("spring.r2dbc.url不能为空");
         }
         if (properties.getPool() != null && properties.getPool().isEnabled()) {
             properties.getPool().validate("primary");
@@ -162,8 +162,7 @@ public class WcdkR2dbcAutoConfiguration {
             case "oracle" -> "com.oracle.database.r2dbc:oracle-r2dbc";
             default -> "an R2DBC driver that supports '" + driver + "'";
         };
-        return new IllegalStateException("No R2DBC SPI provider found for database '" + driver
-                + "'. Add Maven dependency " + coordinates + ".", cause);
+        return new IllegalStateException("未找到数据库 '" + driver + "' 的R2DBC SPI提供者。请添加Maven依赖 " + coordinates + "。", cause);
     }
 
     @Bean
@@ -285,9 +284,8 @@ public class WcdkR2dbcAutoConfiguration {
     @ConditionalOnClass(name = "org.aspectj.lang.annotation.Aspect")
     @ConditionalOnMissingBean(TransactionalAspect.class)
     @Role(ROLE_INFRASTRUCTURE)
-    public TransactionalAspect transactionalAspect(TransactionalOperator transactionalOperator,
-                                                    TransactionTemplate transactionTemplate) {
-        return new TransactionalAspect(transactionalOperator, transactionTemplate);
+    public TransactionalAspect transactionalAspect(ReactiveTransactionManager transactionManager) {
+        return new TransactionalAspect(transactionManager);
     }
 
     @Bean
@@ -313,7 +311,7 @@ public class WcdkR2dbcAutoConfiguration {
             ObjectProvider<ReactiveSqlLifecycleInterceptor> reactiveProvider) {
         List<SqlLifecycleInterceptor> sync = syncProvider.orderedStream().toList();
         List<ReactiveSqlLifecycleInterceptor> reactive = reactiveProvider.orderedStream().toList();
-        log.info("Initialized SQL lifecycle interceptor chain: reactive={}, sync={}",
+        log.info("初始化SQL生命周期拦截器链: reactive={}, sync={}",
                 reactive.stream().map(i -> i.getClass().getName()).toList(),
                 sync.stream().map(i -> i.getClass().getName()).toList());
         return new SqlLifecycleInterceptorChain(sync, reactive);
@@ -332,10 +330,10 @@ public class WcdkR2dbcAutoConfiguration {
 
     private ConnectionFactory createConnectionFactory(String name, WcdkSpringR2dbcProperties.DataSourceProperties dsProperties, WcdkSpringR2dbcProperties.Pool globalPool) {
         if (!StringUtils.hasText(name)) {
-            throw new IllegalArgumentException("spring.r2dbc.data-sources contains a blank data source name");
+            throw new IllegalArgumentException("spring.r2dbc.data-sources包含空的数据源名称");
         }
         if (dsProperties == null || dsProperties.getUrl() == null || dsProperties.getUrl().isBlank()) {
-            throw new IllegalArgumentException("spring.r2dbc.data-sources." + name + ".url must not be blank");
+            throw new IllegalArgumentException("spring.r2dbc.data-sources." + name + ".url不能为空");
         }
         WcdkSpringR2dbcProperties.Pool poolConfig = dsProperties.effectivePool(globalPool);
         if (poolConfig != null && poolConfig.isEnabled()) {

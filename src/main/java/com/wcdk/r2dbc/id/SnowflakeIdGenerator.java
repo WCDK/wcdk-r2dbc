@@ -33,7 +33,7 @@ public class SnowflakeIdGenerator {
 
     public SnowflakeIdGenerator(long workerId) {
         if (workerId < 0 || workerId > MAX_WORKER_ID) {
-            throw new IllegalArgumentException("Worker ID must be between 0 and " + MAX_WORKER_ID);
+            throw new IllegalArgumentException("工作ID必须在0到" + MAX_WORKER_ID + "之间");
         }
         this.workerId = workerId;
     }
@@ -43,7 +43,7 @@ public class SnowflakeIdGenerator {
         if (timestamp < lastTimestamp) {
             Long offset = lastTimestamp - timestamp;
             if (offset > 1000) {
-                throw new IllegalStateException("Clock moved backwards more than 1s");
+                throw new IllegalStateException("时钟回拨超过1秒");
             }
             timestamp = lastTimestamp;
         }
@@ -83,7 +83,7 @@ public class SnowflakeIdGenerator {
             long value = ((digest[0] & 0xffL) << 8) | (digest[1] & 0xffL);
             return value & MAX_WORKER_ID;
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available", e);
+            throw new IllegalStateException("SHA-256不可用", e);
         }
     }
 }
