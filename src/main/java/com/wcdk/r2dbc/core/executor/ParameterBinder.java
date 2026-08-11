@@ -3,6 +3,13 @@ package com.wcdk.r2dbc.core.executor;
 import org.springframework.r2dbc.core.DatabaseClient;
 import io.r2dbc.spi.Parameters;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.Date;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -82,17 +89,17 @@ public class ParameterBinder {
             if (parameter.databaseType() != null) {
                 return spec.bind(index, parameter.value() == null
                         ? Parameters.in(parameter.databaseType())
-                        : Parameters.in(parameter.databaseType(), parameter.value()));
+                        : Parameters.in(parameter.databaseType(), normalizeParameterValue(parameter.value())));
             }
             return parameter.value() == null
                     ? spec.bindNull(index, parameter.javaType())
-                    : spec.bind(index, parameter.value());
+                    : spec.bind(index, normalizeParameterValue(parameter.value()));
         }
         if (value == null) {
             throw new IllegalArgumentException("Null SQL parameter at index " + index
                     + " requires SqlParameter.nullOf(type)");
         }
-        return spec.bind(index, value);
+        return spec.bind(index, normalizeParameterValue(value));
     }
 
     /**
@@ -109,19 +116,39 @@ public class ParameterBinder {
             if (parameter.databaseType() != null) {
                 return spec.bind(identifier, parameter.value() == null
                         ? Parameters.in(parameter.databaseType())
-                        : Parameters.in(parameter.databaseType(), parameter.value()));
+                        : Parameters.in(parameter.databaseType(), normalizeParameterValue(parameter.value())));
             }
             return parameter.value() == null
                     ? spec.bindNull(identifier, parameter.javaType())
-                    : spec.bind(identifier, parameter.value());
+                    : spec.bind(identifier, normalizeParameterValue(parameter.value()));
         }
         if (value == null) {
             throw new IllegalArgumentException("Null SQL parameter '" + identifier
                     + "' requires SqlParameter.nullOf(type)");
         }
-        return spec.bind(identifier, value);
+        return spec.bind(identifier, normalizeParameterValue(value));
     }
 
+    /**
+     * Normalize Java time values before they reach JDBC-backed R2DBC drivers.
+     * The DM driver 1.0.0 timestamp converter accepts java.util.Date and casts
+     * arbitrary values to Date in its Object overload.
+     */
+    static Object normalizeParameterValue(Object value) {
+        if (value instanceof Instant instant) {
+            return Date.from(instant);
+        }
+        if (value instanceof LocalDateTime localDateTime) {
+            return Timestamp.valueOf(localDateTime);
+        }
+        if (value instanceof LocalDate localDate) {
+            return java.sql.Date.valueOf(localDate);
+        }
+        if (value instanceof LocalTime localTime) {
+            return Time.valueOf(localTime);
+        }
+        return value;
+    }
     private String requireSql(String sql) {
         if (sql == null || sql.isBlank()) {
             throw new IllegalArgumentException("R2DBC SQL is blank");

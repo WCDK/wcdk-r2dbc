@@ -6,8 +6,10 @@ import io.r2dbc.spi.RowMetadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.PersistenceCreator;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,6 +79,15 @@ class R2dbcRowMapperTests {
 
         assertThat(entity.token.value()).isEqualTo("abc");
         assertThat(entity.createdBy).isEqualTo("persistence-creator");
+    }
+
+    @Test
+    void convertsInstantToLegacyDateAndJavaTimeTypes() {
+        Instant instant = Instant.parse("2026-08-11T04:05:06Z");
+
+        assertThat(mapper.convertValue(instant, Date.class)).isEqualTo(Date.from(instant));
+        assertThat(mapper.convertValue(instant, LocalDateTime.class))
+                .isEqualTo(LocalDateTime.ofInstant(instant, java.time.ZoneId.systemDefault()));
     }
 
     private Row row(List<String> names, List<Object> values) {

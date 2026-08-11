@@ -233,6 +233,20 @@ public class R2dbcRowMapper {
                 return temporalValue;
             }
         }
+        if (value instanceof Instant instant) {
+            if (boxedType == Date.class) {
+                return Date.from(instant);
+            }
+            if (boxedType == LocalDateTime.class) {
+                return LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+            }
+            if (boxedType == LocalDate.class) {
+                return LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).toLocalDate();
+            }
+            if (boxedType == LocalTime.class) {
+                return LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).toLocalTime();
+            }
+        }
         if (value instanceof LocalDateTime localDateTime) {
             Object temporalValue = convertLocalDateTime(localDateTime, boxedType);
             if (temporalValue != null) {
