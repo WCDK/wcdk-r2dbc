@@ -73,6 +73,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     private final Map<Method, RepositoryMethodPlan> methodPlans;
 
+    private final RepositoryInvocationDispatcher dispatcher;
+
     RepositoryProxyMethodInterceptor(R2dbcUtil r2dbcUtil,
                                      WcdkR2dbcProperties properties,
                                      RepositoryMetadata metadata,
@@ -91,6 +93,10 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         this.customMethodResolver = metadata == null ? null : new CustomMethodResolver(metadata,
                 properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
         this.methodPlans = Map.copyOf(methodPlans);
+        this.dispatcher = new RepositoryInvocationDispatcher(List.of(
+                new CrudMethodExecutor(this::executePlan),
+                new DerivedMethodExecutor(this::executePlan),
+                new XmlMethodExecutor(this::executePlan)));
     }
 
     @Override
@@ -123,10 +129,13 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     /** Builds all mutable execution state for one subscription only. */
     private Object invokeOnce(RepositoryInvocation invocation) {
-        RepositoryMethodPlan plan = invocation.plan();
+        return dispatcher.execute(invocation.plan(), invocation.arguments());
+    }
+
+    /** Executes the selected plan; routing is handled by RepositoryInvocationDispatcher. */
+    private Object executePlan(RepositoryMethodPlan plan, Object[] arguments) {
         Method method = plan.method();
         String methodName = method.getName();
-        Object[] arguments = invocation.arguments();
         if (plan.kind() == RepositoryMethodPlan.Kind.XML) {
             return executeXmlStatement(plan.xmlStatement(), method, arguments);
         }
@@ -140,9 +149,9 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 && plan.kind() != RepositoryMethodPlan.Kind.OBJECT) {
             // 1. 先尝试从XML注册表查找
             return repositoryXmlRegistry.find(repositoryInterface, methodName)
-                    .map(statement -> executeXmlStatement(statement, invocation.getMethod(), arguments))
+                    .map(statement -> executeXmlStatement(statement, method, arguments))
                     // 2. 尝试通过方法名约定解析自定义方法
-                    .orElseGet(() -> executeCustomMethod(invocation.getMethod(), arguments));
+                    .orElseGet(() -> executeCustomMethod(method, arguments));
         }
         if (metadata == null && isBaseCrudMethod(methodName)) {
             throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持基础 CRUD 方法：" + methodName);
@@ -159,9 +168,18 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             case "selectCount" -> selectCount(queryWrapper(arguments));
             case "exists" -> exists(queryWrapper(arguments));
             case "toString" -> "WcdkR2dbcRepositoryProxy(" + (metadata != null ? metadata.entityClass().getName() : repositoryInterface.getSimpleName()) + ")";
-            case "hashCode" -> System.identityHashCode(invocation.getThis());
-            case "equals" -> invocation.getThis() == arguments[0];
+            case "hashCode" -> System.identityHashCode(arguments.length == 0 ? null : arguments[0]);
+            case "equals" -> false;
             default -> throw new UnsupportedOperationException("暂不支持自定义仓储方法：" + methodName);
+        };
+    }
+
+    private Object executeObjectMethod(RepositoryInvocation invocation) {
+        return switch (invocation.getMethod().getName()) {
+            case "toString" -> "WcdkR2dbcRepositoryProxy(" + (metadata != null ? metadata.entityClass().getName() : repositoryInterface.getSimpleName()) + ")";
+            case "hashCode" -> System.identityHashCode(invocation.getThis());
+            case "equals" -> invocation.getThis() == invocation.arguments()[0];
+            default -> throw new UnsupportedOperationException("Unsupported Object method: " + invocation.getMethod());
         };
     }
 

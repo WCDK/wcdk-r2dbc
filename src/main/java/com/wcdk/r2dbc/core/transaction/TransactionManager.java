@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 
 /**
  * 创建活动的手动事务。调用方负责管理并关闭返回的事务。
+ * @author wcdk
  */
 public class TransactionManager {
 

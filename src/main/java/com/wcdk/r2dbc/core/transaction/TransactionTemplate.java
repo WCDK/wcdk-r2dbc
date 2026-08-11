@@ -11,6 +11,7 @@ import java.util.function.Function;
 
 /**
  * 执行响应式事务操作，并确保提交、回滚和连接清理具有确定性。
+ * @author wcdk
  */
 public class TransactionTemplate {
 
