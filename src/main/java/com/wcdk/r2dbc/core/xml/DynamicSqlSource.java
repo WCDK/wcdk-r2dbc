@@ -2,6 +2,7 @@ package com.wcdk.r2dbc.core.xml;
 
 import org.springframework.context.expression.MapAccessor;
 import org.springframework.expression.Expression;
+import org.springframework.expression.EvaluationException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.util.StringUtils;
@@ -20,11 +21,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * 编译并渲染支持的动态 XML SQL 节点。
- *
- * @author WCDK
- **/
+/***
+ * 动态 SQL 源。
+ * @author wcdk
+ */
 public final class DynamicSqlSource {
 
     private static final Pattern PARAMETER_PATTERN = Pattern.compile("#\\{\\s*([a-zA-Z0-9_.$]+)\\s*}");
@@ -227,6 +227,11 @@ public final class DynamicSqlSource {
         StandardEvaluationContext evaluationContext() {
             StandardEvaluationContext context = new StandardEvaluationContext(bindings);
             context.addPropertyAccessor(new MapAccessor());
+            context.setMethodResolvers(List.of());
+            context.setBeanResolver(null);
+            context.setTypeLocator(typeName -> {
+                throw new EvaluationException("Dynamic SQL expressions cannot access types: " + typeName);
+            });
             return context;
         }
 
