@@ -60,29 +60,7 @@ public class CustomMethodResolver {
      * @return 解析结果，null 表示不支持的方法格式
      */
     public ParsedMethod resolve(Method method, Object[] arguments) {
-        String methodName = method.getName();
-        Matcher matcher = METHOD_PATTERN.matcher(methodName);
-
-        if (!matcher.matches()) {
-            return null;
-        }
-
-        String operation = matcher.group(1);
-        String suffix = matcher.group(2);
-        String fieldPart = matcher.group(4);
-
-        if ("All".equals(suffix) || "One".equals(suffix)) {
-            return null;
-        }
-
-        return switch (operation) {
-            case "find" -> resolveFind(method, fieldPart, arguments);
-            case "count" -> resolveCount(method, fieldPart, arguments);
-            case "exists" -> resolveExists(method, fieldPart, arguments);
-            case "delete" -> resolveDelete(method, fieldPart, arguments);
-            case "update" -> resolveUpdate(method, fieldPart, arguments);
-            default -> null;
-        };
+        return resolve(compile(method), method, arguments);
     }
 
     public static boolean supports(Method method) {
@@ -90,9 +68,33 @@ public class CustomMethodResolver {
         return matcher.matches() && matcher.group(2) == null;
     }
 
+    public DerivedQueryDefinition compile(Method method) {
+        Matcher matcher = METHOD_PATTERN.matcher(method.getName());
+        if (!matcher.matches() || matcher.group(2) != null) {
+            throw new IllegalArgumentException("不支持的派生仓库方法：" + method.toGenericString());
+        }
+        String fieldPart = matcher.group(4);
+        String conditionPart = fieldPart;
+        if ("update".equals(matcher.group(1))) {
+            int byIndex = fieldPart == null ? -1 : fieldPart.indexOf("By");
+            conditionPart = byIndex < 0 || fieldPart.endsWith("ById") ? null : fieldPart.substring(byIndex + 2);
+        }
+        return new DerivedQueryDefinition(matcher.group(1), fieldPart, compileConditions(conditionPart));
+    }
+
+    public ParsedMethod resolve(DerivedQueryDefinition plan, Method method, Object[] arguments) {
+        return switch (plan.operation()) {
+            case "find" -> resolveFind(method, plan.fieldPart(), arguments, plan.conditions());
+            case "count" -> resolveCount(method, plan.fieldPart(), arguments, plan.conditions());
+            case "exists" -> resolveExists(method, plan.fieldPart(), arguments, plan.conditions());
+            case "delete" -> resolveDelete(method, plan.fieldPart(), arguments, plan.conditions());
+            case "update" -> resolveUpdate(method, plan.fieldPart(), arguments, plan.conditions());
+            default -> throw new UnsupportedOperationException("不支持的派生操作：" + plan.operation());
+        };
+    }
     // ==================== find ====================
 
-    private ParsedMethod resolveFind(Method method, String fieldPart, Object[] arguments) {
+    private ParsedMethod resolveFind(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
             String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
                     + logicalNotDeleteSql();
@@ -100,7 +102,7 @@ public class CustomMethodResolver {
         }
 
         String conditionPart = conditionPart(fieldPart);
-        List<Condition> conditions = parseConditions(conditionPart, method.getParameters(), arguments, 0, method.getName());
+        List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
         String orderBySql = extractOrderBy(fieldPart);
         String whereSql = buildWhereSql(conditions, true);
 
@@ -113,14 +115,14 @@ public class CustomMethodResolver {
 
     // ==================== count ====================
 
-    private ParsedMethod resolveCount(Method method, String fieldPart, Object[] arguments) {
+    private ParsedMethod resolveCount(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
             String sql = "SELECT COUNT(1) FROM " + metadata.tableName()
                     + logicalNotDeleteSql();
             return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
         }
 
-        List<Condition> conditions = parseConditions(fieldPart, method.getParameters(), arguments, 0, method.getName());
+        List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
         String whereSql = buildWhereSql(conditions, true);
 
         String sql = "SELECT COUNT(1) FROM " + metadata.tableName() + whereSql;
@@ -130,14 +132,14 @@ public class CustomMethodResolver {
 
     // ==================== exists ====================
 
-    private ParsedMethod resolveExists(Method method, String fieldPart, Object[] arguments) {
+    private ParsedMethod resolveExists(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
             String sql = "SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END FROM "
                     + metadata.tableName() + logicalNotDeleteSql();
             return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
         }
 
-        List<Condition> conditions = parseConditions(fieldPart, method.getParameters(), arguments, 0, method.getName());
+        List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
         String whereSql = buildWhereSql(conditions, true);
 
         String sql = "SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END FROM "
@@ -148,13 +150,13 @@ public class CustomMethodResolver {
 
     // ==================== delete ====================
 
-    private ParsedMethod resolveDelete(Method method, String fieldPart, Object[] arguments) {
+    private ParsedMethod resolveDelete(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
             throw new UnsupportedOperationException("delete方法必须指定条件");
         }
 
-        List<Condition> conditions = parseConditions(fieldPart, method.getParameters(), arguments, 0, method.getName());
-        String whereSql = buildWhereSql(conditions, false);
+        List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
+        String whereSql = buildWhereSql(conditions, true);
         Map<String, Object> parameters = buildParameters(conditions);
         FieldColumn logicDeleteColumn = metadata.logicDeleteColumn();
         if (logicDeleteColumn == null) {
@@ -170,7 +172,7 @@ public class CustomMethodResolver {
     }
     // ==================== update ====================
 
-    private ParsedMethod resolveUpdate(Method method, String fieldPart, Object[] arguments) {
+    private ParsedMethod resolveUpdate(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
             throw new UnsupportedOperationException("update方法必须指定更新字段");
         }
@@ -184,7 +186,7 @@ public class CustomMethodResolver {
         if (byIndex > 0) {
             String setPart = fieldPart.substring(0, byIndex);
             String wherePart = fieldPart.substring(byIndex + 2);
-            return resolveUpdateByFields(method, setPart, wherePart, arguments);
+            return resolveUpdateByFields(method, setPart, wherePart, arguments, compiledConditions);
         }
 
         throw new UnsupportedOperationException("不支持的update方法格式：update" + fieldPart);
@@ -218,7 +220,7 @@ public class CustomMethodResolver {
         return new ParsedMethod(sql, params, SqlCommandType.UPDATE);
     }
 
-    private ParsedMethod resolveUpdateByFields(Method method, String setPart, String wherePart, Object[] arguments) {
+    private ParsedMethod resolveUpdateByFields(Method method, String setPart, String wherePart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         List<String> setFields = parseFieldNames(setPart);
 
         if (setFields.isEmpty()) {
@@ -244,8 +246,8 @@ public class CustomMethodResolver {
         sql.append(String.join(", ", setClauses));
 
         int argOffset = setFields.size();
-        List<Condition> conditions = parseConditions(wherePart, method.getParameters(), arguments, argOffset, method.getName());
-        String whereSql = buildWhereSql(conditions, false);
+        List<Condition> conditions = bindConditions(compiledConditions, arguments, argOffset, method.getName());
+        String whereSql = buildWhereSql(conditions, true);
         sql.append(whereSql);
 
         Map<String, Object> whereParams = buildParameters(conditions);
@@ -254,6 +256,51 @@ public class CustomMethodResolver {
         return new ParsedMethod(sql.toString(), parameters, SqlCommandType.UPDATE);
     }
 
+    private List<DerivedQueryDefinition.ConditionDefinition> compileConditions(String fieldPart) {
+        if (fieldPart == null || fieldPart.isEmpty()) {
+            return List.of();
+        }
+        String conditionPart = fieldPart.contains("OrderBy")
+                ? fieldPart.substring(0, fieldPart.indexOf("OrderBy")) : fieldPart;
+        List<DerivedQueryDefinition.ConditionDefinition> result = new ArrayList<>();
+        for (String token : conditionPart.split("(?=And|Or)(?<!^)") ) {
+            String logical = "And";
+            if (token.startsWith("And")) token = token.substring(3);
+            else if (token.startsWith("Or")) { token = token.substring(2); logical = "Or"; }
+            String operator = "=";
+            String field = token;
+            if (token.endsWith("IsNotNull")) { operator = "IS NOT NULL"; field = token.substring(0, token.length() - 9); }
+            else if (token.endsWith("IsNull")) { operator = "IS NULL"; field = token.substring(0, token.length() - 6); }
+            else if (token.endsWith("GreaterThanEqual")) { operator = ">="; field = token.substring(0, token.length() - 16); }
+            else if (token.endsWith("LessThanEqual")) { operator = "<="; field = token.substring(0, token.length() - 13); }
+            else if (token.endsWith("GreaterThan")) { operator = ">"; field = token.substring(0, token.length() - 11); }
+            else if (token.endsWith("LessThan")) { operator = "<"; field = token.substring(0, token.length() - 8); }
+            else if (token.endsWith("NotIn")) { operator = "NOT IN"; field = token.substring(0, token.length() - 5); }
+            else if (token.endsWith("Like")) { operator = "LIKE"; field = token.substring(0, token.length() - 4); }
+            else if (token.endsWith("In")) { operator = "IN"; field = token.substring(0, token.length() - 2); }
+            else if (token.endsWith("Between")) { operator = "BETWEEN"; field = token.substring(0, token.length() - 7); }
+            else if (token.endsWith("Not")) { operator = "<>"; field = token.substring(0, token.length() - 3); }
+            if (findColumn(field) == null) throw new IllegalArgumentException("实体字段不存在：" + field);
+            int argumentCount = ("IS NULL".equals(operator) || "IS NOT NULL".equals(operator)) ? 0
+                    : ("BETWEEN".equals(operator) ? 2 : 1);
+            result.add(new DerivedQueryDefinition.ConditionDefinition(field, operator, logical, argumentCount));
+        }
+        return result;
+    }
+
+    private List<Condition> bindConditions(List<DerivedQueryDefinition.ConditionDefinition> definitions,
+                                           Object[] arguments, int argOffset, String methodName) {
+        List<Condition> conditions = new ArrayList<>();
+        int index = argOffset;
+        for (DerivedQueryDefinition.ConditionDefinition definition : definitions) {
+            Object value = definition.argumentCount() == 0 ? null : arguments[index++];
+            Object second = definition.argumentCount() == 2 ? arguments[index++] : null;
+            FieldColumn column = findColumn(definition.fieldName());
+            conditions.add(new Condition(column.name(), definition.operator(), value, second, definition.logicalOperator()));
+        }
+        if (index != arguments.length) throw new IllegalArgumentException("方法 " + methodName + " 参数数量不匹配");
+        return conditions;
+    }
     // ==================== 条件解析 ====================
 
     private List<Condition> parseConditions(String fieldPart, Parameter[] methodParams,

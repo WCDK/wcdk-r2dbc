@@ -1,4 +1,4 @@
-package com.wcdk.r2dbc.core;
+package com.wcdk.r2dbc.core.plan;
 
 import com.wcdk.r2dbc.core.xml.RepositoryStatement;
 
@@ -37,7 +37,7 @@ public record RepositoryMethodPlan(Method method, Kind kind,
         }
     }
 
-    static RepositoryMethodPlan enrich(RepositoryMethodPlan plan, Class<?> entityType) {
+    public static RepositoryMethodPlan enrich(RepositoryMethodPlan plan, Class<?> entityType) {
         return new RepositoryMethodPlan(plan.method(), plan.kind(), plan.xmlStatement(), plan.statementId(),
                 plan.statementDefinition(), plan.sqlPlan(), plan.parameterPlan(),
                 ResultMappingPlan.of(plan.method(), entityType));
@@ -46,9 +46,9 @@ public record RepositoryMethodPlan(Method method, Kind kind,
     public record StatementDefinition(Kind kind, String statementId) {
     }
 
-    public record SqlPlan(String template, boolean deferred) {
+    public record SqlPlan(String template, boolean deferred, Object compiledPlan) {
         public static SqlPlan createDeferred() {
-            return new SqlPlan(null, true);
+            return new SqlPlan(null, true, null);
         }
     }
 

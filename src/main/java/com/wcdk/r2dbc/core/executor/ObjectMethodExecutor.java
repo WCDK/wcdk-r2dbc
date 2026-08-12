@@ -1,14 +1,15 @@
 package com.wcdk.r2dbc.core;
+import com.wcdk.r2dbc.core.plan.RepositoryMethodPlan;
 
 /***
  * Repository 对象方法执行器。
  * @author wcdk
  */
-final class RepositoryObjectMethodExecutor implements RepositoryMethodExecutor {
+final class ObjectMethodExecutor implements RepositoryMethodExecutor {
     private final Class<?> repositoryInterface;
     private final com.wcdk.r2dbc.core.metadata.RepositoryMetadata metadata;
 
-    RepositoryObjectMethodExecutor(Class<?> repositoryInterface, com.wcdk.r2dbc.core.metadata.RepositoryMetadata metadata) {
+    ObjectMethodExecutor(Class<?> repositoryInterface, com.wcdk.r2dbc.core.metadata.RepositoryMetadata metadata) {
         this.repositoryInterface = repositoryInterface;
         this.metadata = metadata;
     }

@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.core;
+import com.wcdk.r2dbc.core.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 
@@ -24,7 +25,7 @@ public final class CrudStatementCompiler {
         if (RepositoryMethodPlanCompiler.isObjectMethod(method.getName())) {
             return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.OBJECT, null, id));
         }
-        if (!RepositoryMethodPlanCompiler.isCrudMethod(method.getName())) {
+        if (!RepositoryMethodPlanCompiler.isCrudMethod(method)) {
             return Optional.empty();
         }
         if (metadata == null) {

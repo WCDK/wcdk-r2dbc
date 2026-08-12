@@ -1,10 +1,14 @@
 package com.wcdk.r2dbc.core;
+import com.wcdk.r2dbc.core.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
+import com.wcdk.r2dbc.BaseRepository;
+import java.util.Set;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -63,11 +67,12 @@ public final class RepositoryMethodPlanCompiler {
         return "toString".equals(name) || "hashCode".equals(name) || "equals".equals(name);
     }
 
-    static boolean isCrudMethod(String name) {
-        return switch (name) {
-            case "insert", "deleteById", "updateById", "selectById", "findAll", "selectList",
-                 "selectPage", "selectOne", "selectCount", "exists" -> true;
-            default -> false;
-        };
+    private static final Set<MethodSignature> CRUD_METHOD_SIGNATURES = Set.of(
+            Arrays.stream(BaseRepository.class.getMethods())
+                    .map(MethodSignature::of)
+                    .toArray(MethodSignature[]::new));
+
+    static boolean isCrudMethod(Method method) {
+        return CRUD_METHOD_SIGNATURES.contains(MethodSignature.of(method));
     }
 }

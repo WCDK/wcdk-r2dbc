@@ -60,6 +60,7 @@ public class QueryWrapper<T> {
         catch (ArithmeticException error) { throw new IllegalArgumentException("pagination offset overflow", error); }
     }
 
+    @Deprecated
     public List<Condition> conditions() { return Collections.unmodifiableList(conditions); }
     public List<OrderBy> orderByList() { return Collections.unmodifiableList(orderByList); }
     public Long limit() { return limit; }

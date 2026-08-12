@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.core;
+import com.wcdk.r2dbc.core.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.BaseRepository;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
@@ -6,6 +7,7 @@ import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.core.ResolvableType;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
@@ -46,44 +48,22 @@ public class RepositoryProxyFactory {
         ProxyFactory proxyFactory = new ProxyFactory();
         proxyFactory.setInterfaces(repositoryInterface);
         proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(
-                repositoryOperations, properties, metadata, repositoryInterface, repositoryXmlRegistry,
-                snowflakeIdGenerator, methodPlans));
+                methodPlans,
+                RepositoryInvocationDispatcherFactory.create(
+                        repositoryOperations, properties, metadata, repositoryInterface,
+                        repositoryXmlRegistry, snowflakeIdGenerator)));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
     }
 
     private Class<?> resolveEntityClass(Class<?> repositoryInterface) {
-        for (Type type : repositoryInterface.getGenericInterfaces()) {
-            Class<?> entityClass = resolveEntityClass(type);
-            if (entityClass != null) {
-                return entityClass;
-            }
+        ResolvableType repositoryType = ResolvableType.forClass(repositoryInterface).as(BaseRepository.class);
+        if (repositoryType == ResolvableType.NONE) {
+            return null;
         }
-        return null;
-    }
-
-    private Class<?> resolveEntityClass(Type type) {
-        if (type instanceof ParameterizedType parameterizedType) {
-            Type rawType = parameterizedType.getRawType();
-            if (rawType == BaseRepository.class && parameterizedType.getActualTypeArguments()[0] instanceof Class<?> entityClass) {
-                return entityClass;
-            }
-            if (rawType instanceof Class<?> rawClass) {
-                for (Type parentType : rawClass.getGenericInterfaces()) {
-                    Class<?> entityClass = resolveEntityClass(parentType);
-                    if (entityClass != null) {
-                        return entityClass;
-                    }
-                }
-            }
+        Class<?> entityClass = repositoryType.getGeneric(0).resolve();
+        if (entityClass == null) {
+            throw new IllegalStateException("无法解析仓储实体类型: " + repositoryInterface.getName());
         }
-        if (type instanceof Class<?> rawClass) {
-            for (Type parentType : rawClass.getGenericInterfaces()) {
-                Class<?> entityClass = resolveEntityClass(parentType);
-                if (entityClass != null) {
-                    return entityClass;
-                }
-            }
-        }
-        return null;
+        return entityClass;
     }
 }

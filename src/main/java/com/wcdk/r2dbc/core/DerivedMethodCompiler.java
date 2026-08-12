@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.core;
+import com.wcdk.r2dbc.core.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
@@ -9,7 +10,7 @@ import java.util.Optional;
 /**
  * 派生仓库方法分发的启动校验与编译器。
  *
- * @author WCDK
+ * @author wcdk
  **/
 public final class DerivedMethodCompiler {
     private final Class<?> repositoryInterface;
@@ -32,8 +33,13 @@ public final class DerivedMethodCompiler {
             throw new IllegalArgumentException("无效的派生仓库方法: "
                     + method.toGenericString(), error);
         }
-        return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.DERIVED, null,
-                repositoryInterface.getName() + "." + method.getName()));
+        DerivedQueryDefinition derivedPlan = resolver.compile(method);
+        String statementId = repositoryInterface.getName() + "." + method.getName();
+        return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.DERIVED, null, statementId,
+                new RepositoryMethodPlan.StatementDefinition(RepositoryMethodPlan.Kind.DERIVED, statementId),
+                new RepositoryMethodPlan.SqlPlan(null, true, derivedPlan),
+                RepositoryMethodPlan.ParameterPlan.of(method),
+                RepositoryMethodPlan.ResultMappingPlan.of(method, null)));
     }
 
     private Object[] sampleArguments(Method method) {

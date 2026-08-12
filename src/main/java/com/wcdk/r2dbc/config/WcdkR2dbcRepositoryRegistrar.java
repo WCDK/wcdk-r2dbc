@@ -97,7 +97,8 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
         };
         scanner.setResourceLoader(resourceLoader);
         scanner.addIncludeFilter((metadataReader, metadataReaderFactory) ->
-                metadataReader.getAnnotationMetadata().hasAnnotation(Repository.class.getName()));
+                (metadataReader.getAnnotationMetadata().hasAnnotation(Repository.class.getName())
+                        || metadataReader.getAnnotationMetadata().hasAnnotation("com.wcdk.r2dbc.annotation.Repository")));
         for (BeanDefinition candidate : scanner.findCandidateComponents(basePackage)) {
             registerRepository(registry, candidate.getBeanClassName());
         }

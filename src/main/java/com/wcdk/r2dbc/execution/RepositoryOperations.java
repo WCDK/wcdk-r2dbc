@@ -1,10 +1,9 @@
-package com.wcdk.r2dbc.core;
+package com.wcdk.r2dbc.execution;
 
+import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
-import org.reactivestreams.Publisher;
 import org.springframework.r2dbc.core.DatabaseClient;
-import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -12,11 +11,10 @@ import java.util.Map;
 import java.util.function.BiFunction;
 
 /***
- * Repository 内部执行访问接口。
+ * 仓储执行阶段访问接口。
  * @author wcdk
- */
-@Deprecated(forRemoval = false)
-public interface RepositoryOperations extends com.wcdk.r2dbc.execution.RepositoryOperations {
+ **/
+public interface RepositoryOperations {
     DatabaseClient databaseClient();
 
     SqlLifecycleExecutor lifecycleExecutor();

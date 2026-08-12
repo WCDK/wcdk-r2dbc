@@ -1,4 +1,4 @@
-package com.wcdk.r2dbc;
+package com.wcdk.r2dbc.repository;
 
 import com.wcdk.r2dbc.core.query.QueryWrapper;
 import org.springframework.data.domain.Page;
@@ -6,15 +6,11 @@ import org.springframework.data.domain.Pageable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
+/***
  * 基础响应式仓储接口常用操作。
- *
- * @author WCDK
- * @date 2026/7/21
- * @version 1.0
+ * @author wcdk
  **/
-@Deprecated(forRemoval = false)
-public interface BaseRepository<T> extends com.wcdk.r2dbc.repository.BaseRepository<T> {
+public interface BaseRepository<T> {
 
     Mono<T> insert(T entity);
 

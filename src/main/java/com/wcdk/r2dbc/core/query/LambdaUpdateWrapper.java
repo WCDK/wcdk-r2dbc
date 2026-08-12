@@ -1,5 +1,8 @@
 package com.wcdk.r2dbc.core.query;
 
+import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
+import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
+
 import java.io.Serializable;
 import java.lang.invoke.SerializedLambda;
 import java.lang.reflect.Method;
@@ -245,8 +248,10 @@ public class LambdaUpdateWrapper<T> {
      * 解析 Lambda 表达式对应的数据库列名。
      */
     private String resolveColumn(SFunction<T, ?> field) {
-        String fieldName = resolveFieldName(field);
-        return camelToUnderline(fieldName);
+        WcdkR2dbcProperties properties = new WcdkR2dbcProperties();
+        properties.setQuoteIdentifier(false);
+        return LambdaPropertyResolver.defaultResolver()
+                .resolve(field, new RepositoryMetadata(entityClass, properties)).name();
     }
 
     /**

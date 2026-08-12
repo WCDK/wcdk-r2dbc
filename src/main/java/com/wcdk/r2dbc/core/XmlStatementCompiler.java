@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.core;
+import com.wcdk.r2dbc.core.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
 
