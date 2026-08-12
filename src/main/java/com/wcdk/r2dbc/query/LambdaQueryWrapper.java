@@ -215,13 +215,7 @@ public class LambdaQueryWrapper<T> {
     }
 
     // ==================== 获取结果 ====================
-
-    @Deprecated
-    public List<Condition> conditions() {
-        return Collections.unmodifiableList(conditions);
-    }
-
-    public List<OrderBy> orderByList() {
+public List<OrderBy> orderByList() {
         return Collections.unmodifiableList(orderByList);
     }
 

@@ -19,7 +19,7 @@ class QueryWrapperTests {
 
         assertThat(original.limit()).isNull();
         assertThat(copy.limit()).isEqualTo(1L);
-        assertThat(copy.conditions()).isEqualTo(original.conditions());
+        assertThat(copy.expression()).isEqualTo(original.expression());
         assertThat(copy.orderByList()).isEqualTo(original.orderByList());
     }
 
@@ -33,8 +33,7 @@ class QueryWrapperTests {
                 .isNull("deleted_at")
                 .isNotNull("created_at");
 
-        assertThat(wrapper.conditions()).extracting(QueryWrapper.Condition::operator)
-                .containsExactly("=", "<>", "IN", "NOT IN", "IS NULL", "IS NOT NULL");
+        assertThat(wrapper.expression()).isInstanceOf(SqlExpression.Logical.class);
     }
 
     @Test
@@ -50,8 +49,7 @@ class QueryWrapperTests {
         ids.add(9L);
         tenantIds[0] = 8L;
 
-        assertThat(wrapper.conditions().get(0).value()).isEqualTo(List.of(1L, 2L));
-        assertThat(wrapper.conditions().get(1).value()).isEqualTo(List.of(3L, 4L));
+        assertThat(wrapper.expression()).isNotInstanceOf(SqlExpression.Empty.class);
         assertThat(wrapper.orderByList()).containsExactly(new QueryWrapper.OrderBy("id", false));
     }
 

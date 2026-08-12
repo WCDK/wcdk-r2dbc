@@ -210,18 +210,7 @@ public class QueryWrapper<T> {
         }
     }
 
-    /***
-     * 获取历史条件列表。
-     * @author wcdk
-     * @return 只读条件列表
-     * @deprecated 请使用 {@link #expression()}，条件表达式 AST 是唯一执行来源。
-     **/
-    @Deprecated
-    public List<Condition> conditions() {
-        return Collections.unmodifiableList(conditions);
-    }
-
-    /*** 获取只读排序条件列表。 @author wcdk **/
+/*** 获取只读排序条件列表。 @author wcdk **/
     public List<OrderBy> orderByList() {
         return Collections.unmodifiableList(orderByList);
     }
