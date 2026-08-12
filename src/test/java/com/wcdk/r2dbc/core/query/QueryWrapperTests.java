@@ -65,7 +65,7 @@ class QueryWrapperTests {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new QueryWrapper<>().page(Long.MAX_VALUE, 2L))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("overflow");
+                .hasMessageContaining("溢出");
     }
 
     @Test
