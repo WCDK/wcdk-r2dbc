@@ -50,7 +50,7 @@
 #### 派生方法示例
 
 ```java
-public interface UserRepository extends BaseRepository<User, Long> {
+public interface UserRepository extends BaseRepository<User> {
     Flux<User> findByStatus(Integer status);
     Mono<Long> countByStatus(Integer status);
     Mono<Boolean> existsByEmail(String email);
@@ -106,7 +106,7 @@ SqlExecutionObserver sqlExecutionObserver() {
 
 - Java 21+
 - Spring Boot 3.5+
-- Maven 3.8+
+- Maven 3.9.0+
 
 ### 添加依赖
 
@@ -116,7 +116,7 @@ SqlExecutionObserver sqlExecutionObserver() {
     <artifactId>spring-boot-starter-data-r2dbc</artifactId>
 </dependency>
 <dependency>
-    <groupId>com.wcdk</groupId>
+    <groupId>com.wcdk.r2dbc</groupId>
     <artifactId>wcdk-r2dbc</artifactId>
     <version>3.5.16</version>
 </dependency>
@@ -210,8 +210,7 @@ public interface SysUserRepository extends BaseRepository<SysUser> {
     /**
      * 自定义查询方法
      */
-    @Select("SELECT * FROM sys_user WHERE user_name = #{userName}")
-    Flux<SysUser> findByUserName(@Param("userName") String userName);
+    Flux<SysUser> findByUserName(String userName);
 }
 ```
 
@@ -259,6 +258,23 @@ public class SysUserService {
 }
 ```
 
+## 真实 API 约束
+
+README 中的示例以当前源码 API 为准：
+
+- `BaseRepository<T>` 只有一个泛型参数，核心方法返回 `Mono` 或 `Flux`，包括 `insert`、`deleteById`、`updateById`、`selectById`、`findAll`、`selectList`、`selectPage`、`selectOne`、`selectCount` 和 `exists`。
+- 项目当前没有 `@Select`、`@Param` 注解。自定义 Repository 方法应使用派生方法名（例如 `findByStatus`、`countByStatus`、`existsByEmail`、`deleteByStatus`、`updateNameById`），或使用 XML 映射文件。
+- `@Transactional` 方法必须返回 `Publisher`（通常是 `Mono` 或 `Flux`），目标方法在订阅阶段执行；同步返回值和 `.block()` 不受支持。
+- `@R2dbcDataSource` 只能标注返回 `Publisher` 的方法或类型，数据源切换在响应式订阅链路中生效；事务开始后不得切换数据源。
+- `R2dbcUtil.transaction(...)` 返回 `Flux<T>`；`createManualTransaction(...)` 返回 `Mono<ManualTransaction>`；`executeInTransaction(...)` 返回 `Mono<T>`。
+- `selectPage` 返回 Spring Data 的 `Mono<Page<T>>`，参数为 `Pageable`，可选 `QueryWrapper<T>`；项目没有 `PageRequest` 的自定义替代品。
+- XML 动态 SQL 支持 `<if>`、`<where>` 和 `<foreach>`。禁止 `${}` 原样替换，也不要在 XML 中使用 DOCTYPE；参数必须使用 `#{...}` 绑定。
+
+### 当前配置属性
+
+`wcdk.r2dbc` 支持：`enabled`、`sql-log-enabled`、`observability-enabled`、`snowflake-id`、`quote-identifier`、`mapper-locations`、`logic-delete-field`、`logic-delete-value`、`logic-not-delete-value`，以及 `database-initializer` 下的 `enabled`、`sql-location`、`database-type`、`mode`、`ignore-errors`、`execute-in-transaction`。
+
+`spring.r2dbc` 支持单数据源的 `url`、`username`、`password`、`properties`，以及多数据源的 `primary`、`data-sources.<name>.*` 和连接池配置。数据源级 `pool` 配置会完整替换全局 `spring.r2dbc.pool`，不会逐字段合并。
 ## 配置说明
 
 ### 基础配置
@@ -273,7 +289,6 @@ public class SysUserService {
 | `wcdk.r2dbc.logic-delete-field` | String | `delFlg` | 逻辑删除字段 |
 | `wcdk.r2dbc.logic-delete-value` | Object | 1 | 逻辑删除值 |
 | `wcdk.r2dbc.logic-not-delete-value` | Object | 0 | 未删除值 |
-| `wcdk.r2dbc.base-packages` | String[] | - | Repository扫描路径（可选，优先使用注解配置） |
 
 ### 连接池配置
 
@@ -281,7 +296,7 @@ public class SysUserService {
 |------|------|--------|------|
 | `spring.r2dbc.pool.enabled` | boolean | true | 启用连接池 |
 | `spring.r2dbc.pool.max-size` | int | 20 | 最大连接数 |
-| `spring.r2dbc.pool.max-idle-time` | Duration | 30m | 最大空闲时间 |
+| `spring.r2dbc.pool.max-idle-time` | Duration | 30s | 最大空闲时间 |
 | `spring.r2dbc.pool.max-life-time` | Duration | 30m | 最大生命周期 |
 | `spring.r2dbc.pool.max-acquire-time` | Duration | 10s | 最大获取时间 |
 | `spring.r2dbc.pool.acquire-retry` | int | 1 | 获取重试次数 |
@@ -356,7 +371,7 @@ public class MultiDataSourceService {
     /**
      * 事务操作
      */
-    public Mono<Void> transactionalOperation() {
+    public Flux<?> transactionalOperation() {
         return r2dbcUtil.transaction("master", client -> {
             // 事务操作
             return Mono.empty();
@@ -529,7 +544,7 @@ XML SQL 在 Repository 方法调用时根据实参动态渲染，当前支持以
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" ?>
-<!DOCTYPE repository PUBLIC "https://github.com/WCDK/wcdk-r2dbc" "wcdk-r2dbc-repository.dtd">
+
 <repository namespace="com.example.repository.UserRepository">
     
     <!-- 定义 resultMap -->
@@ -1040,13 +1055,11 @@ public class OrderService {
     }
     
     /**
-     * 非响应式返回类型 - 自动包装为 Mono
+     * 非响应式返回类型不受支持
      */
     @Transactional
-    public Order findOrderSync(Long id) {
-        // 方法体在事务上下文中同步执行
-        // 结果自动包装为 Mono.just()
-        return orderRepository.findById(id);
+    public Mono<Order> findOrderSync(Long id) {
+        return orderRepository.selectById(id);
     }
     
     /**
@@ -1789,7 +1802,7 @@ wcdk:
 
 框架通过 `TransactionalAspect` AOP 切面自动拦截带有 `@Transactional` 注解的方法：
 - 检测方法返回类型（`Mono`/`Flux`）
-- 自动包装到事务中
+- 将响应式 Publisher 包装到事务中
 - 成功时自动提交，异常时自动回滚
 - 支持 `readOnly`、`timeout` 等属性
 
@@ -1814,7 +1827,7 @@ wcdk:
 |------|--------|------|
 | `Mono` 返回类型 | ✅ 非阻塞 | 事务在订阅时开始 |
 | `Flux` 返回类型 | ✅ 非阻塞 | 事务在订阅时开始 |
-| 非响应式返回类型 | ⚠️ 同步执行 | 自动包装为 `Mono.just()` |
+| 非响应式返回类型 | ❌ 拒绝执行 | `@Transactional` 方法必须返回 `Publisher` |
 
 ```java
 // 正确：非阻塞
@@ -1823,10 +1836,10 @@ public Mono<Order> createOrder(Order order) {
     return orderRepository.insert(order);  // 返回 Mono，不阻塞
 }
 
-// 正确：自动包装
+// 正确：响应式返回
 @Transactional
-public Order findOrder(Long id) {
-    return orderRepository.findById(id);  // 同步方法，包装为 Mono
+public Mono<Order> findOrder(Long id) {
+    return orderRepository.selectById(id);
 }
 
 // 错误：不要在响应式链中使用 .block()
