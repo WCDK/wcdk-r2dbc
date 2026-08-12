@@ -104,7 +104,7 @@ class ManualTransactionImpl implements ManualTransaction {
             if (savepoints.containsKey(savepointName)) {
                 return Mono.error(new IllegalArgumentException("Savepoint already exists: " + savepointName));
             }
-            return Mono.from(connection.createStatement("SAVEPOINT " + savepointName).execute())
+            return Mono.from(connection.createSavepoint(savepointName))
                     .then(Mono.fromSupplier(() -> {
                         SavepointImpl savepoint = new SavepointImpl(savepointName, savepointCounter.incrementAndGet());
                         savepoints.put(savepointName, savepoint);
@@ -123,7 +123,7 @@ class ManualTransactionImpl implements ManualTransaction {
             if (target == null) {
                 return Mono.error(new IllegalArgumentException("Savepoint not found or no longer valid"));
             }
-            return Mono.from(connection.createStatement("ROLLBACK TO SAVEPOINT " + target.getName()).execute())
+            return Mono.from(connection.rollbackTransactionToSavepoint(target.getName()))
                     .then(Mono.fromSupplier(() -> {
                         savepoints.entrySet().removeIf(entry -> {
                             boolean remove = entry.getValue().getId() > target.getId();
@@ -147,7 +147,7 @@ class ManualTransactionImpl implements ManualTransaction {
             if (target == null) {
                 return Mono.error(new IllegalArgumentException("Savepoint not found or no longer valid"));
             }
-            return Mono.from(connection.createStatement("RELEASE SAVEPOINT " + target.getName()).execute())
+            return Mono.from(connection.releaseSavepoint(target.getName()))
                     .then(Mono.fromSupplier(() -> {
                         savepoints.remove(target.getName());
                         target.invalidate();

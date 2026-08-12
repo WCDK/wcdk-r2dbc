@@ -79,9 +79,9 @@ class ManualTransactionTests {
     @Test
     void createsRollsBackAndReleasesSavepointsSafely() {
         Connection connection = connection();
-        Statement statement = mock(Statement.class);
-        when(connection.createStatement(any(String.class))).thenReturn(statement);
-        when(statement.execute()).thenReturn(Flux.empty());
+        when(connection.createSavepoint(any(String.class))).thenReturn(Mono.empty());
+        when(connection.rollbackTransactionToSavepoint(any(String.class))).thenReturn(Mono.empty());
+        when(connection.releaseSavepoint(any(String.class))).thenReturn(Mono.empty());
         ManualTransactionImpl transaction = new ManualTransactionImpl(connection);
 
         StepVerifier.create(transaction.activate()

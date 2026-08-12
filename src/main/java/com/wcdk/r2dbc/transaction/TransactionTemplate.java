@@ -83,22 +83,6 @@ public class TransactionTemplate {
         return transactionManager.createTransaction();
     }
 
-    public <T> Mono<T> wrapReadOnly(Mono<T> mono) {
-        Objects.requireNonNull(mono, "mono");
-        return executeReadOnly(connection -> mono);
-    }
-
-    public <T> Flux<T> wrapReadOnly(Flux<T> flux) {
-        Objects.requireNonNull(flux, "flux");
-        Flux<T> execution = Flux.usingWhen(
-                transactionManager.createReadOnlyTransaction(),
-                transaction -> flux.concatWith(transaction.commit().thenMany(Flux.empty())),
-                ManualTransaction::close,
-                this::rollbackAndClose,
-                ManualTransaction::close);
-        return R2dbcDataSourceContext.pinTransactionDataSource(execution);
-    }
-
     private Mono<Void> rollbackAndClose(ManualTransaction transaction, Throwable originalError) {
         Mono<Void> rollback = transaction.isActive() || transaction.getStatus() == TransactionStatus.FAILED
                 ? transaction.rollback()

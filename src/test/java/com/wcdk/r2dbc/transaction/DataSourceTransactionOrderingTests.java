@@ -35,7 +35,7 @@ class DataSourceTransactionOrderingTests {
 
         StepVerifier.create(switched)
                 .expectErrorMatches(error -> error instanceof IllegalStateException
-                        && error.getMessage().contains("after a transaction has started"))
+                        && error.getMessage().contains("事务开始后无法将R2DBC数据源"))
                 .verify();
     }
 

@@ -133,26 +133,23 @@ public class TransactionalAspect {
 
     private Mono<?> wrapMono(Mono<?> mono, TransactionalOperator operator, int timeout) {
         Mono<?> wrapped = operator.transactional(mono);
-
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
         }
-
         return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
     }
 
     /**
      * 包装 Flux 到事务中。
+ 到事务中。
      * <p>
      * 事务在订阅时开始，所有元素完成后提交，异常时回滚。
      */
     private Flux<?> wrapFlux(Flux<?> flux, TransactionalOperator operator, int timeout) {
         Flux<?> wrapped = operator.transactional(flux);
-
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
         }
-
         return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
     }
 

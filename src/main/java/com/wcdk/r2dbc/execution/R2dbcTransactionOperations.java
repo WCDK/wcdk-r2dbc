@@ -1,5 +1,6 @@
 package com.wcdk.r2dbc.execution;
 
+import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
 import com.wcdk.r2dbc.transaction.ManualTransaction;
 import com.wcdk.r2dbc.transaction.TransactionManager;
 import com.wcdk.r2dbc.transaction.TransactionTemplate;
@@ -52,7 +53,12 @@ public class R2dbcTransactionOperations {
         if (transactionalOperator == null) {
             throw new IllegalStateException("R2DBC事务操作符缺失");
         }
-        return transactionalOperator.transactional(Flux.from(action.apply(databaseClient)));
+        if (action == null) {
+            throw new IllegalArgumentException("事务操作不能为空");
+        }
+        Flux<T> execution = Flux.defer(() -> Flux.from(action.apply(databaseClient)))
+                .as(transactionalOperator::transactional);
+        return R2dbcDataSourceContext.pinTransactionDataSource(execution);
     }
 
     /**

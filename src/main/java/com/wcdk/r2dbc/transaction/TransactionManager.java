@@ -53,12 +53,21 @@ public class TransactionManager {
                     }
                     return transaction.activate()
                             .thenReturn((ManualTransaction) transaction)
-                            .onErrorResume(error -> closeAfterAcquireFailure(connection, error));
+                            .onErrorResume(error -> closeAfterAcquireFailure(transaction, error));
                 });
     }
 
     private Mono<ManualTransaction> closeAfterAcquireFailure(Connection connection, Throwable error) {
         return Mono.from(connection.close())
+                .onErrorResume(closeError -> {
+                    error.addSuppressed(closeError);
+                    return Mono.empty();
+                })
+                .then(Mono.error(error));
+    }
+
+    private Mono<ManualTransaction> closeAfterAcquireFailure(ManualTransactionImpl transaction, Throwable error) {
+        return transaction.close()
                 .onErrorResume(closeError -> {
                     error.addSuppressed(closeError);
                     return Mono.empty();
