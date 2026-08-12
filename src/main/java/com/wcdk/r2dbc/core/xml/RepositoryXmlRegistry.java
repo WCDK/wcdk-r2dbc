@@ -1,6 +1,7 @@
 package com.wcdk.r2dbc.core.xml;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.util.StringUtils;
@@ -9,10 +10,13 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -66,16 +70,22 @@ public class RepositoryXmlRegistry {
 
     private void load(Resource resource) {
         try (InputStream inputStream = resource.getInputStream()) {
+            byte[] xmlBytes = inputStream.readAllBytes();
+            String xmlContent = new String(xmlBytes, StandardCharsets.UTF_8);
+            boolean hasExternalDtd = xmlContent.matches("(?s).*<!DOCTYPE\\s+\\w+\\s+(SYSTEM|PUBLIC)\\s+.*");
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
             factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
             factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", true);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "file");
             factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            factory.setValidating(hasExternalDtd);
             factory.setXIncludeAware(false);
             factory.setExpandEntityReferences(false);
-            Document document = factory.newDocumentBuilder().parse(new InputSource(inputStream));
+            var documentBuilder = factory.newDocumentBuilder();
+            documentBuilder.setEntityResolver((publicId, systemId) -> resolveLocalDtd(publicId, systemId));
+            Document document = documentBuilder.parse(new ByteArrayInputStream(xmlBytes));
             Element root = document.getDocumentElement();
             if (root == null || !"repository".equals(root.getTagName())) {
                 throw new IllegalStateException("R2DBC XML root element must be <repository>: "
@@ -110,6 +120,27 @@ public class RepositoryXmlRegistry {
         }
     }
 
+    /***
+     * 只解析项目内置 DTD，拒绝文件系统、网络和其他外部实体。
+     * @author wcdk
+     **/
+    private InputSource resolveLocalDtd(String publicId, String systemId) throws SAXException {
+        if (systemId == null || !systemId.endsWith("wcdk-r2dbc-repository.dtd")) {
+            throw new SAXException("仅允许加载项目内置 R2DBC DTD，禁止访问外部实体：" + systemId);
+        }
+        try {
+            ClassPathResource dtd = new ClassPathResource("dtd/wcdk-r2dbc-repository.dtd");
+            if (!dtd.exists()) {
+                throw new SAXException("未找到项目内置 R2DBC DTD");
+            }
+            InputSource source = new InputSource(dtd.getInputStream());
+            source.setPublicId(publicId);
+            source.setSystemId("classpath:/dtd/wcdk-r2dbc-repository.dtd");
+            return source;
+        } catch (java.io.IOException error) {
+            throw new SAXException("读取项目内置 R2DBC DTD 失败", error);
+        }
+    }
     private void registerResultMap(String namespace, Element element, Resource resource) {
         String id = element.getAttribute("id");
         if (!StringUtils.hasText(id)) {
@@ -166,8 +197,7 @@ public class RepositoryXmlRegistry {
         }
         String id = element.getAttribute("id");
         if (!StringUtils.hasText(id)) {
-            throw new IllegalStateException("R2DBC XML statement <" + element.getTagName()
-                    + "> is missing id in namespace " + namespace + ", resource: " + resource.getDescription());
+            throw new IllegalStateException("R2DBC XML 语句 <" + element.getTagName() + "> 缺少 id，命名空间：" + namespace + "，资源：" + resource.getDescription());
         }
         if (!StringUtils.hasText(element.getTextContent())) {
             throw new IllegalStateException("R2DBC XML SQL 不能为空：" + namespace + "." + id);

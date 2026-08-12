@@ -8,6 +8,7 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 
 import java.nio.charset.StandardCharsets;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -15,17 +16,27 @@ import static org.mockito.Mockito.when;
 class RepositoryXmlRegistryTests {
 
     @Test
-    void rejectsDoctypeAndExternalEntities() throws Exception {
+    void allowsBundledDtdAndDoesNotExpandExternalEntities() throws Exception {
         String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE repository SYSTEM "wcdk-r2dbc-repository.dtd">
+                <repository namespace="%s">
+                  <select id="find">SELECT 1</select>
+                </repository>
+                """.formatted(TestRepository.class.getName());
+
+        assertThat(registry(xml).find(TestRepository.class, "find")).isPresent();
+
+        String externalEntity = """
                 <!DOCTYPE repository [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
                 <repository namespace="%s">
                   <select id="find">&xxe;</select>
                 </repository>
                 """.formatted(TestRepository.class.getName());
 
-        assertThatThrownBy(() -> registry(xml))
+        assertThatThrownBy(() -> registry(externalEntity))
                 .isInstanceOf(IllegalStateException.class)
-                .hasStackTraceContaining("DOCTYPE");
+                .hasStackTraceContaining("SQL 不能为空");
     }
 
     @Test
@@ -58,7 +69,7 @@ class RepositoryXmlRegistryTests {
                 <repository namespace="%s"><unknown>SELECT 1</unknown></repository>
                 """.formatted(TestRepository.class.getName());
         assertThatThrownBy(() -> registry(unknown))
-                .hasStackTraceContaining("Unknown R2DBC XML element")
+                .hasStackTraceContaining("未知的R2DBC XML元素")
                 .hasStackTraceContaining(TestRepository.class.getName())
                 .hasStackTraceContaining("test-mapper.xml");
 
@@ -66,7 +77,7 @@ class RepositoryXmlRegistryTests {
                 <repository namespace="%s"><select>SELECT 1</select></repository>
                 """.formatted(TestRepository.class.getName());
         assertThatThrownBy(() -> registry(missingId))
-                .hasStackTraceContaining("missing id")
+                .hasStackTraceContaining("缺少 id")
                 .hasStackTraceContaining(TestRepository.class.getName());
     }
 
