@@ -64,10 +64,10 @@ class ParameterBinderTests {
     void normalizesJavaTimeValuesForJdbcDrivers() {
         Instant instant = Instant.parse("2026-08-11T04:05:06Z");
 
-        assertThat(ParameterBinder.normalizeParameterValue(instant)).isEqualTo(Date.from(instant));
-        assertThat(ParameterBinder.normalizeParameterValue(LocalDateTime.of(2026, 8, 11, 12, 30)))
+        assertThat(com.wcdk.r2dbc.dialect.DmDatabaseDialect.INSTANCE.normalizeParameterValue(instant)).isEqualTo(Date.from(instant));
+        assertThat(com.wcdk.r2dbc.dialect.DmDatabaseDialect.INSTANCE.normalizeParameterValue(LocalDateTime.of(2026, 8, 11, 12, 30)))
                 .isInstanceOf(java.sql.Timestamp.class);
-        assertThat(ParameterBinder.normalizeParameterValue(LocalDate.of(2026, 8, 11)))
+        assertThat(com.wcdk.r2dbc.dialect.DmDatabaseDialect.INSTANCE.normalizeParameterValue(LocalDate.of(2026, 8, 11)))
                 .isInstanceOf(java.sql.Date.class);
     }
     @Test

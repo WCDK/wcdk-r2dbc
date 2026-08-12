@@ -5,6 +5,7 @@ import com.wcdk.r2dbc.repository.RepositoryOperations;
 import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;
+import com.wcdk.r2dbc.dialect.DatabaseDialects;
 import com.wcdk.r2dbc.execution.R2dbcRowMapper;
 import com.wcdk.r2dbc.execution.R2dbcValueConverter;
 import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
@@ -227,8 +228,8 @@ public class WcdkR2dbcAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public ParameterBinder parameterBinder() {
-        return new ParameterBinder();
+    public ParameterBinder parameterBinder(ConnectionFactory connectionFactory) {
+        return new ParameterBinder(DatabaseDialects.get(connectionFactory));
     }
 
     @Bean

@@ -110,7 +110,7 @@ public class R2dbcQueryOperations {
      * @return 查询结果
      */
     public Mono<Map<String, Object>> queryOne(String sql) {
-        return query(sql).next();
+        return query(sql).singleOrEmpty();
     }
 
     /**
@@ -121,7 +121,7 @@ public class R2dbcQueryOperations {
      * @return 查询结果
      */
     public Mono<Map<String, Object>> queryOne(String sql, Map<?, ?> parameters) {
-        return query(sql, parameters).next();
+        return query(sql, parameters).singleOrEmpty();
     }
 
     /**
@@ -133,7 +133,7 @@ public class R2dbcQueryOperations {
      * @return 查询结果
      */
     public <T> Mono<T> queryOne(String sql, BiFunction<Row, RowMetadata, T> mapper) {
-        return query(sql, mapper).next();
+        return query(sql, mapper).singleOrEmpty();
     }
 
     /**
@@ -146,7 +146,7 @@ public class R2dbcQueryOperations {
      * @return 查询结果
      */
     public <T> Mono<T> queryOne(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) {
-        return query(sql, parameters, mapper).next();
+        return query(sql, parameters, mapper).singleOrEmpty();
     }
 
     /** Executes an already intercepted repository query without invoking the lifecycle chain again. */
@@ -167,7 +167,7 @@ public class R2dbcQueryOperations {
 
     public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,
                                                  BiFunction<Row, RowMetadata, T> mapper) {
-        return queryWithoutLifecycle(sql, parameters, mapper).next();
+        return queryWithoutLifecycle(sql, parameters, mapper).singleOrEmpty();
     }
 
     private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters) {

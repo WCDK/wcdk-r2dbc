@@ -1,5 +1,8 @@
 package com.wcdk.r2dbc.execution;
 
+import com.wcdk.r2dbc.dialect.DatabaseDialect;
+import com.wcdk.r2dbc.dialect.PostgreSqlDatabaseDialect;
+
 import org.springframework.r2dbc.core.DatabaseClient;
 import io.r2dbc.spi.Parameters;
 
@@ -22,6 +25,16 @@ import java.util.Set;
  * @version 1.0
  **/
 public class ParameterBinder {
+
+    private final DatabaseDialect dialect;
+
+    public ParameterBinder() {
+        this(PostgreSqlDatabaseDialect.INSTANCE);
+    }
+
+    public ParameterBinder(DatabaseDialect dialect) {
+        this.dialect = java.util.Objects.requireNonNull(dialect);
+    }
 
     /**
      * 创建绑定后的执行规范。
@@ -109,16 +122,16 @@ public class ParameterBinder {
             if (parameter.databaseType() != null) {
                 return spec.bind(index, parameter.value() == null
                         ? Parameters.in(parameter.databaseType())
-                        : Parameters.in(parameter.databaseType(), normalizeParameterValue(parameter.value())));
+                        : Parameters.in(parameter.databaseType(), dialect.normalizeParameterValue(parameter.value())));
             }
             return parameter.value() == null
                     ? spec.bindNull(index, parameter.javaType())
-                    : spec.bind(index, normalizeParameterValue(parameter.value()));
+                    : spec.bind(index, dialect.normalizeParameterValue(parameter.value()));
         }
         if (value == null) {
             throw new IllegalArgumentException("索引 " + index + " 处的空SQL参数需要使用SqlParameter.nullOf(type)");
         }
-        return spec.bind(index, normalizeParameterValue(value));
+        return spec.bind(index, dialect.normalizeParameterValue(value));
     }
 
     /**
@@ -135,39 +148,19 @@ public class ParameterBinder {
             if (parameter.databaseType() != null) {
                 return spec.bind(identifier, parameter.value() == null
                         ? Parameters.in(parameter.databaseType())
-                        : Parameters.in(parameter.databaseType(), normalizeParameterValue(parameter.value())));
+                        : Parameters.in(parameter.databaseType(), dialect.normalizeParameterValue(parameter.value())));
             }
             return parameter.value() == null
                     ? spec.bindNull(identifier, parameter.javaType())
-                    : spec.bind(identifier, normalizeParameterValue(parameter.value()));
+                    : spec.bind(identifier, dialect.normalizeParameterValue(parameter.value()));
         }
         if (value == null) {
             throw new IllegalArgumentException("空SQL参数 '" + identifier
                     + "' 需要使用SqlParameter.nullOf(type)");
         }
-        return spec.bind(identifier, normalizeParameterValue(value));
+        return spec.bind(identifier, dialect.normalizeParameterValue(value));
     }
 
-    /**
-     * Normalize Java time values before they reach JDBC-backed R2DBC drivers.
-     * The DM driver 1.0.0 timestamp converter accepts java.util.Date and casts
-     * arbitrary values to Date in its Object overload.
-     */
-    static Object normalizeParameterValue(Object value) {
-        if (value instanceof Instant instant) {
-            return Date.from(instant);
-        }
-        if (value instanceof LocalDateTime localDateTime) {
-            return Timestamp.valueOf(localDateTime);
-        }
-        if (value instanceof LocalDate localDate) {
-            return java.sql.Date.valueOf(localDate);
-        }
-        if (value instanceof LocalTime localTime) {
-            return Time.valueOf(localTime);
-        }
-        return value;
-    }
     private String requireSql(String sql) {
         if (sql == null || sql.isBlank()) {
             throw new IllegalArgumentException("R2DBC SQL为空");
@@ -187,61 +180,6 @@ public class ParameterBinder {
     }
 
     static Set<String> namedParameters(String sql) {
-        Set<String> names = new LinkedHashSet<>();
-        boolean single = false;
-        boolean quoted = false;
-        boolean lineComment = false;
-        boolean blockComment = false;
-        for (int i = 0; i < sql.length(); i++) {
-            char ch = sql.charAt(i);
-            char next = i + 1 < sql.length() ? sql.charAt(i + 1) : '\0';
-            if (lineComment) {
-                if (ch == '\n') lineComment = false;
-                continue;
-            }
-            if (blockComment) {
-                if (ch == '*' && next == '/') {
-                    blockComment = false;
-                    i++;
-                }
-                continue;
-            }
-            if (!single && !quoted && ch == '-' && next == '-') {
-                lineComment = true;
-                i++;
-                continue;
-            }
-            if (!single && !quoted && ch == '/' && next == '*') {
-                blockComment = true;
-                i++;
-                continue;
-            }
-            if (ch == '\'' && !quoted) {
-                if (single && next == '\'') {
-                    i++;
-                    continue;
-                }
-                single = !single;
-                continue;
-            }
-            if (ch == '"' && !single) {
-                quoted = !quoted;
-                continue;
-            }
-            if (!single && !quoted && ch == ':' && next != ':' && i > 0 && sql.charAt(i - 1) == ':') {
-                continue;
-            }
-            if (!single && !quoted && ch == ':' && (Character.isLetter(next) || next == '_')) {
-                int end = i + 2;
-                while (end < sql.length()) {
-                    char candidate = sql.charAt(end);
-                    if (!Character.isLetterOrDigit(candidate) && candidate != '_') break;
-                    end++;
-                }
-                names.add(sql.substring(i + 1, end));
-                i = end - 1;
-            }
-        }
-        return names;
+        return NamedParameterParser.parse(sql);
     }
 }
