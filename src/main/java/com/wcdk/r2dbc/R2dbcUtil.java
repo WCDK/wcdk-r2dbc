@@ -11,6 +11,7 @@ import com.wcdk.r2dbc.core.executor.R2dbcUpdateOperations;
 import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
+import com.wcdk.r2dbc.core.RepositoryOperations;
 import com.wcdk.r2dbc.core.transaction.ManualTransaction;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
 import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
@@ -145,11 +146,25 @@ public class R2dbcUtil {
 
     // ==================== 委托方法：查询执行 ====================
 
-    public DatabaseClient databaseClient() {
+    public RepositoryOperations repositoryOperations() {
+        return new RepositoryOperations() {
+            @Override public DatabaseClient databaseClient() { return R2dbcUtil.this.databaseClient; }
+            @Override public SqlLifecycleExecutor lifecycleExecutor() { return R2dbcUtil.this.lifecycleExecutor; }
+            @Override public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.queryWithoutLifecycle(sql, parameters, mapper); }
+            @Override public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.queryOneWithoutLifecycle(sql, parameters, mapper); }
+            @Override public <T> Flux<T> query(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.query(sql, parameters, mapper); }
+            @Override public <T> Mono<T> queryOne(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.queryOne(sql, parameters, mapper); }
+            @Override public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) { return R2dbcUtil.this.updateWithoutLifecycle(sql, parameters); }
+            @Override public <T> T map(Row row, Class<T> entityClass) { return R2dbcUtil.this.map(row, entityClass); }
+            @Override public Object convertValue(Object value, Class<?> targetType) { return R2dbcUtil.this.convertValue(value, targetType); }
+        };
+    }
+
+    DatabaseClient databaseClient() {
         return databaseClient;
     }
 
-    public R2dbcEntityTemplate entityTemplate() {
+    R2dbcEntityTemplate entityTemplate() {
         if (entityTemplate == null) {
             throw new IllegalStateException("R2DBC实体模板缺失");
         }
@@ -188,12 +203,12 @@ public class R2dbcUtil {
         return queryOperations.queryOne(sql, parameters, mapper);
     }
 
-    public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
+    <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
                                               BiFunction<Row, RowMetadata, T> mapper) {
         return queryOperations.queryWithoutLifecycle(sql, parameters, mapper);
     }
 
-    public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,
+    <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters,
                                                  BiFunction<Row, RowMetadata, T> mapper) {
         return queryOperations.queryOneWithoutLifecycle(sql, parameters, mapper);
     }
@@ -206,7 +221,7 @@ public class R2dbcUtil {
         return updateOperations.update(sql, parameters);
     }
 
-    public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
+    Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return updateOperations.updateWithoutLifecycle(sql, parameters);
     }
 
@@ -290,45 +305,12 @@ public class R2dbcUtil {
 
     // ==================== 委托方法：实体映射 ====================
 
-    public <T> T map(Row row, Class<T> entityClass) {
+    <T> T map(Row row, Class<T> entityClass) {
         return rowMapper.map(row, entityClass);
     }
 
-    public Object convertValue(Object value, Class<?> targetType) {
+    Object convertValue(Object value, Class<?> targetType) {
         return rowMapper.convertValue(value, targetType);
     }
 
-    // ==================== 获取内部组件 ====================
-
-    public ParameterBinder getParameterBinder() {
-        return parameterBinder;
-    }
-
-    public SqlLifecycleExecutor getLifecycleExecutor() {
-        return lifecycleExecutor;
-    }
-
-    public R2dbcRowMapper getRowMapper() {
-        return rowMapper;
-    }
-
-    public R2dbcSqlLogger getSqlLogger() {
-        return sqlLogger;
-    }
-
-    public R2dbcDataSourceRouter getDataSourceRouter() {
-        return dataSourceRouter;
-    }
-
-    public R2dbcQueryOperations getQueryOperations() {
-        return queryOperations;
-    }
-
-    public R2dbcUpdateOperations getUpdateOperations() {
-        return updateOperations;
-    }
-
-    public R2dbcTransactionOperations getTransactionOperations() {
-        return transactionOperations;
-    }
 }

@@ -35,4 +35,22 @@ public final class DerivedMethodCompiler {
         return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.DERIVED, null,
                 repositoryInterface.getName() + "." + method.getName()));
     }
-}
+
+    private Object[] sampleArguments(Method method) {
+        Object[] arguments = new Object[method.getParameterCount()];
+        for (int i = 0; i < arguments.length; i++) {
+            Class<?> type = method.getParameterTypes()[i];
+            if (type.isArray()) {
+                arguments[i] = java.lang.reflect.Array.newInstance(type.getComponentType(), 1);
+            } else if (java.util.Collection.class.isAssignableFrom(type) || Iterable.class.isAssignableFrom(type)) {
+                arguments[i] = java.util.List.of("sample");
+            } else if (type == boolean.class || type == Boolean.class) {
+                arguments[i] = false;
+            } else if (type.isPrimitive()) {
+                arguments[i] = 0;
+            } else {
+                arguments[i] = "sample";
+            }
+        }
+        return arguments;
+    }}

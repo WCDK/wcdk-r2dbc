@@ -68,15 +68,23 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     private final R2dbcDialect dialect;
 
+    private final RepositoryOperations repositoryOperations;
+
+    private final SqlExecutionEngine sqlExecutionEngine;
+
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     private final boolean snowflakeIdEnabled;
 
     private final CustomMethodResolver customMethodResolver;
 
-    private final Map<Method, RepositoryMethodPlan> methodPlans;
+    private final RepositoryMethodPlanRegistry planRegistry;
 
     private final RepositoryInvocationDispatcher dispatcher;
+
+    private final RepositoryObjectMethodExecutor objectMethodExecutor;
+
+    private final RepositoryParameterBinder parameterBinder;
 
     RepositoryProxyMethodInterceptor(R2dbcUtil r2dbcUtil,
                                      WcdkR2dbcProperties properties,
@@ -86,31 +94,36 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                                      SnowflakeIdGenerator snowflakeIdGenerator,
                                      Map<Method, RepositoryMethodPlan> methodPlans) {
         this.r2dbcUtil = r2dbcUtil;
+        this.repositoryOperations = r2dbcUtil.repositoryOperations();
+        this.sqlExecutionEngine = new SqlExecutionEngine(repositoryOperations);
         this.properties = properties;
         this.metadata = metadata;
         this.repositoryInterface = repositoryInterface;
         this.repositoryXmlRegistry = repositoryXmlRegistry;
-        this.dialect = DialectResolver.getDialect(r2dbcUtil.databaseClient().getConnectionFactory());
+        this.dialect = DialectResolver.getDialect(sqlExecutionEngine.connectionFactory());
         this.snowflakeIdEnabled = properties.isSnowflakeId();
         this.snowflakeIdGenerator = snowflakeIdGenerator;
         this.customMethodResolver = metadata == null ? null : new CustomMethodResolver(metadata,
                 properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
-        this.methodPlans = Map.copyOf(methodPlans);
+        this.planRegistry = new RepositoryMethodPlanRegistry(methodPlans);
+        this.objectMethodExecutor = new RepositoryObjectMethodExecutor(repositoryInterface, metadata);
+        this.parameterBinder = new RepositoryParameterBinder();
         this.dispatcher = new RepositoryInvocationDispatcher(List.of(
-                new CrudMethodExecutor(this::executePlan),
-                new DerivedMethodExecutor(this::executePlan),
-                new XmlMethodExecutor(this::executePlan)));
+                new CrudMethodExecutor(this::executeCrudPlan),
+                new DerivedMethodExecutor((plan, args, context) -> executeCustomMethod(plan, args)),
+                new XmlMethodExecutor((plan, args, context) -> executeXmlStatement(plan.xmlStatement(), plan.method(), args)),
+                new UnsupportedMethodExecutor()));
     }
 
     @Override
     public Object invoke(MethodInvocation invocation) {
         Method method = invocation.getMethod();
-        RepositoryMethodPlan plan = methodPlans.get(method);
+        RepositoryMethodPlan plan = planRegistry.get(method);
         if (plan == null) {
             throw new IllegalStateException("Repository方法未在启动时编译: " + method);
         }
         if (plan.kind() == RepositoryMethodPlan.Kind.OBJECT) {
-            return executeObjectMethod(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+            return objectMethodExecutor.execute(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
         }
         if (method.getReturnType() == Mono.class) {
             return Mono.deferContextual(context -> {
@@ -138,29 +151,11 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         return dispatcher.execute(invocation.plan(), invocation.arguments(), context);
     }
 
-    /** Executes the selected plan; routing is handled by RepositoryInvocationDispatcher. */
-    private Object executePlan(RepositoryMethodPlan plan, Object[] arguments, ContextView context) {
+    private Object executeCrudPlan(RepositoryMethodPlan plan, Object[] arguments, ContextView context) {
         Method method = plan.method();
         String methodName = method.getName();
-        if (plan.kind() == RepositoryMethodPlan.Kind.XML) {
-            return executeXmlStatement(plan.xmlStatement(), method, arguments);
-        }
-        if (plan.kind() == RepositoryMethodPlan.Kind.DERIVED) {
-            return executeCustomMethod(method, arguments);
-        }
-        if (plan.kind() == RepositoryMethodPlan.Kind.UNSUPPORTED) {
-            throw new UnsupportedOperationException("不支持的Repository方法: " + method.toGenericString());
-        }
-        if (plan.kind() != RepositoryMethodPlan.Kind.CRUD
-                && plan.kind() != RepositoryMethodPlan.Kind.OBJECT) {
-            // 1. 先尝试从XML注册表查找
-            return repositoryXmlRegistry.find(repositoryInterface, methodName)
-                    .map(statement -> executeXmlStatement(statement, method, arguments))
-                    // 2. 尝试通过方法名约定解析自定义方法
-                    .orElseGet(() -> executeCustomMethod(method, arguments));
-        }
         if (metadata == null && isBaseCrudMethod(methodName)) {
-            throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持基础 CRUD 方法：" + methodName);
+            throw new UnsupportedOperationException("Repository接口未继承 BaseRepository，不支持基础 CRUD 方法: " + methodName);
         }
         return switch (methodName) {
             case "insert" -> insert(arguments[0]);
@@ -173,46 +168,26 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             case "selectOne" -> selectOne(queryWrapper(arguments), context);
             case "selectCount" -> selectCount(queryWrapper(arguments), context);
             case "exists" -> exists(queryWrapper(arguments), context);
-            case "toString" -> "WcdkR2dbcRepositoryProxy(" + (metadata != null ? metadata.entityClass().getName() : repositoryInterface.getSimpleName()) + ")";
-            case "hashCode" -> System.identityHashCode(arguments.length == 0 ? null : arguments[0]);
-            case "equals" -> false;
-            default -> throw new UnsupportedOperationException("暂不支持自定义仓储方法：" + methodName);
+            default -> throw new UnsupportedOperationException("不支持的 CRUD 方法: " + methodName);
         };
     }
-
-    private Object executeObjectMethod(RepositoryInvocation invocation) {
-        return switch (invocation.getMethod().getName()) {
-            case "toString" -> "WcdkR2dbcRepositoryProxy(" + (metadata != null ? metadata.entityClass().getName() : repositoryInterface.getSimpleName()) + ")";
-            case "hashCode" -> System.identityHashCode(invocation.getThis());
-            case "equals" -> invocation.getThis() == invocation.arguments()[0];
-            default -> throw new UnsupportedOperationException("Unsupported Object method: " + invocation.getMethod());
-        };
-    }
-
-    private boolean isBaseMethod(String methodName) {
-        return isBaseCrudMethod(methodName) || switch (methodName) {
-            case "toString", "hashCode", "equals" -> true;
-            default -> false;
-        };
-    }
-
     private static boolean isBaseCrudMethod(String methodName) {
         return switch (methodName) {
-            case "insert", "deleteById", "updateById", "selectById", "findAll", "selectList", "selectPage", "selectOne", "selectCount",
-                 "exists" -> true;
+            case "insert", "deleteById", "updateById", "selectById", "findAll", "selectList", "selectPage", "selectOne", "selectCount", "exists" -> true;
             default -> false;
         };
     }
-
-    /**
-     * 执行自定义方法（通过方法名约定解析）。
-     */
-    private Object executeCustomMethod(Method method, Object[] arguments) {
+    private Object executeCustomMethod(RepositoryMethodPlan plan, Object[] arguments) {
+        Method method = plan.method();
         if (metadata == null) {
             throw new UnsupportedOperationException("仓储接口未继承 BaseRepository，不支持自定义方法：" + method.getName());
         }
 
         CustomMethodResolver.ParsedMethod parsedMethod = customMethodResolver.resolve(method, arguments);
+        if (plan.sqlPlan().template() != null) {
+            parsedMethod = new CustomMethodResolver.ParsedMethod(plan.sqlPlan().template(),
+                    parsedMethod.parameters(), parsedMethod.commandType());
+        }
 
         if (parsedMethod == null) {
             throw new UnsupportedOperationException("暂不支持自定义仓储方法：" + method.getName());
@@ -249,7 +224,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     private Object executeCustomCountQuery(Mono<Boolean> lifecycle, SqlExecutionContext context,
                                             SqlLifecycleInterceptorChain chain) {
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
                                 (row, rowMetadata) -> numberValue(row).longValue())
                         .defaultIfEmpty(0L));
     }
@@ -257,7 +232,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     private Object executeCustomExistsQuery(Mono<Boolean> lifecycle, SqlExecutionContext context,
                                              SqlLifecycleInterceptorChain chain) {
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
                                 (row, rowMetadata) -> numberValue(row).longValue() > 0)
                         .defaultIfEmpty(false));
     }
@@ -265,21 +240,21 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     private Object executeCustomFindQueryFlux(Mono<Boolean> lifecycle, SqlExecutionContext context,
                                                SqlLifecycleInterceptorChain chain) {
         return lifecycleExecutor().executeFlux(chain, context, lifecycle,
-                () -> r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass())));
+                () -> sqlExecutionEngine.queryWithoutLifecycle(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())));
     }
 
     private Object executeCustomFindQueryMono(Mono<Boolean> lifecycle, SqlExecutionContext context,
                                                SqlLifecycleInterceptorChain chain) {
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass())));
+                () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())));
     }
 
     private Object executeCustomUpdate(Mono<Boolean> lifecycle, Method method, Class<?> valueType,
                                         SqlExecutionContext context, SqlLifecycleInterceptorChain chain) {
         Mono<Long> updateMono = lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters()));
+                () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters()));
 
         if (method.getReturnType() == Mono.class && valueType == Boolean.class) {
             return updateMono.map(count -> count > 0);
@@ -293,7 +268,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     private Object executeXmlStatement(RepositoryStatement statement, Method method, Object[] arguments) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
-        context.setParameters(methodParameters(method, arguments));
+        context.setParameters(parameterBinder.methodParameters(method, arguments));
         context.setCommandType(statement.commandType());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
@@ -301,7 +276,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getParameters());
                     Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getParameters());
                     sourceParameters.putAll(renderedSql.additionalParameters());
-                    BoundSql boundSql = bindSql(renderedSql.sql(), method, arguments, sourceParameters);
+                    RepositoryParameterBinder.BoundSql boundSql = parameterBinder.bindSql(renderedSql.sql(), method, arguments, sourceParameters);
                     context.setSql(boundSql.sql());
                     context.setParameters(boundSql.parameters());
                 }));
@@ -311,7 +286,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         if (returnsFlux) {
             return lifecycleExecutor().executeFlux(chain, context, lifecycle,
                     () -> Flux.defer(() -> {
-                        BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
+                        RepositoryParameterBinder.BoundSql finalBoundSql = new RepositoryParameterBinder.BoundSql(context.getSql(), context.getParameters());
 
                         Object result;
                         try {
@@ -335,7 +310,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         } else {
             return lifecycleExecutor().executeMono(chain, context, lifecycle,
                     () -> Mono.defer(() -> {
-                        BoundSql finalBoundSql = new BoundSql(context.getSql(), context.getParameters());
+                        RepositoryParameterBinder.BoundSql finalBoundSql = new RepositoryParameterBinder.BoundSql(context.getSql(), context.getParameters());
 
                         Object result;
                         try {
@@ -358,8 +333,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         }
     }
 
-    private Object executeXmlUpdate(BoundSql boundSql, Method method, Object[] arguments) {
-        Mono<Long> rows = r2dbcUtil.updateWithoutLifecycle(boundSql.sql(), boundSql.parameters());
+    private Object executeXmlUpdate(RepositoryParameterBinder.BoundSql boundSql, Method method, Object[] arguments) {
+        Mono<Long> rows = sqlExecutionEngine.updateWithoutLifecycle(boundSql.sql(), boundSql.parameters());
         Class<?> valueType = reactiveValueType(method);
         if (method.getReturnType() == Mono.class && valueType == Boolean.class) {
             return rows.map(count -> count > 0);
@@ -371,28 +346,28 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         return rows;
     }
 
-    private Object executeXmlSelect(BoundSql boundSql, Method method, RepositoryStatement statement) {
+    private Object executeXmlSelect(RepositoryParameterBinder.BoundSql boundSql, Method method, RepositoryStatement statement) {
         Class<?> valueType = reactiveValueType(method);
         String resultType = statement.resultType();
         String resultMapId = statement.resultMapId();
 
         if (method.getReturnType() == Flux.class) {
-            return r2dbcUtil.queryWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
+            return sqlExecutionEngine.queryWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
                     mapXmlRow(row, valueType, resultType, resultMapId));
         }
         if (valueType == Boolean.class || valueType == boolean.class) {
-            return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue() > 0)
+            return sqlExecutionEngine.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue() > 0)
                     .defaultIfEmpty(false);
         }
         if (valueType == Long.class || valueType == long.class) {
-            return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue())
+            return sqlExecutionEngine.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue())
                     .defaultIfEmpty(0L);
         }
         if (valueType == Integer.class || valueType == int.class) {
-            return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).intValue())
+            return sqlExecutionEngine.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).intValue())
                     .defaultIfEmpty(0);
         }
-        return r2dbcUtil.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
+        return sqlExecutionEngine.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) ->
                 mapXmlRow(row, valueType, resultType, resultMapId));
     }
 
@@ -403,20 +378,20 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         if (StringUtils.hasText(resultType)) {
             Class<?> targetClass = resolveClass(resultType);
             if (Number.class.isAssignableFrom(targetClass) || targetClass == String.class || targetClass == Boolean.class || targetClass == boolean.class) {
-                return r2dbcUtil.convertValue(row.get(0), targetClass);
+                return sqlExecutionEngine.convertValue(row.get(0), targetClass);
             }
-            return r2dbcUtil.map(row, targetClass);
+            return sqlExecutionEngine.map(row, targetClass);
         }
         if (valueType == Object.class) {
             if (metadata == null) {
                 throw new IllegalStateException("无法确定实体类型，请在 XML 中明确指定返回值类型或继承 BaseRepository");
             }
-            return r2dbcUtil.map(row, metadata.entityClass());
+            return sqlExecutionEngine.map(row, metadata.entityClass());
         }
         if (Number.class.isAssignableFrom(valueType) || valueType == String.class || valueType == Boolean.class || valueType == boolean.class) {
-            return r2dbcUtil.convertValue(row.get(0), valueType);
+            return sqlExecutionEngine.convertValue(row.get(0), valueType);
         }
-        return r2dbcUtil.map(row, valueType);
+        return sqlExecutionEngine.map(row, valueType);
     }
 
     private Object mapRowByResultMap(Row row, String resultMapId) {
@@ -445,7 +420,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 Field field = findField(targetClass, property);
                 if (field != null) {
                     field.setAccessible(true);
-                    field.set(entity, r2dbcUtil.convertValue(value, field.getType()));
+                    field.set(entity, sqlExecutionEngine.convertValue(value, field.getType()));
                 }
             }
             return entity;
@@ -497,151 +472,12 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         return method.getReturnType();
     }
 
-    private BoundSql bindSql(String sql, Method method, Object[] arguments, Map<String, Object> sourceParameters) {
-        Map<String, Object> boundParameters = new LinkedHashMap<>();
-        List<String> parameterNames = new ArrayList<>();
-        Matcher matcher = PARAMETER_PATTERN.matcher(sql);
-        StringBuilder builder = new StringBuilder();
-        while (matcher.find()) {
-            String name = matcher.group(1);
-            parameterNames.add(name);
-            matcher.appendReplacement(builder, ":" + bindName(name));
-        }
-        matcher.appendTail(builder);
-        if ((arguments == null ? 0 : arguments.length) == 1 && parameterNames.size() == 1
-                && !sourceParameters.containsKey(parameterNames.get(0))) {
-            boundParameters.put(bindName(parameterNames.get(0)), typedNull(arguments[0], method.getParameterTypes()[0]));
-            return new BoundSql(builder.toString(), boundParameters);
-        }
-        for (String name : parameterNames) {
-            Object value = parameterValue(sourceParameters, name);
-            boundParameters.put(bindName(name), typedNull(value, parameterJavaType(method, name)));
-        }
-        return new BoundSql(builder.toString(), boundParameters);
-    }
-
-    private Object typedNull(Object value, Class<?> javaType) {
-        return value == null ? SqlParameter.nullOf(javaType == null ? Object.class : javaType) : value;
-    }
-
-    private Class<?> parameterJavaType(Method method, String name) {
-        String rootName = name.contains(".") ? name.substring(0, name.indexOf('.')) : name;
-        String[] discoveredNames = PARAMETER_NAME_DISCOVERER.getParameterNames(method);
-        for (int i = 0; i < method.getParameterCount(); i++) {
-            MethodParameter parameter = new MethodParameter(method, i);
-            Param annotation = parameter.getParameterAnnotation(Param.class);
-            boolean matches = rootName.equals("arg" + i) || rootName.equals("param" + (i + 1))
-                    || annotation != null && rootName.equals(annotation.value())
-                    || discoveredNames != null && rootName.equals(discoveredNames[i]);
-            if (!matches) {
-                continue;
-            }
-            Class<?> type = method.getParameterTypes()[i];
-            if (name.contains(".")) {
-                return field(type, name.substring(name.indexOf('.') + 1)).getType();
-            }
-            return type;
-        }
-        if (method.getParameterCount() == 1 && name.contains(".")) {
-            return field(method.getParameterTypes()[0], name.substring(name.indexOf('.') + 1)).getType();
-        }
-        if (method.getParameterCount() == 1) {
-            Field beanField = findField(method.getParameterTypes()[0], name);
-            if (beanField != null) {
-                return beanField.getType();
-            }
-        }
-        return Object.class;
-    }
-
     static Object terminatedPublisher(Method method) {
         return method.getReturnType() == Flux.class ? Flux.empty() : Mono.empty();
     }
 
-    private Map<String, Object> methodParameters(Method method, Object[] arguments) {
-        Map<String, Object> parameters = new LinkedHashMap<>();
-        if (arguments == null) {
-            return parameters;
-        }
-        String[] parameterNames = PARAMETER_NAME_DISCOVERER.getParameterNames(method);
-        for (int i = 0; i < arguments.length; i++) {
-            Object argument = arguments[i];
-            parameters.put("arg" + i, argument);
-            parameters.put("param" + (i + 1), argument);
-            MethodParameter methodParameter = new MethodParameter(method, i);
-            Param param = methodParameter.getParameterAnnotation(Param.class);
-            if (param != null) {
-                parameters.put(param.value(), argument);
-            }
-            if (parameterNames != null && StringUtils.hasText(parameterNames[i])) {
-                parameters.put(parameterNames[i], argument);
-            }
-            if (arguments.length == 1 && !isSimpleValue(argument)) {
-                putBeanProperties(parameters, argument);
-            }
-        }
-        return parameters;
-    }
-
-    private Object parameterValue(Map<String, Object> parameters, String name) {
-        if (parameters.containsKey(name)) {
-            return parameters.get(name);
-        }
-        int dotIndex = name.indexOf('.');
-        if (dotIndex > 0) {
-            Object root = parameters.get(name.substring(0, dotIndex));
-            if (root != null) {
-                return propertyValue(root, name.substring(dotIndex + 1));
-            }
-        }
-        throw new IllegalArgumentException("R2DBC XML SQL 参数不存在：" + name);
-    }
-
-    private String bindName(String name) {
-        return name.replace('.', '_');
-    }
-
-    private void putBeanProperties(Map<String, Object> parameters, Object argument) {
-        for (Field field : argument.getClass().getDeclaredFields()) {
-            if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
-                continue;
-            }
-            field.setAccessible(true);
-            parameters.putIfAbsent(field.getName(), fieldValue(field, argument));
-        }
-    }
-
-    private Object propertyValue(Object root, String propertyPath) {
-        Object value = root;
-        for (String name : propertyPath.split("\\.")) {
-            if (value == null) {
-                return null;
-            }
-            value = fieldValue(field(value.getClass(), name), value);
-        }
-        return value;
-    }
-
-    private Field field(Class<?> type, String name) {
-        Class<?> searchType = type;
-        while (searchType != null && searchType != Object.class) {
-            try {
-                Field field = searchType.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException ignored) {
-                searchType = searchType.getSuperclass();
-            }
-        }
-        throw new IllegalArgumentException("R2DBC XML SQL 参数字段不存在：" + type.getName() + "." + name);
-    }
-
-    private boolean isSimpleValue(Object value) {
-        return value == null
-                || value instanceof CharSequence
-                || value instanceof Number
-                || value instanceof Boolean
-                || value instanceof Enum<?>;
+    private Object typedNull(Object value, Class<?> javaType) {
+        return value == null ? SqlParameter.nullOf(javaType == null ? Object.class : javaType) : value;
     }
 
     private Mono<?> insert(Object entity) {
@@ -681,7 +517,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     context.setParameters(parameters);
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters())
                         .thenReturn(entity));
     }
 
@@ -714,7 +550,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     context.setParameters(parameters);
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters()));
+                () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters()));
     }
 
     private Mono<Long> updateById(Object entity) {
@@ -750,7 +586,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     context.setParameters(parameters);
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.updateWithoutLifecycle(context.getSql(), context.getParameters()));
+                () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters()));
     }
 
     private Mono<?> selectById(Object id) {
@@ -774,8 +610,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     context.setParameters(parameters);
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass())));
+                () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())));
     }
 
     private Flux<?> selectList(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
@@ -794,8 +630,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     context.setParameters(where.parameters());
                 }));
         return lifecycleExecutor().executeFlux(chain, context, lifecycle,
-                () -> r2dbcUtil.queryWithoutLifecycle(context.getSql(), context.getParameters(),
-                        (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass())));
+                () -> sqlExecutionEngine.queryWithoutLifecycle(context.getSql(), context.getParameters(),
+                        (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())));
     }
 
     private Mono<?> selectOne(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
@@ -814,7 +650,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName() + where.sql()
                 + orderBySql(queryWrapper)
                 + pageSql(pageable, dialectContext);
-        Mono<List<Object>> records = r2dbcUtil.query(sql, where.parameters(), (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
+        Mono<List<Object>> records = sqlExecutionEngine.query(sql, where.parameters(), (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass()))
                 .cast(Object.class)
                 .collectList();
         return Mono.zip(records, selectCount(queryWrapper, dialectContext))
@@ -835,7 +671,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     context.setParameters(where.parameters());
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> r2dbcUtil.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
                                 (row, rowMetadata) -> numberValue(row).longValue())
                         .defaultIfEmpty(0L));
     }
@@ -935,7 +771,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
 
     private R2dbcDialect resolveDialect(ContextView context) {
         String dataSource = R2dbcDataSourceContext.get(context);
-        if (r2dbcUtil.databaseClient().getConnectionFactory() instanceof DynamicRoutingConnectionFactory routing) {
+        if (sqlExecutionEngine.connectionFactory() instanceof DynamicRoutingConnectionFactory routing) {
             return DialectResolver.getDialect(routing.getConnectionFactory(dataSource));
         }
         return dialect;
@@ -963,7 +799,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
     }
 
     private SqlLifecycleExecutor lifecycleExecutor() {
-        return r2dbcUtil.getLifecycleExecutor();
+        return sqlExecutionEngine.lifecycleExecutor();
     }
 
     private Method findMethod(String methodName) {
