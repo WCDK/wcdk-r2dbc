@@ -52,6 +52,15 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
         return connectionFactories.get(primary).getMetadata();
     }
 
+    public ConnectionFactory getConnectionFactory(String dataSource) {
+        String key = dataSource == null || dataSource.isBlank() ? primary : dataSource;
+        ConnectionFactory connectionFactory = connectionFactories.get(key);
+        if (connectionFactory == null) {
+            throw new IllegalArgumentException("R2DBC数据源不存在: " + key + "; 可用键: " + connectionFactories.keySet());
+        }
+        return connectionFactory;
+    }
+
     public Map<String, ConnectionFactory> getConnectionFactories() {
         return connectionFactories;
     }
@@ -93,13 +102,6 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
     }
 
     private ConnectionFactory determineConnectionFactory(ContextView contextView) {
-        String dataSource = R2dbcDataSourceContext.get(contextView);
-        String key = dataSource == null || dataSource.isBlank() ? primary : dataSource;
-        ConnectionFactory connectionFactory = connectionFactories.get(key);
-        if (connectionFactory == null) {
-            throw new IllegalArgumentException("R2DBC数据源不存在: " + key
-                    + "; 可用键: " + connectionFactories.keySet());
-        }
-        return connectionFactory;
+        return getConnectionFactory(R2dbcDataSourceContext.get(contextView));
     }
 }

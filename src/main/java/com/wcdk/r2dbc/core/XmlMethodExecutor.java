@@ -1,15 +1,16 @@
 package com.wcdk.r2dbc.core;
 
 import java.util.function.BiFunction;
+import reactor.util.context.ContextView;
 
 /***
  * XML 方法执行器。
  * @author wcdk
  */
 final class XmlMethodExecutor implements RepositoryMethodExecutor {
-    private final BiFunction<RepositoryMethodPlan, Object[], Object> delegate;
+    private final RepositoryPlanExecutor delegate;
 
-    XmlMethodExecutor(BiFunction<RepositoryMethodPlan, Object[], Object> delegate) {
+    XmlMethodExecutor(RepositoryPlanExecutor delegate) {
         this.delegate = delegate;
     }
 
@@ -19,7 +20,7 @@ final class XmlMethodExecutor implements RepositoryMethodExecutor {
     }
 
     @Override
-    public Object execute(RepositoryMethodPlan plan, Object[] args) {
-        return delegate.apply(plan, args);
+    public Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context) {
+        return delegate.apply(plan, args, context);
     }
 }

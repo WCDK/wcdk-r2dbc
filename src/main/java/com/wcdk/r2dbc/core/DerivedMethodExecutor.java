@@ -1,15 +1,16 @@
 package com.wcdk.r2dbc.core;
 
 import java.util.function.BiFunction;
+import reactor.util.context.ContextView;
 
 /***
  * Derived Query 方法执行器。
  * @author wcdk
  */
 final class DerivedMethodExecutor implements RepositoryMethodExecutor {
-    private final BiFunction<RepositoryMethodPlan, Object[], Object> delegate;
+    private final RepositoryPlanExecutor delegate;
 
-    DerivedMethodExecutor(BiFunction<RepositoryMethodPlan, Object[], Object> delegate) {
+    DerivedMethodExecutor(RepositoryPlanExecutor delegate) {
         this.delegate = delegate;
     }
 
@@ -19,7 +20,7 @@ final class DerivedMethodExecutor implements RepositoryMethodExecutor {
     }
 
     @Override
-    public Object execute(RepositoryMethodPlan plan, Object[] args) {
-        return delegate.apply(plan, args);
+    public Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context) {
+        return delegate.apply(plan, args, context);
     }
 }

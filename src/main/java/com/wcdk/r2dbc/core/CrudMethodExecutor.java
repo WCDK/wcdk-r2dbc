@@ -1,15 +1,16 @@
 package com.wcdk.r2dbc.core;
 
 import java.util.function.BiFunction;
+import reactor.util.context.ContextView;
 
 /**
  *  CRUD 方法执行器。
  *  @author wcdk`
  *  */
 final class CrudMethodExecutor implements RepositoryMethodExecutor {
-    private final BiFunction<RepositoryMethodPlan, Object[], Object> delegate;
+    private final RepositoryPlanExecutor delegate;
 
-    CrudMethodExecutor(BiFunction<RepositoryMethodPlan, Object[], Object> delegate) {
+    CrudMethodExecutor(RepositoryPlanExecutor delegate) {
         this.delegate = delegate;
     }
 
@@ -20,7 +21,7 @@ final class CrudMethodExecutor implements RepositoryMethodExecutor {
     }
 
     @Override
-    public Object execute(RepositoryMethodPlan plan, Object[] args) {
-        return delegate.apply(plan, args);
+    public Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context) {
+        return delegate.apply(plan, args, context);
     }
 }

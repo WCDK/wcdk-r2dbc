@@ -29,6 +29,9 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.context.ContextView;
+import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
+import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -106,15 +109,18 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
         if (plan == null) {
             throw new IllegalStateException("Repository方法未在启动时编译: " + method);
         }
+        if (plan.kind() == RepositoryMethodPlan.Kind.OBJECT) {
+            return executeObjectMethod(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+        }
         if (method.getReturnType() == Mono.class) {
-            return Mono.defer(() -> {
-                Object result = invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+            return Mono.deferContextual(context -> {
+                Object result = invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()), context);
                 return result instanceof Mono<?> mono ? mono : Mono.justOrEmpty(result);
             });
         }
         if (method.getReturnType() == Flux.class) {
-            return Flux.defer(() -> {
-                Object result = invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+            return Flux.deferContextual(context -> {
+                Object result = invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()), context);
                 if (result instanceof org.reactivestreams.Publisher<?> publisher) {
                     @SuppressWarnings("unchecked")
                     org.reactivestreams.Publisher<Object> typed =
@@ -124,16 +130,16 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 return Flux.just(result);
             });
         }
-        return invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()));
+        return invokeOnce(new RepositoryInvocation(plan, invocation.getThis(), invocation.getArguments()), reactor.util.context.Context.empty());
     }
 
     /** Builds all mutable execution state for one subscription only. */
-    private Object invokeOnce(RepositoryInvocation invocation) {
-        return dispatcher.execute(invocation.plan(), invocation.arguments());
+    private Object invokeOnce(RepositoryInvocation invocation, ContextView context) {
+        return dispatcher.execute(invocation.plan(), invocation.arguments(), context);
     }
 
     /** Executes the selected plan; routing is handled by RepositoryInvocationDispatcher. */
-    private Object executePlan(RepositoryMethodPlan plan, Object[] arguments) {
+    private Object executePlan(RepositoryMethodPlan plan, Object[] arguments, ContextView context) {
         Method method = plan.method();
         String methodName = method.getName();
         if (plan.kind() == RepositoryMethodPlan.Kind.XML) {
@@ -161,12 +167,12 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
             case "deleteById" -> deleteById(arguments[0]);
             case "updateById" -> updateById(arguments[0]);
             case "selectById" -> selectById(arguments[0]);
-            case "findAll" -> selectList(new QueryWrapper<>());
-            case "selectList" -> selectList(queryWrapper(arguments));
-            case "selectPage" -> selectPage(pageable(arguments), queryWrapper(arguments, 1));
-            case "selectOne" -> selectOne(queryWrapper(arguments));
-            case "selectCount" -> selectCount(queryWrapper(arguments));
-            case "exists" -> exists(queryWrapper(arguments));
+            case "findAll" -> selectList(new QueryWrapper<>(), context);
+            case "selectList" -> selectList(queryWrapper(arguments), context);
+            case "selectPage" -> selectPage(pageable(arguments), queryWrapper(arguments, 1), context);
+            case "selectOne" -> selectOne(queryWrapper(arguments), context);
+            case "selectCount" -> selectCount(queryWrapper(arguments), context);
+            case "exists" -> exists(queryWrapper(arguments), context);
             case "toString" -> "WcdkR2dbcRepositoryProxy(" + (metadata != null ? metadata.entityClass().getName() : repositoryInterface.getSimpleName()) + ")";
             case "hashCode" -> System.identityHashCode(arguments.length == 0 ? null : arguments[0]);
             case "equals" -> false;
@@ -772,7 +778,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                         (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass())));
     }
 
-    private Flux<?> selectList(QueryWrapper<?> queryWrapper) {
+    private Flux<?> selectList(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("selectList"), repositoryInterface, new Object[]{queryWrapper});
@@ -782,7 +788,7 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     SqlWhere where = buildWhere(queryWrapper);
                     String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName() + where.sql()
                             + orderBySql(queryWrapper)
-                            + limitSql(queryWrapper);
+                            + limitSql(queryWrapper, dialectContext);
 
                     context.setSql(sql);
                     context.setParameters(where.parameters());
@@ -792,30 +798,30 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                         (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass())));
     }
 
-    private Mono<?> selectOne(QueryWrapper<?> queryWrapper) {
+    private Mono<?> selectOne(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
         QueryWrapper<?> wrapper = queryWrapper == null ? new QueryWrapper<>() : queryWrapper.copy();
         if (wrapper.limit() == null) {
             wrapper.limit(1);
         }
-        return selectList(wrapper).next();
+        return selectList(wrapper, dialectContext).next();
     }
 
-    private Mono<?> selectPage(Pageable pageable, QueryWrapper<?> queryWrapper) {
+    private Mono<?> selectPage(Pageable pageable, QueryWrapper<?> queryWrapper, ContextView dialectContext) {
         if (pageable == null) {
             throw new IllegalArgumentException("分页参数不能为空");
         }
         SqlWhere where = buildWhere(queryWrapper);
         String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName() + where.sql()
                 + orderBySql(queryWrapper)
-                + pageSql(pageable);
+                + pageSql(pageable, dialectContext);
         Mono<List<Object>> records = r2dbcUtil.query(sql, where.parameters(), (row, rowMetadata) -> r2dbcUtil.map(row, metadata.entityClass()))
                 .cast(Object.class)
                 .collectList();
-        return Mono.zip(records, selectCount(queryWrapper))
+        return Mono.zip(records, selectCount(queryWrapper, dialectContext))
                 .map(tuple -> new PageImpl<>(tuple.getT1(), pageable, tuple.getT2()));
     }
 
-    private Mono<Long> selectCount(QueryWrapper<?> queryWrapper) {
+    private Mono<Long> selectCount(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("selectCount"), repositoryInterface, new Object[]{queryWrapper});
@@ -834,8 +840,8 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                         .defaultIfEmpty(0L));
     }
 
-    private Mono<Boolean> exists(QueryWrapper<?> queryWrapper) {
-        return selectCount(queryWrapper).map(count -> count > 0);
+    private Mono<Boolean> exists(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
+        return selectCount(queryWrapper, dialectContext).map(count -> count > 0);
     }
 
     private SqlWhere buildWhere(QueryWrapper<?> queryWrapper) {
@@ -908,23 +914,31 @@ class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                 .collect(Collectors.joining(", ", " ORDER BY ", ""));
     }
 
-    private String limitSql(QueryWrapper<?> queryWrapper) {
+    private String limitSql(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
         if (queryWrapper == null || queryWrapper.limit() == null) {
             return "";
         }
         Long offset = queryWrapper.offset() == null ? null : queryWrapper.offset().longValue();
-        return paginationSql(queryWrapper.limit(), offset);
+        return paginationSql(queryWrapper.limit(), offset, dialectContext);
     }
 
-    private String pageSql(Pageable pageable) {
+    private String pageSql(Pageable pageable, ContextView dialectContext) {
         if (pageable.isUnpaged()) {
             return "";
         }
-        return paginationSql(pageable.getPageSize(), pageable.getOffset());
+        return paginationSql(pageable.getPageSize(), pageable.getOffset(), dialectContext);
     }
 
-    private String paginationSql(long limit, Long offset) {
-        return DialectPagination.render(dialect, limit, offset);
+    private String paginationSql(long limit, Long offset, ContextView context) {
+        return DialectPagination.render(resolveDialect(context), limit, offset);
+    }
+
+    private R2dbcDialect resolveDialect(ContextView context) {
+        String dataSource = R2dbcDataSourceContext.get(context);
+        if (r2dbcUtil.databaseClient().getConnectionFactory() instanceof DynamicRoutingConnectionFactory routing) {
+            return DialectResolver.getDialect(routing.getConnectionFactory(dataSource));
+        }
+        return dialect;
     }
 
     private String logicNotDeleteSql(String prefix) {
