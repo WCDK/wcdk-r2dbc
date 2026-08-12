@@ -15,6 +15,6 @@ public class DmBindMarkersFactoryProvider implements BindMarkersFactoryResolver.
 
     @Override
     public BindMarkersFactory getBindMarkers(ConnectionFactory connectionFactory) {
-        return DmR2dbcSupport.isDm(connectionFactory) ? DmR2dbcDialect.INSTANCE.getBindMarkersFactory() : null;
+        return DmR2dbcSupport.isDm(connectionFactory) ? DmSpringDialect.INSTANCE.getBindMarkersFactory() : null;
     }
 }

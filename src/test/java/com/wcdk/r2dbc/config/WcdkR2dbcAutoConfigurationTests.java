@@ -3,7 +3,8 @@ package com.wcdk.r2dbc.config;
 import io.r2dbc.spi.Connection;
 import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryMetadata;
-import com.wcdk.r2dbc.core.executor.ParameterBinder;
+import com.wcdk.r2dbc.execution.ParameterBinder;
+import com.wcdk.r2dbc.transaction.TransactionalAspect;
 import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -32,6 +33,36 @@ class WcdkR2dbcAutoConfigurationTests {
                     assertThat(context).hasSingleBean(ConnectionFactory.class);
                     assertThat(context.getBean(ConnectionFactory.class)).isSameAs(supplied);
                 });
+    }
+
+    @Test
+    void disablesWcdkTransactionalAspectByDefault() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+
+        runner.withBean(ConnectionFactory.class, () -> connectionFactory)
+                .run(context -> assertThat(context).doesNotHaveBean(TransactionalAspect.class));
+    }
+
+    @Test
+    void enablesWcdkTransactionalAspectOnlyWhenExplicitlyConfigured() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+
+        runner.withPropertyValues("wcdk.r2dbc.transaction.aspect-enabled=true")
+                .withBean(ConnectionFactory.class, () -> connectionFactory)
+                .run(context -> assertThat(context).hasSingleBean(TransactionalAspect.class));
+    }
+
+    @Test
+    void backsOffWcdkTransactionalAspectWhenSpringAdvisorExists() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+
+        runner.withPropertyValues("wcdk.r2dbc.transaction.aspect-enabled=true")
+                .withBean(ConnectionFactory.class, () -> connectionFactory)
+                .withBean("org.springframework.transaction.config.internalTransactionAdvisor", Object.class, Object::new)
+                .run(context -> assertThat(context).doesNotHaveBean(TransactionalAspect.class));
     }
 
     @Test

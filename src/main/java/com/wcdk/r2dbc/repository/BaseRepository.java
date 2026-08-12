@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.repository;
 
-import com.wcdk.r2dbc.core.query.QueryWrapper;
+import com.wcdk.r2dbc.query.QueryWrapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import reactor.core.publisher.Flux;

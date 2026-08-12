@@ -341,6 +341,7 @@ public class UserService {
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE repository PUBLIC "-//WCDK/wcdk-r2dbc" "wcdk-r2dbc-repository.dtd">
 <repository namespace="com.example.repository.UserRepository">
     <select id="findActiveByEmail" resultType="com.example.User">
         SELECT id, user_name, email, status

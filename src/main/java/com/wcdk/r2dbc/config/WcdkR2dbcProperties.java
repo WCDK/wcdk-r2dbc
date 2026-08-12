@@ -21,6 +21,11 @@ public class WcdkR2dbcProperties {
     /** Enables optional Micrometer observations when an ObservationRegistry bean is available. */
     private boolean observabilityEnabled;
 
+    /**
+     * 事务相关配置。
+     */
+    private Transaction transaction = new Transaction();
+
     private boolean snowflakeId;
 
     private boolean quoteIdentifier = true;
@@ -32,6 +37,20 @@ public class WcdkR2dbcProperties {
     private Object logicNotDeleteValue = 0;
 
     private Object logicDeleteValue = 1;
+
+    /**
+     * WCDK 事务扩展配置。
+     *
+     * @author wcdk
+     */
+    @Data
+    public static class Transaction {
+
+        /**
+         * 是否启用 WCDK 自定义事务切面。默认关闭，优先使用 Spring 标准事务 Advisor。
+         */
+        private boolean aspectEnabled;
+    }
 
     /**
      * 数据库Schema初始化配置

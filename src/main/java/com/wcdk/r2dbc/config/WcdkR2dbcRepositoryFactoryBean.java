@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.config;
 
-import com.wcdk.r2dbc.core.RepositoryProxyFactory;
+import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.FactoryBean;
 

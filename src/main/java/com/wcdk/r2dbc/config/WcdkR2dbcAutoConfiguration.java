@@ -1,23 +1,23 @@
 package com.wcdk.r2dbc.config;
 
 import com.wcdk.r2dbc.R2dbcUtil;
-import com.wcdk.r2dbc.core.RepositoryOperations;
-import com.wcdk.r2dbc.core.RepositoryProxyFactory;
-import com.wcdk.r2dbc.core.datasource.R2dbcDataSourceRouter;
-import com.wcdk.r2dbc.core.executor.ParameterBinder;
-import com.wcdk.r2dbc.core.executor.R2dbcRowMapper;
-import com.wcdk.r2dbc.core.executor.R2dbcValueConverter;
-import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
-import com.wcdk.r2dbc.core.executor.SqlExecutionObserver;
-import com.wcdk.r2dbc.core.executor.MicrometerSqlExecutionObserver;
-import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptor;
-import com.wcdk.r2dbc.core.interceptor.ReactiveSqlLifecycleInterceptor;
-import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
-import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
-import com.wcdk.r2dbc.core.transaction.TransactionManager;
-import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
-import com.wcdk.r2dbc.core.transaction.TransactionalAspect;
-import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
+import com.wcdk.r2dbc.repository.RepositoryOperations;
+import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
+import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
+import com.wcdk.r2dbc.execution.ParameterBinder;
+import com.wcdk.r2dbc.execution.R2dbcRowMapper;
+import com.wcdk.r2dbc.execution.R2dbcValueConverter;
+import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
+import com.wcdk.r2dbc.execution.SqlExecutionObserver;
+import com.wcdk.r2dbc.execution.MicrometerSqlExecutionObserver;
+import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptor;
+import com.wcdk.r2dbc.execution.lifecycle.ReactiveSqlLifecycleInterceptor;
+import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
+import com.wcdk.r2dbc.execution.log.R2dbcSqlLogger;
+import com.wcdk.r2dbc.transaction.TransactionManager;
+import com.wcdk.r2dbc.transaction.TransactionTemplate;
+import com.wcdk.r2dbc.transaction.TransactionalAspect;
+import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
 import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceAspect;
 import io.r2dbc.pool.ConnectionPool;
@@ -283,7 +283,8 @@ public class WcdkR2dbcAutoConfiguration {
 
     @Bean
     @ConditionalOnClass(name = "org.aspectj.lang.annotation.Aspect")
-    @ConditionalOnMissingBean(TransactionalAspect.class)
+    @ConditionalOnProperty(prefix = "wcdk.r2dbc.transaction", name = "aspect-enabled", havingValue = "true")
+    @ConditionalOnMissingBean(value = TransactionalAspect.class, name = "org.springframework.transaction.config.internalTransactionAdvisor")
     @Role(ROLE_INFRASTRUCTURE)
     public TransactionalAspect transactionalAspect(ReactiveTransactionManager transactionManager) {
         return new TransactionalAspect(transactionManager);

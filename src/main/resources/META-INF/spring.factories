@@ -1,8 +1,8 @@
 org.springframework.data.r2dbc.dialect.DialectResolver$R2dbcDialectProvider=\
-com.wcdk.r2dbc.database.dm.DmR2dbcDialectProvider,\
-com.wcdk.r2dbc.database.postgresql.PostgresR2dbcDialectProvider,\
-com.wcdk.r2dbc.database.mysql.MysqlR2dbcDialectProvider,\
-com.wcdk.r2dbc.database.oracle.OracleR2dbcDialectProvider
+com.wcdk.r2dbc.database.dm.DmSpringDialectProvider,\
+com.wcdk.r2dbc.database.postgresql.PostgresSpringDialectProvider,\
+com.wcdk.r2dbc.database.mysql.MysqlSpringDialectProvider,\
+com.wcdk.r2dbc.database.oracle.OracleSpringDialectProvider
 org.springframework.r2dbc.core.binding.BindMarkersFactoryResolver$BindMarkerFactoryProvider=\
 com.wcdk.r2dbc.database.dm.DmBindMarkersFactoryProvider,\
 com.wcdk.r2dbc.database.postgresql.PostgresBindMarkersFactoryProvider,\

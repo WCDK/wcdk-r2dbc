@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.execution;
 
-import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
+import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import org.springframework.r2dbc.core.DatabaseClient;
