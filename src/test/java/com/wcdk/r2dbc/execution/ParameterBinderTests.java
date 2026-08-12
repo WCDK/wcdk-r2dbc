@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Date;
+import java.sql.Timestamp;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,16 +62,24 @@ class ParameterBinderTests {
     }
 
     @Test
-    void normalizesJavaTimeValuesForJdbcDrivers() {
+    void defaultConverterKeepsR2dbcNativeJavaTypes() {
         Instant instant = Instant.parse("2026-08-11T04:05:06Z");
 
-        assertThat(com.wcdk.r2dbc.dialect.DmDatabaseDialect.INSTANCE.normalizeParameterValue(instant)).isEqualTo(Date.from(instant));
-        assertThat(com.wcdk.r2dbc.dialect.DmDatabaseDialect.INSTANCE.normalizeParameterValue(LocalDateTime.of(2026, 8, 11, 12, 30)))
-                .isInstanceOf(java.sql.Timestamp.class);
-        assertThat(com.wcdk.r2dbc.dialect.DmDatabaseDialect.INSTANCE.normalizeParameterValue(LocalDate.of(2026, 8, 11)))
-                .isInstanceOf(java.sql.Date.class);
+        assertThat(new DefaultParameterValueConverter().convert(instant)).isSameAs(instant);
+        assertThat(new DefaultParameterValueConverter().convert(LocalDateTime.of(2026, 8, 11, 12, 30)))
+                .isInstanceOf(LocalDateTime.class);
     }
+
     @Test
+    void dmConverterOnlyAdaptsDmCompatibilityTypes() {
+        Instant instant = Instant.parse("2026-08-11T04:05:06Z");
+
+        assertThat(new DmParameterValueConverter().convert(instant)).isEqualTo(Date.from(instant));
+        assertThat(new DmParameterValueConverter().convert(LocalDateTime.of(2026, 8, 11, 12, 30)))
+                .isInstanceOf(Timestamp.class);
+        assertThat(new DmParameterValueConverter().convert(LocalDate.of(2026, 8, 11)))
+                .isInstanceOf(java.sql.Date.class);
+    }    @Test
     void scannerIgnoresCastsQuotedTextAndComments() {
         String sql = "SELECT value::text, ':quoted' -- :line\n/* :block */ WHERE id = :id";
         DatabaseClient client = mock(DatabaseClient.class);

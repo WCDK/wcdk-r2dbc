@@ -1,18 +1,9 @@
 package com.wcdk.r2dbc.execution;
 
-import com.wcdk.r2dbc.dialect.DatabaseDialect;
-import com.wcdk.r2dbc.dialect.PostgreSqlDatabaseDialect;
 
 import org.springframework.r2dbc.core.DatabaseClient;
 import io.r2dbc.spi.Parameters;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.util.Date;
-import java.sql.Time;
-import java.sql.Timestamp;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -26,14 +17,19 @@ import java.util.Set;
  **/
 public class ParameterBinder {
 
-    private final DatabaseDialect dialect;
+    private final ParameterValueConverter parameterValueConverter;
 
     public ParameterBinder() {
-        this(PostgreSqlDatabaseDialect.INSTANCE);
+        this(new DefaultParameterValueConverter());
     }
 
-    public ParameterBinder(DatabaseDialect dialect) {
-        this.dialect = java.util.Objects.requireNonNull(dialect);
+    /***
+     * 使用指定参数转换器创建绑定器。
+     * @author wcdk
+     * @param parameterValueConverter 参数转换器
+     */
+    public ParameterBinder(ParameterValueConverter parameterValueConverter) {
+        this.parameterValueConverter = java.util.Objects.requireNonNull(parameterValueConverter);
     }
 
     /**
@@ -122,16 +118,16 @@ public class ParameterBinder {
             if (parameter.databaseType() != null) {
                 return spec.bind(index, parameter.value() == null
                         ? Parameters.in(parameter.databaseType())
-                        : Parameters.in(parameter.databaseType(), dialect.normalizeParameterValue(parameter.value())));
+                        : Parameters.in(parameter.databaseType(), parameterValueConverter.convert(parameter.value())));
             }
             return parameter.value() == null
                     ? spec.bindNull(index, parameter.javaType())
-                    : spec.bind(index, dialect.normalizeParameterValue(parameter.value()));
+                    : spec.bind(index, parameterValueConverter.convert(parameter.value()));
         }
         if (value == null) {
             throw new IllegalArgumentException("索引 " + index + " 处的空SQL参数需要使用SqlParameter.nullOf(type)");
         }
-        return spec.bind(index, dialect.normalizeParameterValue(value));
+        return spec.bind(index, parameterValueConverter.convert(value));
     }
 
     /**
@@ -148,17 +144,17 @@ public class ParameterBinder {
             if (parameter.databaseType() != null) {
                 return spec.bind(identifier, parameter.value() == null
                         ? Parameters.in(parameter.databaseType())
-                        : Parameters.in(parameter.databaseType(), dialect.normalizeParameterValue(parameter.value())));
+                        : Parameters.in(parameter.databaseType(), parameterValueConverter.convert(parameter.value())));
             }
             return parameter.value() == null
                     ? spec.bindNull(identifier, parameter.javaType())
-                    : spec.bind(identifier, dialect.normalizeParameterValue(parameter.value()));
+                    : spec.bind(identifier, parameterValueConverter.convert(parameter.value()));
         }
         if (value == null) {
             throw new IllegalArgumentException("空SQL参数 '" + identifier
                     + "' 需要使用SqlParameter.nullOf(type)");
         }
-        return spec.bind(identifier, dialect.normalizeParameterValue(value));
+        return spec.bind(identifier, parameterValueConverter.convert(value));
     }
 
     private String requireSql(String sql) {

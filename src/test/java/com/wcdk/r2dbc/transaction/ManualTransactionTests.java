@@ -102,8 +102,14 @@ class ManualTransactionTests {
                         .flatMap(point -> transaction.releaseSavepoint(point).thenReturn(point)))
                 .assertNext(point -> assertThat(point.isValid()).isFalse())
                 .verifyComplete();
-    }
 
+        // 验证保存点操作全部通过 R2DBC SPI 执行，不拼接 SQL。
+        verify(connection).createSavepoint("first");
+        verify(connection).createSavepoint("second");
+        verify(connection).rollbackTransactionToSavepoint("first");
+        verify(connection).createSavepoint("release_me");
+        verify(connection).releaseSavepoint("release_me");
+    }
     private Connection connection() {
         Connection connection = mock(Connection.class);
         when(connection.beginTransaction(any(TransactionDefinition.class))).thenReturn(Mono.empty());

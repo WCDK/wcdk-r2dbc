@@ -122,12 +122,6 @@ public class R2dbcTransactionOperations {
      * @param <T>    返回类型
      * @return 操作结果
      */
-    public <T> Mono<T> executeInReadOnlyTransaction(Function<Connection, Publisher<T>> action) {
-        if (transactionTemplate == null) {
-            throw new IllegalStateException("TransactionTemplate未配置");
-        }
-        return transactionTemplate.executeReadOnly(action);
-    }
 
     /**
      * 获取事务模板。

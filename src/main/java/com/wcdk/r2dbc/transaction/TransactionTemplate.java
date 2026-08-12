@@ -29,9 +29,6 @@ public class TransactionTemplate {
         return executeMono(transactionManager.createTransaction(transactionName), action);
     }
 
-    public <T> Mono<T> executeReadOnly(Function<Connection, Publisher<T>> action) {
-        return executeMono(transactionManager.createReadOnlyTransaction(), action);
-    }
 
     private <T> Mono<T> executeMono(Mono<ManualTransaction> resource,
                                     Function<Connection, Publisher<T>> action) {

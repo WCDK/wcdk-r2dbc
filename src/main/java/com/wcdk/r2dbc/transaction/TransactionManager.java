@@ -30,9 +30,6 @@ public class TransactionManager {
                         : transactionName));
     }
 
-    public Mono<ManualTransaction> createReadOnlyTransaction() {
-        return createTransaction(transaction -> transaction.setReadOnly(true));
-    }
 
     public Mono<ManualTransaction> createTransaction(int timeoutSeconds) {
         return createTransaction(transaction -> transaction.setTimeout(timeoutSeconds));

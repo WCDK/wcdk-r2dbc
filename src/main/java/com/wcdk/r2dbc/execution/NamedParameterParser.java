@@ -3,50 +3,123 @@ package com.wcdk.r2dbc.execution;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/***
- * SQL named parameter parser.
+/**
+ * Unified SQL named-parameter lexer.
+ *
  * @author wcdk
-***/
+ */
 public final class NamedParameterParser {
+
     private NamedParameterParser() {
     }
 
     public static Set<String> parse(String sql) {
         Set<String> names = new LinkedHashSet<>();
-        if (sql == null || sql.isEmpty()) return names;
-        boolean single = false, quoted = false, backtick = false, line = false, block = false;
-        String dollar = null;
+        if (sql == null || sql.isEmpty()) {
+            return names;
+        }
+
+        LexerState state = LexerState.NORMAL;
+        String delimiter = null;
         for (int i = 0; i < sql.length(); i++) {
             char ch = sql.charAt(i);
             char next = i + 1 < sql.length() ? sql.charAt(i + 1) : 0;
-            if (line) { if (ch == '\n' || ch == '\r') line = false; continue; }
-            if (block) { if (ch == '*' && next == '/') { block = false; i++; } continue; }
-            if (dollar != null) {
-                if (sql.startsWith(dollar, i)) { i += dollar.length() - 1; dollar = null; }
+
+            if (state == LexerState.LINE_COMMENT) {
+                if (ch == '\n' || ch == '\r') state = LexerState.NORMAL;
                 continue;
             }
-            if (!single && !quoted && !backtick) {
-                if (ch == '-' && next == '-') { line = true; i++; continue; }
-                if (ch == '/' && next == '*') { block = true; i++; continue; }
-                if (ch == '$') {
-                    int end = sql.indexOf('$', i + 1);
-                    if (end > i && sql.substring(i + 1, end).chars().allMatch(c -> Character.isLetterOrDigit(c) || c == '_')) {
-                        dollar = sql.substring(i, end + 1); i = end; continue;
-                    }
+            if (state == LexerState.BLOCK_COMMENT) {
+                if (ch == '*' && next == '/') { state = LexerState.NORMAL; i++; }
+                continue;
+            }
+            if (state == LexerState.POSTGRES_DOLLAR_QUOTE || state == LexerState.ORACLE_Q_QUOTE) {
+                if (delimiter != null && sql.startsWith(delimiter, i)) {
+                    i += delimiter.length() - 1;
+                    state = LexerState.NORMAL;
+                    delimiter = null;
+                }
+                continue;
+            }
+            if (state == LexerState.SINGLE_QUOTE) {
+                if (ch == '\'' && next == '\'') i++;
+                else if (ch == '\'') state = LexerState.NORMAL;
+                continue;
+            }
+            if (state == LexerState.DOUBLE_QUOTE) {
+                if (ch == '"' && next == '"') i++;
+                else if (ch == '"') state = LexerState.NORMAL;
+                continue;
+            }
+            if (state == LexerState.BACKTICK) {
+                if (ch == '`' && next == '`') i++;
+                else if (ch == '`') state = LexerState.NORMAL;
+                continue;
+            }
+
+            if (ch == '-' && next == '-') { state = LexerState.LINE_COMMENT; i++; continue; }
+            if (ch == '/' && next == '*') { state = LexerState.BLOCK_COMMENT; i++; continue; }
+            if (ch == '\'') { state = LexerState.SINGLE_QUOTE; continue; }
+            if (ch == '"') { state = LexerState.DOUBLE_QUOTE; continue; }
+            if (ch == '`') { state = LexerState.BACKTICK; continue; }
+            if (ch == '$') {
+                String tag = postgresDollarDelimiter(sql, i);
+                if (tag != null) {
+                    state = LexerState.POSTGRES_DOLLAR_QUOTE;
+                    delimiter = tag;
+                    i += tag.length() - 1;
+                    continue;
                 }
             }
-            if (ch == '\'' && !quoted && !backtick) { if (single && next == '\'') i++; else single = !single; continue; }
-            if (ch == '"' && !single && !backtick) { quoted = !quoted; continue; }
-            if (ch == '`' && !single && !quoted) { backtick = !backtick; continue; }
-            if (single || quoted || backtick || ch != ':' || !start(next)) continue;
+            if (ch == 'q' && next == '\'' && i + 2 < sql.length()) {
+                char close = oracleQuoteClose(sql.charAt(i + 2));
+                if (close != 0) {
+                    state = LexerState.ORACLE_Q_QUOTE;
+                    delimiter = String.valueOf(close) + "'";
+                    i += 2;
+                    continue;
+                }
+            }
+            if (ch != ':' || !isParameterStart(next)) continue;
             if ((i > 0 && sql.charAt(i - 1) == ':') || next == '=') continue;
             int end = i + 2;
-            while (end < sql.length() && part(sql.charAt(end))) end++;
-            names.add(sql.substring(i + 1, end)); i = end - 1;
+            while (end < sql.length() && isParameterPart(sql.charAt(end))) end++;
+            names.add(sql.substring(i + 1, end));
+            i = end - 1;
         }
         return names;
     }
 
-    private static boolean start(char ch) { return Character.isLetter(ch) || ch == '_'; }
-    private static boolean part(char ch) { return Character.isLetterOrDigit(ch) || ch == '_'; }
+    private static String postgresDollarDelimiter(String sql, int index) {
+        int end = sql.indexOf('$', index + 1);
+        if (end <= index) return null;
+        for (int i = index + 1; i < end; i++) {
+            char ch = sql.charAt(i);
+            if (!(Character.isLetterOrDigit(ch) || ch == '_')) return null;
+        }
+        return sql.substring(index, end + 1);
+    }
+
+    private static char oracleQuoteClose(char open) {
+        return switch (open) {
+            case '[' -> ']';
+            case '(' -> ')';
+            case '{' -> '}';
+            case '<' -> '>';
+            default -> 0;
+        };
+    }
+
+    private static boolean isParameterStart(char ch) {
+        return Character.isLetter(ch) || ch == '_';
+    }
+
+    private static boolean isParameterPart(char ch) {
+        return Character.isLetterOrDigit(ch) || ch == '_';
+    }
+
+    private enum LexerState {
+        NORMAL, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, LINE_COMMENT, BLOCK_COMMENT,
+        POSTGRES_DOLLAR_QUOTE, ORACLE_Q_QUOTE
+    }
 }

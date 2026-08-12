@@ -244,9 +244,6 @@ public class R2dbcUtil {
         return transactionOperations.executeInTransaction(transactionName, action);
     }
 
-    public <T> Mono<T> executeInReadOnlyTransaction(Function<Connection, Publisher<T>> action) {
-        return transactionOperations.executeInReadOnlyTransaction(action);
-    }
 
     public TransactionTemplate getTransactionTemplate() {
         return transactionOperations.getTransactionTemplate();

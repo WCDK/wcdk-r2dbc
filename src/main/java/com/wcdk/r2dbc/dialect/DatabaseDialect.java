@@ -25,9 +25,6 @@ public interface DatabaseDialect {
 
     String renderCurrentTimestamp();
 
-    default Object normalizeParameterValue(Object value) {
-        return value;
-    }
 
     default boolean supportsSavepoint() {
         return false;

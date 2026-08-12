@@ -5,7 +5,14 @@ import com.wcdk.r2dbc.repository.RepositoryOperations;
 import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;
+import com.wcdk.r2dbc.execution.ParameterValueConverter;
+import com.wcdk.r2dbc.execution.DefaultParameterValueConverter;
+import com.wcdk.r2dbc.execution.DmParameterValueConverter;
+import com.wcdk.r2dbc.execution.PostgreSqlParameterValueConverter;
+import com.wcdk.r2dbc.execution.MysqlParameterValueConverter;
+import com.wcdk.r2dbc.execution.OracleParameterValueConverter;
 import com.wcdk.r2dbc.dialect.DatabaseDialects;
+import com.wcdk.r2dbc.dialect.DatabaseType;
 import com.wcdk.r2dbc.execution.R2dbcRowMapper;
 import com.wcdk.r2dbc.execution.R2dbcValueConverter;
 import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
@@ -18,6 +25,7 @@ import com.wcdk.r2dbc.execution.log.R2dbcSqlLogger;
 import com.wcdk.r2dbc.transaction.TransactionManager;
 import com.wcdk.r2dbc.transaction.TransactionTemplate;
 import com.wcdk.r2dbc.transaction.TransactionalAspect;
+import com.wcdk.r2dbc.transaction.WcdkReactiveTransactionManager;
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
 import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceAspect;
@@ -43,7 +51,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.r2dbc.connection.R2dbcTransactionManager;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.ReactiveTransactionManager;
 import org.springframework.transaction.reactive.TransactionalOperator;
@@ -188,8 +195,8 @@ public class WcdkR2dbcAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(ReactiveTransactionManager.class)
     @Role(ROLE_INFRASTRUCTURE)
-    public R2dbcTransactionManager r2dbcTransactionManager(ConnectionFactory connectionFactory) {
-        return new R2dbcTransactionManager(connectionFactory);
+    public WcdkReactiveTransactionManager r2dbcTransactionManager(ConnectionFactory connectionFactory) {
+        return new WcdkReactiveTransactionManager(connectionFactory);
     }
 
     @Bean
@@ -229,7 +236,15 @@ public class WcdkR2dbcAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public ParameterBinder parameterBinder(ConnectionFactory connectionFactory) {
-        return new ParameterBinder(DatabaseDialects.get(connectionFactory));
+        DatabaseType type = DatabaseDialects.get(connectionFactory).databaseType();
+        ParameterValueConverter converter = switch (type) {
+            case DM -> new DmParameterValueConverter();
+            case POSTGRESQL -> new PostgreSqlParameterValueConverter();
+            case MYSQL -> new MysqlParameterValueConverter();
+            case ORACLE -> new OracleParameterValueConverter();
+            default -> new DefaultParameterValueConverter();
+        };
+        return new ParameterBinder(converter);
     }
 
     @Bean
