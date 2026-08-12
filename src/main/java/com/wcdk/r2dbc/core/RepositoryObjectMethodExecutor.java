@@ -4,7 +4,7 @@ package com.wcdk.r2dbc.core;
  * Repository 对象方法执行器。
  * @author wcdk
  */
-final class RepositoryObjectMethodExecutor {
+final class RepositoryObjectMethodExecutor implements RepositoryMethodExecutor {
     private final Class<?> repositoryInterface;
     private final com.wcdk.r2dbc.core.metadata.RepositoryMetadata metadata;
 
@@ -23,4 +23,14 @@ final class RepositoryObjectMethodExecutor {
     }
 
 
+
+    @Override
+    public boolean supports(RepositoryMethodPlan plan) {
+        return plan.kind() == RepositoryMethodPlan.Kind.OBJECT;
+    }
+
+    @Override
+    public Object execute(RepositoryMethodPlan plan, Object[] args, reactor.util.context.ContextView context, Object proxy) {
+        return execute(new RepositoryInvocation(plan, proxy, args));
+    }
 }

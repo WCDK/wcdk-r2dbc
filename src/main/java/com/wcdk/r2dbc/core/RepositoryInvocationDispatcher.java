@@ -14,12 +14,13 @@ final class RepositoryInvocationDispatcher {
         this.executors = List.copyOf(executors);
     }
 
-    Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context) {
+    Object execute(RepositoryPlan typedPlan, Object[] args, ContextView context, Object proxy) {
+        RepositoryMethodPlan plan = typedPlan.legacy();
         return executors.stream()
                 .filter(executor -> executor.supports(plan))
                 .findFirst()
                 .orElseThrow(() -> new UnsupportedOperationException(
                         "没有执行器支持该Repository方法: " + plan.method().toGenericString()))
-                .execute(plan, args, context);
+                .execute(plan, args, context, proxy);
     }
 }

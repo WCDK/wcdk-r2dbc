@@ -11,7 +11,6 @@ import com.wcdk.r2dbc.core.executor.R2dbcUpdateOperations;
 import com.wcdk.r2dbc.core.executor.SqlLifecycleExecutor;
 import com.wcdk.r2dbc.core.interceptor.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.core.log.R2dbcSqlLogger;
-import com.wcdk.r2dbc.core.RepositoryOperations;
 import com.wcdk.r2dbc.core.transaction.ManualTransaction;
 import com.wcdk.r2dbc.core.transaction.TransactionManager;
 import com.wcdk.r2dbc.core.transaction.TransactionTemplate;
@@ -146,18 +145,8 @@ public class R2dbcUtil {
 
     // ==================== 委托方法：查询执行 ====================
 
-    public RepositoryOperations repositoryOperations() {
-        return new RepositoryOperations() {
-            @Override public DatabaseClient databaseClient() { return R2dbcUtil.this.databaseClient; }
-            @Override public SqlLifecycleExecutor lifecycleExecutor() { return R2dbcUtil.this.lifecycleExecutor; }
-            @Override public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.queryWithoutLifecycle(sql, parameters, mapper); }
-            @Override public <T> Mono<T> queryOneWithoutLifecycle(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.queryOneWithoutLifecycle(sql, parameters, mapper); }
-            @Override public <T> Flux<T> query(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.query(sql, parameters, mapper); }
-            @Override public <T> Mono<T> queryOne(String sql, Map<?, ?> parameters, BiFunction<Row, RowMetadata, T> mapper) { return R2dbcUtil.this.queryOne(sql, parameters, mapper); }
-            @Override public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) { return R2dbcUtil.this.updateWithoutLifecycle(sql, parameters); }
-            @Override public <T> T map(Row row, Class<T> entityClass) { return R2dbcUtil.this.map(row, entityClass); }
-            @Override public Object convertValue(Object value, Class<?> targetType) { return R2dbcUtil.this.convertValue(value, targetType); }
-        };
+    SqlLifecycleExecutor getLifecycleExecutorInternal() {
+        return lifecycleExecutor;
     }
 
     DatabaseClient databaseClient() {

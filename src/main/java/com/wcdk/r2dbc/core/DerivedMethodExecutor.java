@@ -20,7 +20,7 @@ final class DerivedMethodExecutor implements RepositoryMethodExecutor {
     }
 
     @Override
-    public Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context) {
-        return delegate.apply(plan, args, context);
+    public Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context, Object proxy) {
+        return delegate.apply(plan, args, context, proxy);
     }
 }

@@ -8,10 +8,10 @@ import reactor.util.context.ContextView;
  */
 @FunctionalInterface
 interface RepositoryPlanExecutor {
-    Object apply(RepositoryMethodPlan plan, Object[] args, ContextView context);
+    Object apply(RepositoryMethodPlan plan, Object[] args, ContextView context, Object proxy);
 }
 
 interface RepositoryMethodExecutor {
     boolean supports(RepositoryMethodPlan plan);
-    Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context);
+    Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context, Object proxy);
 }

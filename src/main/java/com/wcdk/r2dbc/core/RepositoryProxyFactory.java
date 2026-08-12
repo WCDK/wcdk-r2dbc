@@ -1,7 +1,6 @@
 package com.wcdk.r2dbc.core;
 
 import com.wcdk.r2dbc.BaseRepository;
-import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.core.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.core.xml.RepositoryXmlRegistry;
@@ -21,7 +20,7 @@ import java.util.Map;
  **/
 public class RepositoryProxyFactory {
 
-    private final R2dbcUtil r2dbcUtil;
+    private final RepositoryOperations repositoryOperations;
 
     private final WcdkR2dbcProperties properties;
 
@@ -29,8 +28,8 @@ public class RepositoryProxyFactory {
 
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
-    public RepositoryProxyFactory(R2dbcUtil r2dbcUtil, WcdkR2dbcProperties properties, RepositoryXmlRegistry repositoryXmlRegistry) {
-        this.r2dbcUtil = r2dbcUtil;
+    public RepositoryProxyFactory(RepositoryOperations repositoryOperations, WcdkR2dbcProperties properties, RepositoryXmlRegistry repositoryXmlRegistry) {
+        this.repositoryOperations = repositoryOperations;
         this.properties = properties;
         this.repositoryXmlRegistry = repositoryXmlRegistry;
         this.snowflakeIdGenerator = properties.isSnowflakeId() ? new SnowflakeIdGenerator() : null;
@@ -47,7 +46,7 @@ public class RepositoryProxyFactory {
         ProxyFactory proxyFactory = new ProxyFactory();
         proxyFactory.setInterfaces(repositoryInterface);
         proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(
-                r2dbcUtil, properties, metadata, repositoryInterface, repositoryXmlRegistry,
+                repositoryOperations, properties, metadata, repositoryInterface, repositoryXmlRegistry,
                 snowflakeIdGenerator, methodPlans));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
     }

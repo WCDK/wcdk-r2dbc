@@ -15,7 +15,15 @@ final class RepositoryMethodPlanRegistry {
         this.plans = Map.copyOf(Objects.requireNonNull(plans, "plans"));
     }
 
-    RepositoryMethodPlan get(Method method) {
-        return plans.get(method);
+    RepositoryPlan get(Method method) {
+        RepositoryMethodPlan plan = plans.get(method);
+        if (plan == null) return null;
+        return switch (plan.kind()) {
+            case OBJECT -> new ObjectMethodPlan(plan);
+            case CRUD -> new CrudMethodPlan(plan);
+            case DERIVED -> new DerivedQueryPlan(plan);
+            case XML -> new XmlStatementPlan(plan);
+            case UNSUPPORTED -> new UnsupportedMethodPlan(plan);
+        };
     }
 }

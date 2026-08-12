@@ -1,6 +1,7 @@
 package com.wcdk.r2dbc.config;
 
 import com.wcdk.r2dbc.R2dbcUtil;
+import com.wcdk.r2dbc.core.RepositoryOperations;
 import com.wcdk.r2dbc.core.RepositoryProxyFactory;
 import com.wcdk.r2dbc.core.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.core.executor.ParameterBinder;
@@ -296,12 +297,18 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(RepositoryOperations.class)
+    public RepositoryOperations repositoryOperations(R2dbcUtil r2dbcUtil) {
+        return new com.wcdk.r2dbc.R2dbcRepositoryOperations(r2dbcUtil);
+    }
+
+    @Bean
     @ConditionalOnMissingBean(RepositoryProxyFactory.class)
     @Role(ROLE_INFRASTRUCTURE)
-    public RepositoryProxyFactory repositoryProxyFactory(R2dbcUtil r2dbcUtil,
+    public RepositoryProxyFactory repositoryProxyFactory(RepositoryOperations repositoryOperations,
                                                            WcdkR2dbcProperties properties,
                                                            RepositoryXmlRegistry repositoryXmlRegistry) {
-        return new RepositoryProxyFactory(r2dbcUtil, properties, repositoryXmlRegistry);
+        return new RepositoryProxyFactory(repositoryOperations, properties, repositoryXmlRegistry);
     }
 
     @Bean
