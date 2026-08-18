@@ -98,7 +98,9 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     }
 
     private boolean isQueryMethod(String methodName) {
-        return methodName.equals("findAll") || methodName.startsWith("select") || methodName.equals("exists");
+        return methodName.equals("findAll")
+                || (methodName.startsWith("select") && !methodName.equals("selectById"))
+                || methodName.equals("exists");
     }
     Object executeCrudPlan(RepositoryMethodPlan plan, Object[] arguments, ContextView context) {
         Method method = plan.method();
@@ -119,10 +121,6 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
             case "exists" -> exists(querySqlBuilder.queryWrapper(arguments), context);
             default -> throw new UnsupportedOperationException("不支持的 CRUD 方法: " + methodName);
         };
-    }
-
-    private Object typedNull(Object value, Class<?> javaType) {
-        return value == null ? SqlParameter.nullOf(javaType == null ? Object.class : javaType) : value;
     }
 
     private Number numberValue(Row row) {
@@ -156,13 +154,20 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                         }
                     }
                     Map<String, Object> parameters = new LinkedHashMap<>();
-                    String fields = metadata.columns().stream().map(FieldColumn::name).collect(Collectors.joining(", "));
-                    String values = metadata.columns().stream()
-                            .peek(column -> parameters.put(column.field().getName(),
-                                    typedNull(fieldValue(column, entity), column.field().getType())))
-                            .map(column -> ":" + column.field().getName())
-                            .collect(Collectors.joining(", "));
-                    String sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
+                    List<FieldColumn> insertColumns = metadata.columns().stream()
+                            .filter(column -> fieldValue(column, entity) != null)
+                            .toList();
+                    String sql;
+                    if (insertColumns.isEmpty()) {
+                        sql = "INSERT INTO " + metadata.tableName() + " DEFAULT VALUES";
+                    } else {
+                        String fields = insertColumns.stream().map(FieldColumn::name).collect(Collectors.joining(", "));
+                        String values = insertColumns.stream()
+                                .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
+                                .map(column -> ":" + column.field().getName())
+                                .collect(Collectors.joining(", "));
+                        sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
+                    }
 
                     context.setSql(sql);
                     context.setParameters(parameters);
@@ -174,9 +179,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
 
     private Mono<Long> deleteById(Object id) {
         FieldColumn idColumn = metadata.requireIdColumn();
+        Object deleteId = normalizeDeleteId(id, idColumn);
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("deleteById"), repositoryInterface, new Object[]{id});
+                findMethod("deleteById"), repositoryInterface, new Object[]{deleteId});
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
@@ -189,12 +195,14 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                                 + " WHERE " + idColumn.name() + " = :id"
                                 + querySqlBuilder.logicNotDeleteSql(" AND ");
                         parameters = Map.of(
-                                "id", id,
-                                "logicDeleteValue", properties.getLogicDeleteValue(),
-                                "logicNotDeleteValue", properties.getLogicNotDeleteValue());
+                                "id", deleteId,
+                                "logicDeleteValue", LogicDeleteValueConverter.convert(
+                                        properties.getLogicDeleteValue(), logicDeleteColumn.field().getType()),
+                                "logicNotDeleteValue", LogicDeleteValueConverter.convert(
+                                        properties.getLogicNotDeleteValue(), logicDeleteColumn.field().getType()));
                     } else {
                         sql = "DELETE FROM " + metadata.tableName() + " WHERE " + idColumn.name() + " = :id";
-                        parameters = Map.of("id", id);
+                        parameters = Map.of("id", deleteId);
                     }
 
                     context.setSql(sql);
@@ -202,6 +210,20 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
                 () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters()));
+    }
+
+    /**
+     * 兼容 deleteById(entity) 方法引用，实体参数自动提取其 @Id 字段。
+     *
+     * @param value 删除参数，可以是主键值或实体对象
+     * @param idColumn 实体主键字段
+     * @return SQL 使用的主键值
+     */
+    private Object normalizeDeleteId(Object value, FieldColumn idColumn) {
+        if (value == null || !metadata.entityClass().isInstance(value)) {
+            return value;
+        }
+        return fieldValue(idColumn, value);
     }
 
     private Mono<Long> updateById(Object entity) {
@@ -226,7 +248,8 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                     Object id = fieldValue(idColumn, entity);
                     parameters.put("id", id);
                     if (metadata.logicDeleteColumn() != null) {
-                        parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
+                        parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(
+                                properties.getLogicNotDeleteValue(), metadata.logicDeleteColumn().field().getType()));
                     }
                     String sql = "UPDATE " + metadata.tableName()
                             + " SET " + setSql
@@ -254,7 +277,8 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                     Map<String, Object> parameters = new LinkedHashMap<>();
                     parameters.put("id", id);
                     if (metadata.logicDeleteColumn() != null) {
-                        parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
+                        parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(
+                                properties.getLogicNotDeleteValue(), metadata.logicDeleteColumn().field().getType()));
                     }
 
                     context.setSql(sql);

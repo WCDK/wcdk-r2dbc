@@ -1,7 +1,6 @@
 package com.wcdk.r2dbc.repository;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 
-import com.wcdk.r2dbc.BaseRepository;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
@@ -32,12 +31,14 @@ class RepositoryMethodPlanCompilerTests {
         Method derived = UserRepository.class.getMethod("findByName", String.class);
         Method unsupported = UserRepository.class.getMethod("custom", String.class);
         Method insert = BaseRepository.class.getMethod("insert", Object.class);
+        Method selectById = BaseRepository.class.getMethod("selectById", Object.class);
         Method toString = Object.class.getMethod("toString");
         assertThat(plans.get(derived).kind()).isEqualTo(RepositoryMethodPlan.Kind.DERIVED);
         assertThat(plans.get(derived).statementId())
                 .isEqualTo(UserRepository.class.getName() + ".findByName");
         assertThat(plans.get(unsupported).kind()).isEqualTo(RepositoryMethodPlan.Kind.UNSUPPORTED);
         assertThat(plans.get(insert).kind()).isEqualTo(RepositoryMethodPlan.Kind.CRUD);
+        assertThat(plans.get(selectById).kind()).isEqualTo(RepositoryMethodPlan.Kind.CRUD);
         assertThat(plans.get(toString).kind()).isEqualTo(RepositoryMethodPlan.Kind.OBJECT);
         assertThatThrownByMutation(plans, derived);
         assertThat(plans.get(derived).statementDefinition().kind())

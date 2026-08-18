@@ -558,7 +558,9 @@ public class CustomMethodResolver {
     }
 
     private Object typed(FieldColumn column, Object value) {
-        return value == null ? SqlParameter.nullOf(column.field().getType()) : value;
+        return value == null
+                ? SqlParameter.nullOf(column.field().getType())
+                : LogicDeleteValueConverter.convert(value, column.field().getType());
     }
 
     // ==================== OrderBy ====================

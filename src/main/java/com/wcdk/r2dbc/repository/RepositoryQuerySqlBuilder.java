@@ -69,7 +69,8 @@ final class RepositoryQuerySqlBuilder {
         if (metadata.logicDeleteColumn() != null && !sql.contains(metadata.logicDeleteColumn().name())) {
             sql = sql.isBlank() ? " WHERE " : sql + " AND ";
             sql += metadata.logicDeleteColumn().name() + " = :logicNotDeleteValue";
-            parameters.put("logicNotDeleteValue", properties.getLogicNotDeleteValue());
+            parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(
+                    properties.getLogicNotDeleteValue(), metadata.logicDeleteColumn().field().getType()));
         }
         return new SqlWhere(sql, parameters);
     }

@@ -65,10 +65,10 @@ public final class DynamicSqlSource {
             if (!(child instanceof Element element)) {
                 continue;
             }
-            SqlNode contents = parseChildren(element);
             nodes.add(switch (element.getTagName()) {
-                case "if" -> new IfSqlNode(requiredAttribute(element, "test"), contents);
-                case "where" -> new WhereSqlNode(contents);
+                case "if" -> new IfSqlNode(requiredAttribute(element, "test"), parseChildren(element));
+                case "where" -> new WhereSqlNode(parseChildren(element));
+                case "choose" -> parseChoose(element);
                 case "foreach" -> new ForeachSqlNode(
                         requiredAttribute(element, "collection"),
                         attribute(element, "item", "item"),
@@ -76,13 +76,52 @@ public final class DynamicSqlSource {
                         element.getAttribute("open"),
                         element.getAttribute("separator"),
                         element.getAttribute("close"),
-                        contents);
+                        parseChildren(element));
+                case "when", "otherwise" -> throw new IllegalArgumentException(
+                        "<" + element.getTagName() + "> 必须位于 <choose> 内部");
                 default -> throw new IllegalArgumentException("不支持的动态SQL元素: " + element.getTagName());
             });
         }
         return new MixedSqlNode(nodes);
     }
 
+    /***
+     * 解析 MyBatis 风格的 choose 分支节点。
+     * @author wcdk
+     */
+    private static SqlNode parseChoose(Element chooseElement) {
+        List<ChooseBranch> branches = new ArrayList<>();
+        boolean hasOtherwise = false;
+        NodeList children = chooseElement.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.TEXT_NODE || child.getNodeType() == Node.CDATA_SECTION_NODE) {
+                if (StringUtils.hasText(child.getTextContent())) {
+                    throw new IllegalArgumentException("<choose> 只允许包含 <when> 或 <otherwise>");
+                }
+                continue;
+            }
+            if (!(child instanceof Element branchElement)) {
+                continue;
+            }
+            switch (branchElement.getTagName()) {
+                case "when" -> branches.add(new ChooseBranch(
+                        new IfSqlNode(requiredAttribute(branchElement, "test"), parseChildren(branchElement)), false));
+                case "otherwise" -> {
+                    if (hasOtherwise) {
+                        throw new IllegalArgumentException("<choose> 最多只能包含一个 <otherwise>");
+                    }
+                    hasOtherwise = true;
+                    branches.add(new ChooseBranch(new AlwaysSqlNode(parseChildren(branchElement)), true));
+                }
+                default -> throw new IllegalArgumentException("<choose> 只允许包含 <when> 或 <otherwise>");
+            }
+        }
+        if (branches.isEmpty()) {
+            throw new IllegalArgumentException("<choose> 至少需要包含一个 <when> 或 <otherwise>");
+        }
+        return new ChooseSqlNode(List.copyOf(branches));
+    }
     private static String requiredAttribute(Element element, String name) {
         String value = element.getAttribute(name);
         if (!StringUtils.hasText(value)) {
@@ -149,6 +188,32 @@ public final class DynamicSqlSource {
         }
     }
 
+    private record AlwaysSqlNode(SqlNode contents) implements SqlNode {
+        @Override
+        public void apply(RenderContext context, StringBuilder sql) {
+            contents.apply(context, sql);
+        }
+    }
+
+    private record ChooseBranch(SqlNode node, boolean otherwise) {
+    }
+
+    private record ChooseSqlNode(List<ChooseBranch> branches) implements SqlNode {
+        @Override
+        public void apply(RenderContext context, StringBuilder sql) {
+            for (ChooseBranch branch : branches) {
+                if (branch.otherwise() || matches(branch.node(), context)) {
+                    branch.node().apply(context, sql);
+                    return;
+                }
+            }
+        }
+
+        private boolean matches(SqlNode node, RenderContext context) {
+            return node instanceof IfSqlNode ifNode
+                    && Boolean.TRUE.equals(ifNode.test().getValue(context.evaluationContext(), Boolean.class));
+        }
+    }
     private record WhereSqlNode(SqlNode contents) implements SqlNode {
         @Override
         public void apply(RenderContext context, StringBuilder sql) {

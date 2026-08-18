@@ -28,7 +28,7 @@ final class QuerySpecExecutor implements RepositoryMethodExecutor {
             return false;
         }
         String methodName = plan.method().getName();
-        return methodName.equals("findAll") || methodName.startsWith("select") || methodName.equals("exists");
+        return methodName.equals("findAll") || (methodName.startsWith("select") && !methodName.equals("selectById")) || methodName.equals("exists");
     }
 
     @Override

@@ -2,7 +2,7 @@ package com.wcdk.r2dbc.repository;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
-import com.wcdk.r2dbc.BaseRepository;
+
 import java.util.Set;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;

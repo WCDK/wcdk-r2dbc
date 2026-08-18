@@ -76,6 +76,29 @@ class DynamicSqlSourceTests {
     }
 
     @Test
+    void rendersFirstMatchingChooseWhenAndOtherwise() throws Exception {
+        DynamicSqlSource source = parse("""
+                <select>SELECT * FROM sys_user <where><choose>
+                  <when test="name != null">AND user_name = #{name}</when>
+                  <when test="status != null">AND status = #{status}</when>
+                  <otherwise>AND deleted = 0</otherwise>
+                </choose></where></select>
+                """);
+
+        assertThat(source.render(mapWithNull("name", null, "status", 1)).sql())
+                .contains("WHERE status = #{status}")
+                .doesNotContain("deleted = 0");
+        assertThat(source.render(mapWithNull("name", null, "status", null)).sql())
+                .contains("WHERE deleted = 0");
+    }
+
+    @Test
+    void rejectsInvalidChooseBranches() {
+        assertThatThrownBy(() -> parse("<select><choose><otherwise>SELECT 1</otherwise><otherwise>SELECT 2</otherwise></choose></select>"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("最多只能包含一个");
+    }
+    @Test
     void rejectsLiteralSubstitutionByDefault() {
         assertThatThrownBy(() -> parse("<select>SELECT * FROM ${table}</select>"))
                 .isInstanceOf(IllegalArgumentException.class)

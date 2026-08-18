@@ -3,7 +3,7 @@
 <!ATTLIST repository
         namespace CDATA #REQUIRED>
 
-<!ENTITY % dynamic "#PCDATA|if|where|foreach">
+<!ENTITY % dynamic "#PCDATA|if|where|foreach|choose">
 
 <!ELEMENT select (%dynamic;)*>
 <!ATTLIST select
@@ -36,6 +36,11 @@
         open CDATA #IMPLIED
         separator CDATA #IMPLIED
         close CDATA #IMPLIED>
+
+<!ELEMENT choose (when|otherwise)+>
+<!ELEMENT when (%dynamic;)*>
+<!ATTLIST when test CDATA #REQUIRED>
+<!ELEMENT otherwise (%dynamic;)*>
 
 <!ELEMENT resultMap (id|result|discriminator)*>
 <!ATTLIST resultMap id CDATA #REQUIRED type CDATA #REQUIRED>

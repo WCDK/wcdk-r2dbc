@@ -1,7 +1,6 @@
 package com.wcdk.r2dbc.repository;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 
-import com.wcdk.r2dbc.BaseRepository;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
@@ -9,8 +8,6 @@ import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.core.ResolvableType;
 
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
 import java.util.Map;
 
 /**
