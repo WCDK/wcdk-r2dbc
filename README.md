@@ -15,6 +15,7 @@ WCDK R2DBC 是一个基于 Spring Boot、Spring Data R2DBC 和 Project Reactor �
 - [Repository API](#repository-api)
 - [派生查询方法](#派生查询方法)
 - [QueryWrapper](#querywrapper)
+- [Lambda Wrapper](#lambda-wrapper)
 - [分页](#分页)
 - [逻辑删除](#逻辑删除)
 - [多数据源](#多数据源)
@@ -31,7 +32,7 @@ WCDK R2DBC 是一个基于 Spring Boot、Spring Data R2DBC 和 Project Reactor �
 - **Repository 动态代理**：启动时扫描接口并生成仓储代理，业务代码只需定义接口。
 - **标准 CRUD**：提供新增、按 ID 查询、更新、删除、列表、单条、统计和存在性查询。
 - **派生方法**：支持 `findBy`、`countBy`、`existsBy`、`deleteBy`、`update...By...` 等方法名约定。
-- **查询构造器**：支持等值、范围、模糊、集合、空值、嵌套 `AND` / `OR`、排序、分页。
+- **查询构造器**：支持字符串字段和 Lambda 属性引用，覆盖等值、范围、模糊、集合、空值、嵌套 `AND` / `OR`、排序、分页。
 - **逻辑删除**：查询、统计、更新和派生删除默认过滤已删除数据。
 - **多数据源路由**：支持通过 `@R2dbcDataSource` 和 Reactor Context 切换数据源。
 - **响应式事务**：提供 `TransactionalOperator`、模板事务和手动事务能力。
@@ -131,7 +132,7 @@ public interface UserRepository extends BaseRepository<User> {
 }
 ```
 
-> 如果项目仍使用旧版本包路径，也可以继续使用 `com.wcdk.r2dbc.Repository` 和 `com.wcdk.r2dbc.BaseRepository`；这两个接口保留了兼容支持。
+> `com.wcdk.r2dbc.Repository` 仍作为仓储注解的兼容入口保留；基础仓储接口的推荐路径为 `com.wcdk.r2dbc.repository.BaseRepository`。
 
 ### 5. 在 Service 中使用
 
@@ -175,6 +176,15 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 | `wcdk.r2dbc.logic-delete-field` | `delFlg` | 逻辑删除字段 |
 | `wcdk.r2dbc.logic-not-delete-value` | `0` | 未删除值 |
 | `wcdk.r2dbc.logic-delete-value` | `1` | 已删除值 |
+
+事务切面默认关闭。如需使用 `@Transactional` 的 WCDK 响应式事务切面，可显式开启：
+
+```yaml
+wcdk:
+  r2dbc:
+    transaction:
+      aspect-enabled: true
+```
 
 数据库初始化配置位于 `wcdk.r2dbc.database-initializer`，支持 `enabled`、`sql-location`、`database-type`、`mode`、`ignore-errors` 和 `execute-in-transaction`。
 
@@ -231,10 +241,10 @@ public interface UserRepository extends BaseRepository<User> {
 
 ## QueryWrapper
 
-当前 QueryWrapper 位于 `com.wcdk.r2dbc.core.query`，推荐使用条件表达式 API：
+当前 QueryWrapper 位于 `com.wcdk.r2dbc.query`，推荐使用条件表达式 API：
 
 ```java
-import com.wcdk.r2dbc.core.query.QueryWrapper;
+import com.wcdk.r2dbc.query.QueryWrapper;
 
 QueryWrapper<User> wrapper = new QueryWrapper<>();
 wrapper.eq("status", 1)
@@ -254,6 +264,11 @@ Flux<User> users = userRepository.selectList(wrapper);
 `eq`、`ne`、`gt`、`ge`、`lt`、`le`、`like`、`in`、`inArray`、`notIn`、`notInArray`、`isNull`、`isNotNull`、`and`、`or`、`orderByAsc`、`orderByDesc`、`limit`、`offset`、`page`。
 
 `conditions()` 仅为历史兼容 API，新的执行链以 `expression()` 生成的条件表达式为准。
+
+### Lambda Wrapper
+
+需要避免手写字段名时，可以使用 `LambdaQueryWrapper`、`LambdaUpdateWrapper` 和
+`LambdaDeleteWrapper`。它们通过实体属性方法引用解析数据库列名。
 
 ## 分页
 
@@ -310,6 +325,8 @@ public Flux<UserReport> queryReport() {
     return reportRepository.findAll();
 }
 ```
+
+注解包路径为 `com.wcdk.r2dbc.datasource.R2dbcDataSource`。单数据源场景继续使用 `spring.r2dbc.url`；只有在由 WCDK 创建多数据源时才需要配置 `spring.r2dbc.data-sources` 和 `primary`。
 
 数据源标识通过 Reactor Context 传递；不要使用普通 `ThreadLocal` 假设数据源上下文一定存在。
 
@@ -408,10 +425,9 @@ com.wcdk.r2dbc
 ├── dialect          # 数据库方言
 ├── repository       # 仓储公共接口
 ├── execution        # 仓储执行接口
-├── core.query       # QueryWrapper 与查询表达式
-├── core.plan        # Repository 方法计划
-├── core.executor    # CRUD、派生方法和 XML 执行器
-├── core.sql         # SQL 表达式渲染
+├── query           # QueryWrapper、Lambda Wrapper 与查询表达式
+│   ├── sql         # SQL 表达式渲染
+│   └── xml         # XML SQL 与结果映射
 └── database         # 各数据库驱动适配
 ```
 
