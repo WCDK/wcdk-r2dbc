@@ -5,7 +5,6 @@ import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.execution.lifecycle.SqlExecutionContext;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
-import com.wcdk.r2dbc.execution.SqlParameter;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata.FieldColumn;
@@ -17,7 +16,6 @@ import com.wcdk.r2dbc.query.xml.ResultMapDefinition;
 import com.wcdk.r2dbc.query.xml.RepositoryStatement;
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
 import io.r2dbc.spi.Row;
-import com.wcdk.r2dbc.execution.SqlParameter;
 
 import org.aopalliance.intercept.MethodInvocation;
 import org.springframework.core.DefaultParameterNameDiscoverer;
@@ -144,10 +142,6 @@ final class RepositoryQuerySqlBuilder {
         return metadata.columns().stream().map(FieldColumn::name).collect(Collectors.joining(", "));
     }
 
-
-    private Object typedNull(Object value, Class<?> javaType) {
-        return value == null ? SqlParameter.nullOf(javaType == null ? Object.class : javaType) : value;
-    }
 
     record SqlWhere(String sql, Map<String, Object> parameters) {}
 

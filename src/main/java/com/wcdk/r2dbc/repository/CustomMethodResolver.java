@@ -815,20 +815,6 @@ public class CustomMethodResolver {
         return null;
     }
 
-    private boolean isSimpleType(Class<?> type) {
-        return type == String.class
-                || type == Long.class || type == long.class
-                || type == Integer.class || type == int.class
-                || type == Boolean.class || type == boolean.class
-                || type == Double.class || type == double.class
-                || type == Float.class || type == float.class
-                || type == Short.class || type == short.class
-                || type == Byte.class || type == byte.class
-                || type == Character.class || type == char.class
-                || Number.class.isAssignableFrom(type)
-                || type.isEnum();
-    }
-
     // ==================== 类型定义 ====================
 
     /**

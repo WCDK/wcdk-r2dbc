@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc;
 
-import com.wcdk.r2dbc.repository.RepositoryOperations;
+import com.wcdk.r2dbc.execution.RepositoryOperations;
 import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;

@@ -86,12 +86,7 @@ final class DerivedRepositoryExecutor implements RepositoryMethodExecutor {
         return sqlExecutionEngine.lifecycleExecutor();
     }
 
-    private Method findMethod(String name) {
-        for (Method method : repositoryInterface.getMethods()) if (method.getName().equals(name)) return method;
-        throw new IllegalStateException("Repository方法不存在: " + name);
-    }
-
-        @Override
+    @Override
     public boolean supports(RepositoryMethodPlan plan) {
         return plan.kind() == RepositoryMethodPlan.Kind.DERIVED;
     }

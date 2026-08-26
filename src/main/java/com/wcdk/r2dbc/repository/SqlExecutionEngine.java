@@ -1,5 +1,7 @@
 package com.wcdk.r2dbc.repository;
 
+import com.wcdk.r2dbc.execution.RepositoryOperations;
+
 import com.wcdk.r2dbc.execution.ExecutionOptions;
 import com.wcdk.r2dbc.execution.SqlExecutionRequest;
 import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;

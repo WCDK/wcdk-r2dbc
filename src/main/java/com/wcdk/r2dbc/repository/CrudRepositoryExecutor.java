@@ -390,6 +390,4 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     private record SqlWhere(String sql, Map<String, Object> parameters) {
     }
 
-    private record BoundSql(String sql, Map<String, Object> parameters) {
-    }
 }

@@ -1,7 +1,7 @@
 package com.wcdk.r2dbc.config;
 
 import com.wcdk.r2dbc.R2dbcUtil;
-import com.wcdk.r2dbc.repository.RepositoryOperations;
+import com.wcdk.r2dbc.execution.RepositoryOperations;
 import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;

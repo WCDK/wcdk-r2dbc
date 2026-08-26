@@ -263,6 +263,29 @@ Flux<User> users = userRepository.selectList(wrapper);
 
 `eq`、`ne`、`gt`、`ge`、`lt`、`le`、`like`、`in`、`inArray`、`notIn`、`notInArray`、`isNull`、`isNotNull`、`and`、`or`、`orderByAsc`、`orderByDesc`、`limit`、`offset`、`page`。
 
+`and` / `or` 会先生成条件表达式树，再渲染为 SQL。连续普通条件默认使用 `AND`，
+同一种连续逻辑会合并；混用 `AND` / `OR` 时会保留括号来维持优先级。以下示例仅展示
+`WHERE` 片段，实际执行时字段会按实体元数据映射为数据库列名：
+
+| QueryWrapper 写法 | 生成的 WHERE 片段 |
+|---|---|
+| `new QueryWrapper<>()` | 空字符串 |
+| `.and(n -> {})` | 空字符串 |
+| `.or(n -> {})` | 空字符串 |
+| `.and(n -> n.eq("a", 1))` | `WHERE a = :p0` |
+| `.or(n -> n.eq("a", 1))` | `WHERE a = :p0` |
+| `.eq("a", 1).eq("b", 2)` | `WHERE (a = :p0 AND b = :p1)` |
+| `.eq("a", 1).and(n -> n.eq("b", 2))` | `WHERE (a = :p0 AND b = :p1)` |
+| `.eq("a", 1).or(n -> n.eq("b", 2))` | `WHERE (a = :p0 OR b = :p1)` |
+| `.eq("a", 1).and(n -> n.eq("b", 2).eq("c", 3))` | `WHERE (a = :p0 AND (b = :p1 AND c = :p2))` |
+| `.eq("a", 1).or(n -> n.eq("b", 2).eq("c", 3))` | `WHERE (a = :p0 OR (b = :p1 AND c = :p2))` |
+| `.eq("a", 1).and(n -> n.eq("b", 2).or(o -> o.eq("c", 3)))` | `WHERE (a = :p0 AND (b = :p1 OR c = :p2))` |
+| `.eq("a", 1).or(n -> n.eq("b", 2).or(o -> o.eq("c", 3)))` | `WHERE (a = :p0 OR (b = :p1 OR c = :p2))` |
+
+`eq(column, null)` 会渲染为 `column IS NULL`，`ne(column, null)` 会渲染为
+`column IS NOT NULL`；空 `IN` 渲染为 `1 = 0`，空 `NOT IN` 渲染为 `1 = 1`。
+如果实体配置了逻辑删除字段，Repository 查询构建时还会自动追加未删除条件。
+
 `conditions()` 仅为历史兼容 API，新的执行链以 `expression()` 生成的条件表达式为准。
 
 ### Lambda Wrapper

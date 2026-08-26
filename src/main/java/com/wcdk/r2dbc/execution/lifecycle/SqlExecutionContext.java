@@ -183,11 +183,6 @@ public class SqlExecutionContext {
         this.terminationType = terminationType;
     }
 
-    private boolean isDataModification() {
-        return commandType == SqlCommandType.INSERT || commandType == SqlCommandType.UPDATE
-                || commandType == SqlCommandType.DELETE || commandType == SqlCommandType.MERGE;
-    }
-
     private SqlCommandType inferCommandType(String methodName) {
         String normalized = methodName.toLowerCase(java.util.Locale.ROOT);
         if (normalized.startsWith("insert")) return SqlCommandType.INSERT;

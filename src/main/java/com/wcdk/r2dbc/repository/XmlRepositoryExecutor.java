@@ -7,7 +7,6 @@ import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.execution.lifecycle.SqlExecutionContext;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.execution.SqlLifecycleExecutor;
-import com.wcdk.r2dbc.execution.SqlParameter;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata.FieldColumn;
@@ -59,7 +58,6 @@ final class XmlRepositoryExecutor implements RepositoryMethodExecutor {
         this.metadata = metadata; this.repositoryInterface = repositoryInterface; this.repositoryXmlRegistry = repositoryXmlRegistry; this.sqlExecutionEngine = sqlExecutionEngine; this.parameterBinder = parameterBinder;
     }
     private SqlLifecycleExecutor lifecycleExecutor() { return sqlExecutionEngine.lifecycleExecutor(); }
-    private Method findMethod(String name) { for (Method method : repositoryInterface.getMethods()) if (method.getName().equals(name)) return method; throw new IllegalStateException("Repository方法不存在: " + name); }
         @Override
     public boolean supports(RepositoryMethodPlan plan) {
         return plan.kind() == RepositoryMethodPlan.Kind.XML;
@@ -275,14 +273,5 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
         }
         return method.getReturnType();
     }
-
-    static Object terminatedPublisher(Method method) {
-        return method.getReturnType() == Flux.class ? Flux.empty() : Mono.empty();
-    }
-
-    private Object typedNull(Object value, Class<?> javaType) {
-        return value == null ? SqlParameter.nullOf(javaType == null ? Object.class : javaType) : value;
-    }
-
 
 }

@@ -6,8 +6,6 @@ import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.core.DefaultParameterNameDiscoverer;
 import org.springframework.data.repository.query.Param;
 import org.springframework.util.StringUtils;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -103,10 +101,6 @@ final class RepositoryParameterBinder {
             }
         }
         return Object.class;
-    }
-
-    static Object terminatedPublisher(Method method) {
-        return method.getReturnType() == Flux.class ? Flux.empty() : Mono.empty();
     }
 
     Map<String, Object> methodParameters(Method method, Object[] arguments) {
