@@ -104,7 +104,7 @@ public class R2dbcRowMapper {
                     Field field = entityClass.getDeclaredField(component.getName());
                     targets.add(new ValueTarget(component.getName(), columnName(field), component.getType()));
                 }
-                return new ConstructorMappingPlan(constructor, List.copyOf(targets));
+                return new ConstructorMappingPlan(constructor, List.copyOf(targets), List.of());
             }
 
             Constructor<?>[] constructors = entityClass.getDeclaredConstructors();
@@ -122,7 +122,7 @@ public class R2dbcRowMapper {
             try {
                 Constructor<?> constructor = entityClass.getDeclaredConstructor();
                 constructor.setAccessible(true);
-                return new FieldMappingPlan(constructor, persistentFields(entityClass));
+                return new FieldMappingPlan(constructor, fieldTargets(entityClass));
             } catch (NoSuchMethodException ignored) {
                 if (constructors.length != 1) {
                     throw new IllegalStateException("实体需要无参构造函数或恰好一个映射构造函数: "
@@ -144,10 +144,10 @@ public class R2dbcRowMapper {
                     field == null ? camelToUnderline(parameter.getName()) : columnName(field),
                     parameter.getType()));
         }
-        return new ConstructorMappingPlan(constructor, List.copyOf(targets));
+        return new ConstructorMappingPlan(constructor, List.copyOf(targets), transientFields(entityClass));
     }
 
-    private List<FieldTarget> persistentFields(Class<?> entityClass) {
+    private List<FieldTarget> fieldTargets(Class<?> entityClass) {
         Map<String, FieldTarget> targets = new LinkedHashMap<>();
         List<Class<?>> hierarchy = new ArrayList<>();
         for (Class<?> current = entityClass; current != null && current != Object.class;
@@ -156,11 +156,31 @@ public class R2dbcRowMapper {
         }
         for (Class<?> type : hierarchy) {
             for (Field field : type.getDeclaredFields()) {
-                if (Modifier.isStatic(field.getModifiers()) || field.isAnnotationPresent(Transient.class)) {
+                if (Modifier.isStatic(field.getModifiers())) {
                     continue;
                 }
                 field.setAccessible(true);
-                targets.put(field.getName(), new FieldTarget(field, columnName(field)));
+                targets.put(field.getName(), new FieldTarget(field, columnName(field),
+                        !field.isAnnotationPresent(Transient.class)));
+            }
+        }
+        return List.copyOf(targets.values());
+    }
+
+    private List<FieldTarget> transientFields(Class<?> entityClass) {
+        Map<String, FieldTarget> targets = new LinkedHashMap<>();
+        List<Class<?>> hierarchy = new ArrayList<>();
+        for (Class<?> current = entityClass; current != null && current != Object.class;
+             current = current.getSuperclass()) {
+            hierarchy.add(0, current);
+        }
+        for (Class<?> type : hierarchy) {
+            for (Field field : type.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers()) || !field.isAnnotationPresent(Transient.class)) {
+                    continue;
+                }
+                field.setAccessible(true);
+                targets.put(field.getName(), new FieldTarget(field, columnName(field), false));
             }
         }
         return List.copyOf(targets.values());
@@ -392,16 +412,19 @@ public class R2dbcRowMapper {
     private record ValueTarget(String name, String column, Class<?> type) {
     }
 
-    private record FieldTarget(Field field, String column) {
+    private record FieldTarget(Field field, String column, boolean required) {
     }
 
     private final class ConstructorMappingPlan implements MappingPlan {
         private final Constructor<?> constructor;
         private final List<ValueTarget> targets;
+        private final List<FieldTarget> transientFields;
 
-        private ConstructorMappingPlan(Constructor<?> constructor, List<ValueTarget> targets) {
+        private ConstructorMappingPlan(Constructor<?> constructor, List<ValueTarget> targets,
+                                       List<FieldTarget> transientFields) {
             this.constructor = constructor;
             this.targets = targets;
+            this.transientFields = transientFields;
         }
 
         @Override
@@ -410,7 +433,16 @@ public class R2dbcRowMapper {
             for (int i = 0; i < targets.size(); i++) {
                 arguments[i] = mappedValue(row, rowColumns, targets.get(i));
             }
-            return constructor.newInstance(arguments);
+            Object entity = constructor.newInstance(arguments);
+            for (FieldTarget target : transientFields) {
+                if (actualColumnName(rowColumns, target.column()) == null) {
+                    continue;
+                }
+                ValueTarget valueTarget = new ValueTarget(target.field().getName(),
+                        target.column(), target.field().getType());
+                target.field().set(entity, mappedValue(row, rowColumns, valueTarget));
+            }
+            return entity;
         }
     }
 
@@ -429,7 +461,7 @@ public class R2dbcRowMapper {
             for (FieldTarget target : targets) {
                 String actualColumn = actualColumnName(rowColumns, target.column());
                 if (actualColumn == null) {
-                    if (target.field().getType().isPrimitive()) {
+                    if (target.required() && target.field().getType().isPrimitive()) {
                         throw new IllegalStateException("必需的基本类型属性 '" + target.field().getName()
                                 + "' 缺少列 '" + target.column() + "'");
                     }

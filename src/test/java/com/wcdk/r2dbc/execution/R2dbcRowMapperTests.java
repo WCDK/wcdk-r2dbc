@@ -5,6 +5,7 @@ import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.PersistenceCreator;
+import org.springframework.data.annotation.Transient;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -82,6 +83,25 @@ class R2dbcRowMapperTests {
     }
 
     @Test
+    void mapsTransientFieldsReturnedByQueryWithoutRequiringThem() {
+        Row row = row(List.of("id", "display_name", "display_label"),
+                List.of(3L, "alice", "Alice (active)"));
+
+        QueryEntity entity = mapper.map(row, QueryEntity.class);
+
+        assertThat(entity.displayLabel).isEqualTo("Alice (active)");
+    }
+
+    @Test
+    void mapsTransientFieldsAfterConstructorInvocation() {
+        Row row = row(List.of("name", "display_label"), List.of("alice", "Alice (active)"));
+
+        ConstructorQueryEntity entity = mapper.map(row, ConstructorQueryEntity.class);
+
+        assertThat(entity.displayLabel).isEqualTo("Alice (active)");
+    }
+
+    @Test
     void convertsInstantToLegacyDateAndJavaTimeTypes() {
         Instant instant = Instant.parse("2026-08-11T04:05:06Z");
 
@@ -150,6 +170,23 @@ class R2dbcRowMapperTests {
         private CreatorEntity(Token token) {
             this.token = token;
             this.createdBy = "persistence-creator";
+        }
+    }
+
+    private static class QueryEntity {
+        private Long id;
+        private String displayName;
+        @Transient
+        private String displayLabel;
+    }
+
+    private static class ConstructorQueryEntity {
+        private final String name;
+        @Transient
+        private String displayLabel;
+
+        private ConstructorQueryEntity(String name) {
+            this.name = name;
         }
     }
 }
