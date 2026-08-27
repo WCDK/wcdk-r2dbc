@@ -13,6 +13,7 @@ WCDK R2DBC 是一个基于 Spring Boot、Spring Data R2DBC 和 Project Reactor �
 - [快速开始](#快速开始)
 - [配置](#配置)
 - [Repository API](#repository-api)
+- [@Transient 字段](#transient-字段)
 - [派生查询方法](#派生查询方法)
 - [QueryWrapper](#querywrapper)
 - [Lambda Wrapper](#lambda-wrapper)
@@ -211,6 +212,37 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 | `selectPage(pageable, wrapper)` | `Mono<Page<T>>` | 分页查询 |
 
 更新和删除方法支持 `Mono<Long>`、`Mono<Integer>`、`Mono<Boolean>`、`Mono<Void>` 等兼容返回形式，具体以方法声明为准。
+
+## `@Transient` 字段
+
+实体中的 `@Transient` 应使用 `org.springframework.data.annotation.Transient`。这类字段不会被当作数据表列参与实体元数据解析，因此不会出现在自动生成的 INSERT、UPDATE 以及其他基于实体字段生成的 SQL 中。
+
+`@Transient` 不会阻止查询结果映射：如果 SELECT 结果包含与该字段匹配的列（字段名按默认规则转换，或使用 `@Column` 指定列名），RowMapper 会在实体创建完成后填充该字段。查询结果不包含该列时，字段保持默认值。
+
+```java
+@Table("sys_user")
+public class User {
+
+    @Id
+    private Long id;
+
+    @Column("user_name")
+    private String userName;
+
+    @Transient
+    @Column("display_label")
+    private String displayLabel;
+}
+```
+
+例如，XML SQL 或自定义 SELECT 可以返回计算列：
+
+```sql
+SELECT id, user_name, CONCAT(user_name, ' (active)') AS display_label
+FROM sys_user
+```
+
+使用持久化构造器时，`@Transient` 字段不需要作为构造器参数；框架会先完成构造器映射，再根据查询结果补充该字段。`@Transient` 只影响持久化字段识别，不会自动生成计算列，SQL 仍需显式返回对应列。
 
 ## 派生查询方法
 
