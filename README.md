@@ -87,6 +87,12 @@ wcdk:
     sql-log-enabled: true
 ```
 
+- /demo 不会被达梦 R2DBC URL 识别为 schema。
+- 推荐使用 r2dbc:dm://127.0.0.1:5236。
+- 或者添加 ?schema=demo
+- 优先使用 demo 用户登录。
+- 其他用户登录时，每条物理连接需执行 SET SCHEMA demo。
+- 提供 CURRENT_USER、CURRENT_SCHEMA 验证 SQL。
 ### 3. 启用仓储扫描
 
 ```java

@@ -3,11 +3,14 @@ package com.wcdk.r2dbc.execution.log;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
+import com.wcdk.r2dbc.execution.SqlParameter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.util.context.ContextView;
 
 import java.lang.reflect.Array;
+import java.time.temporal.TemporalAccessor;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -88,9 +91,161 @@ public class R2dbcSqlLogger {
                         "executionId：{}\n" +
                         "excuteSQl：{}\n" +
                         "excuteParam：{}\n" +
+                        "completeSql：{}\n" +
                         "result：{}\n" +
                         "=========r2dbc==end==========",
-                UUID.randomUUID(), normalizeSql(sql), sanitizeParameters(parameters), describeResult(result));
+                UUID.randomUUID(), normalizeSql(sql), sanitizeParameters(parameters),
+                completeSql(sql, parameters), describeResult(result));
+    }
+
+    /**
+     * 将命名参数替换为 SQL 字面量，生成可复制执行的 SQL。
+     * 敏感参数仍会脱敏，但会保留合法的 SQL 字面量格式。
+     *
+     * @param sql SQL语句
+     * @param parameters 参数
+     * @return 完整SQL
+     */
+    public String completeSql(String sql, Map<?, ?> parameters) {
+        if (sql == null || sql.isBlank() || parameters == null || parameters.isEmpty()) {
+            return normalizeSql(sql);
+        }
+        StringBuilder result = new StringBuilder(sql.length() + parameters.size() * 16);
+        LexerState state = LexerState.NORMAL;
+        String delimiter = null;
+        for (int i = 0; i < sql.length(); i++) {
+            char ch = sql.charAt(i);
+            char next = i + 1 < sql.length() ? sql.charAt(i + 1) : 0;
+            if (state == LexerState.LINE_COMMENT) {
+                result.append(ch);
+                if (ch == '\n' || ch == '\r') state = LexerState.NORMAL;
+                continue;
+            }
+            if (state == LexerState.BLOCK_COMMENT) {
+                result.append(ch);
+                if (ch == '*' && next == '/') {
+                    result.append(next); i++; state = LexerState.NORMAL;
+                }
+                continue;
+            }
+            if (state == LexerState.POSTGRES_DOLLAR_QUOTE || state == LexerState.ORACLE_Q_QUOTE) {
+                if (delimiter != null && sql.startsWith(delimiter, i)) {
+                    result.append(delimiter); i += delimiter.length() - 1;
+                    state = LexerState.NORMAL; delimiter = null;
+                } else {
+                    result.append(ch);
+                }
+                continue;
+            }
+            if (state == LexerState.SINGLE_QUOTE || state == LexerState.DOUBLE_QUOTE || state == LexerState.BACKTICK) {
+                result.append(ch);
+                char quote = state == LexerState.SINGLE_QUOTE ? '\'' : state == LexerState.DOUBLE_QUOTE ? '"' : '`';
+                if (ch == quote && next == quote) {
+                    result.append(next); i++;
+                } else if (ch == quote) {
+                    state = LexerState.NORMAL;
+                }
+                continue;
+            }
+            if (ch == '-' && next == '-') {
+                result.append(ch).append(next); i++; state = LexerState.LINE_COMMENT; continue;
+            }
+            if (ch == '/' && next == '*') {
+                result.append(ch).append(next); i++; state = LexerState.BLOCK_COMMENT; continue;
+            }
+            if (ch == '\'' || ch == '"' || ch == '`') {
+                result.append(ch);
+                state = ch == '\'' ? LexerState.SINGLE_QUOTE : ch == '"' ? LexerState.DOUBLE_QUOTE : LexerState.BACKTICK;
+                continue;
+            }
+            if (ch == '$') {
+                String tag = postgresDollarDelimiter(sql, i);
+                if (tag != null) {
+                    result.append(tag); i += tag.length() - 1;
+                    state = LexerState.POSTGRES_DOLLAR_QUOTE; delimiter = tag; continue;
+                }
+            }
+            if ((ch == 'q' || ch == 'Q') && next == '\'' && i + 2 < sql.length()) {
+                char close = oracleQuoteClose(sql.charAt(i + 2));
+                if (close != 0) {
+                    result.append(ch).append(next).append(sql.charAt(i + 2)); i += 2;
+                    state = LexerState.ORACLE_Q_QUOTE; delimiter = String.valueOf(close) + "'"; continue;
+                }
+            }
+            if (ch == ':' && isParameterStart(next) && (i == 0 || sql.charAt(i - 1) != ':')) {
+                int end = i + 2;
+                while (end < sql.length() && isParameterPart(sql.charAt(end))) end++;
+                String name = sql.substring(i + 1, end);
+                if (parameters.containsKey(name)) {
+                    Object value = SENSITIVE_KEY.matcher(name).matches() ? "[REDACTED]" : parameters.get(name);
+                    result.append(toSqlLiteral(value)); i = end - 1; continue;
+                }
+            }
+            result.append(ch);
+        }
+        return normalizeSql(result.toString());
+    }
+
+    private String toSqlLiteral(Object value) {
+        if (value instanceof SqlParameter parameter) value = parameter.value();
+        if (value == null) return "NULL";
+        if (value instanceof Number) return value.toString();
+        if (value instanceof Boolean bool) return bool ? "TRUE" : "FALSE";
+        if (value instanceof Iterable<?> iterable) {
+            StringBuilder values = new StringBuilder();
+            for (Object item : iterable) {
+                if (!values.isEmpty()) values.append(", ");
+                values.append(toSqlLiteral(item));
+            }
+            return values.isEmpty() ? "NULL" : values.toString();
+        }
+        if (value.getClass().isArray() && !(value instanceof byte[])) {
+            StringBuilder values = new StringBuilder();
+            for (int i = 0; i < Array.getLength(value); i++) {
+                if (!values.isEmpty()) values.append(", ");
+                values.append(toSqlLiteral(Array.get(value, i)));
+            }
+            return values.isEmpty() ? "NULL" : values.toString();
+        }
+        if (value instanceof byte[] bytes) return "X'" + java.util.HexFormat.of().formatHex(bytes) + "'";
+        if (value instanceof TemporalAccessor || value instanceof Date || value instanceof UUID
+                || value instanceof Character || value instanceof CharSequence || value instanceof Enum<?>) {
+            return quoteSqlString(String.valueOf(value));
+        }
+        return quoteSqlString(String.valueOf(value));
+    }
+
+    private String quoteSqlString(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    private String postgresDollarDelimiter(String sql, int index) {
+        int end = sql.indexOf('$', index + 1);
+        if (end <= index) return null;
+        for (int i = index + 1; i < end; i++) {
+            char ch = sql.charAt(i);
+            if (!(Character.isLetterOrDigit(ch) || ch == '_')) return null;
+        }
+        return sql.substring(index, end + 1);
+    }
+
+    private char oracleQuoteClose(char open) {
+        return switch (open) {
+            case '[' -> ']'; case '(' -> ')'; case '{' -> '}'; case '<' -> '>'; default -> 0;
+        };
+    }
+
+    private boolean isParameterStart(char ch) {
+        return Character.isLetter(ch) || ch == '_';
+    }
+
+    private boolean isParameterPart(char ch) {
+        return Character.isLetterOrDigit(ch) || ch == '_';
+    }
+
+    private enum LexerState {
+        NORMAL, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, LINE_COMMENT, BLOCK_COMMENT,
+        POSTGRES_DOLLAR_QUOTE, ORACLE_Q_QUOTE
     }
 
     public Map<String, Object> sanitizeParameters(Map<?, ?> parameters) {

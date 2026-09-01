@@ -31,4 +31,30 @@ class R2dbcSqlLoggerTests {
         assertThat(result.get("blob")).isEqualTo("[bytes:1024]");
         assertThat(result.toString()).doesNotContain("do-not-log", "also-secret");
     }
+
+    @Test
+    void createsExecutableSqlWithEscapedLiterals() {
+        String sql = "SELECT * FROM users WHERE id = :id AND name = :name "
+                + "AND enabled = :enabled AND deleted_at = :deletedAt AND role IN (:roles)";
+
+        assertThat(logger.completeSql(sql, Map.of(
+                "id", 7L,
+                "name", "O'Reilly",
+                "enabled", true,
+                "deletedAt", com.wcdk.r2dbc.execution.SqlParameter.nullOf(String.class),
+                "roles", List.of("admin", "operator"))))
+                .isEqualTo("SELECT * FROM users WHERE id = 7 AND name = 'O''Reilly' "
+                        + "AND enabled = TRUE AND deleted_at = NULL AND role IN ('admin', 'operator')");
+    }
+
+    @Test
+    void ignoresParameterLikeTextInSqlSyntaxAndRedactsSensitiveValues() {
+        String sql = "SELECT ':ignored', value::text, $$:dollar$$ FROM users "
+                + "WHERE id = :id AND password = :password /* :comment */";
+
+        assertThat(logger.completeSql(sql, Map.of("id", 9, "password", "do-not-log")))
+                .isEqualTo("SELECT ':ignored', value::text, $$:dollar$$ FROM users "
+                        + "WHERE id = 9 AND password = '[REDACTED]' /* :comment */")
+                .doesNotContain("do-not-log");
+    }
 }
