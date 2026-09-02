@@ -9,6 +9,7 @@ import org.springframework.data.annotation.Transient;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
@@ -110,6 +111,20 @@ class R2dbcRowMapperTests {
                 .isEqualTo(LocalDateTime.ofInstant(instant, java.time.ZoneId.systemDefault()));
     }
 
+    @Test
+    void mapsByteBufferToByteArrayWithoutChangingBufferPosition() {
+        ByteBuffer content = ByteBuffer.wrap(new byte[]{0, 1, 2, 3});
+        content.position(1);
+        content.limit(3);
+
+        BinaryEntity entity = mapper.map(
+                row(List.of("content_bytes"), List.of(content)), BinaryEntity.class);
+
+        assertThat(entity.contentBytes).containsExactly(1, 2);
+        assertThat(content.position()).isEqualTo(1);
+        assertThat(content.limit()).isEqualTo(3);
+    }
+
     private Row row(List<String> names, List<Object> values) {
         Row row = mock(Row.class);
         RowMetadata metadata = mock(RowMetadata.class);
@@ -188,5 +203,9 @@ class R2dbcRowMapperTests {
         private ConstructorQueryEntity(String name) {
             this.name = name;
         }
+    }
+
+    private static class BinaryEntity {
+        private byte[] contentBytes;
     }
 }

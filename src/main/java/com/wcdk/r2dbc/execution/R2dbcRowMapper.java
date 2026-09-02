@@ -12,6 +12,7 @@ import java.lang.reflect.Parameter;
 import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -246,6 +247,12 @@ public class R2dbcRowMapper {
         }
         if (Number.class.isAssignableFrom(boxedType) && value instanceof Number number) {
             return convertNumber(number, boxedType);
+        }
+        if (boxedType == byte[].class && value instanceof ByteBuffer byteBuffer) {
+            ByteBuffer readableBuffer = byteBuffer.asReadOnlyBuffer();
+            byte[] bytes = new byte[readableBuffer.remaining()];
+            readableBuffer.get(bytes);
+            return bytes;
         }
         if (value instanceof Date date) {
             Object temporalValue = convertDate(date, boxedType);

@@ -6,12 +6,15 @@ import com.wcdk.r2dbc.execution.lifecycle.ReactiveSqlLifecycleInterceptor;
 import com.wcdk.r2dbc.execution.lifecycle.SqlExecutionContext;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.execution.log.R2dbcSqlLogger;
+import io.r2dbc.spi.Row;
 import org.junit.jupiter.api.Test;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.time.Instant;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -21,6 +24,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 class R2dbcQueryOperationsTests {
+
+    @Test
+    void convertsInstantWhenCustomMapperRequestsLegacyDate() {
+        Instant instant = Instant.parse("2026-09-02T08:00:00Z");
+        Row row = mock(Row.class);
+        org.mockito.Mockito.when(row.get("created_at")).thenReturn(instant);
+
+        Date value = R2dbcQueryOperations.compatibleRow(row).get("created_at", Date.class);
+
+        assertThat(value).isEqualTo(Date.from(instant));
+    }
 
     @Test
     void repeatedAndConcurrentSubscriptionsUseIndependentContexts() {
