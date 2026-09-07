@@ -12,6 +12,12 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -21,7 +27,7 @@ import java.util.function.BiFunction;
  * R2DBC查询操作，负责执行SQL查询。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 public class R2dbcQueryOperations {
@@ -205,28 +211,28 @@ public class R2dbcQueryOperations {
         return new Row() {
             @Override
             public <T> T get(int index, Class<T> type) {
-                if (type == Date.class) {
-                    return convertLegacyDate(row.get(index), type);
+                if (isLegacyTemporalType(type)) {
+                    return convertLegacyTemporal(row.get(index), type);
                 }
                 return row.get(index, type);
             }
 
             @Override
             public <T> T get(String name, Class<T> type) {
-                if (type == Date.class) {
-                    return convertLegacyDate(row.get(name), type);
+                if (isLegacyTemporalType(type)) {
+                    return convertLegacyTemporal(row.get(name), type);
                 }
                 return row.get(name, type);
             }
 
             @Override
             public Object get(int index) {
-                return row.get(index);
+                return normalizeLegacyValue(row.get(index));
             }
 
             @Override
             public Object get(String name) {
-                return row.get(name);
+                return normalizeLegacyValue(row.get(name));
             }
 
             @Override
@@ -236,11 +242,40 @@ public class R2dbcQueryOperations {
         };
     }
 
-    private static <T> T convertLegacyDate(Object value, Class<T> type) {
+    private static boolean isLegacyTemporalType(Class<?> type) {
+        return type == Date.class || type == Timestamp.class || type == java.sql.Date.class
+                || type == Time.class || type == Instant.class || type == LocalDateTime.class
+                || type == LocalDate.class || type == LocalTime.class;
+    }
+
+    private static <T> T convertLegacyTemporal(Object value, Class<T> type) {
         if (value instanceof Instant instant) {
-            return type.cast(Date.from(instant));
+            Object converted = switch (type.getName()) {
+                case "java.util.Date" -> Date.from(instant);
+                case "java.sql.Timestamp" -> Timestamp.from(instant);
+                case "java.sql.Date" -> new java.sql.Date(instant.toEpochMilli());
+                case "java.sql.Time" -> new Time(instant.toEpochMilli());
+                case "java.time.Instant" -> instant;
+                case "java.time.LocalDateTime" -> LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+                case "java.time.LocalDate" -> LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).toLocalDate();
+                case "java.time.LocalTime" -> LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).toLocalTime();
+                default -> null;
+            };
+            if (converted != null) {
+                return type.cast(converted);
+            }
         }
         return value == null ? null : type.cast(value);
+    }
+
+    /**
+     * 兼容旧代码通过无类型 Row.get 读取 Date 的场景。
+     *
+     * @param value 驱动返回值
+     * @return 兼容后的值
+     */
+    private static Object normalizeLegacyValue(Object value) {
+        return value instanceof Instant instant ? Date.from(instant) : value;
     }
     private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters) {
         return parameterBinder.bind(databaseClient, sql, parameters);

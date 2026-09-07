@@ -23,7 +23,7 @@ import reactor.core.publisher.Mono;
  * 实现此接口并注册为Spring Bean即可自动生效。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  * @see SqlLifecycleInterceptor 同步版本
  **/

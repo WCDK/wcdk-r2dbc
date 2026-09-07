@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * WCDK R2DBC 配置属性
  *
  * @auther WCDK
- * @date 2026/7/20
+ *
  * @version 1.0
  **/
 @Data

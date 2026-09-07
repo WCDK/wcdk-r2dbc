@@ -29,7 +29,7 @@ import java.util.Set;
  * 仓储接口扫描注册器。
  *
  * @author WCDK
- * @date 2026/7/21
+ *
  * @version 1.0
  **/
 public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, ResourceLoaderAware, BeanFactoryAware {

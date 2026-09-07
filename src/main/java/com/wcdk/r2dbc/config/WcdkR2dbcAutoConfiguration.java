@@ -3,6 +3,7 @@ package com.wcdk.r2dbc.config;
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.execution.RepositoryOperations;
 import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
+import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;
 import com.wcdk.r2dbc.execution.ParameterValueConverter;
@@ -74,7 +75,7 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
  *
  * @author WCDK
  * @version 1.0
- * @date 2026/7/21
+ *
  **/
 @AutoConfiguration
 @AutoConfigureAfter(name = {
@@ -319,13 +320,27 @@ public class WcdkR2dbcAutoConfiguration {
         return new com.wcdk.r2dbc.R2dbcRepositoryOperations(r2dbcUtil);
     }
 
+    /**
+     * 提供应用内唯一的雪花 ID 生成器，供仓储代理和业务原生 SQL 共同复用。
+     *
+     * @return 雪花 ID 生成器
+     * @author wcdk
+     */
+    @Bean
+    @ConditionalOnMissingBean(SnowflakeIdGenerator.class)
+    public SnowflakeIdGenerator snowflakeIdGenerator() {
+        return new SnowflakeIdGenerator();
+    }
+
     @Bean
     @ConditionalOnMissingBean(RepositoryProxyFactory.class)
     @Role(ROLE_INFRASTRUCTURE)
     public RepositoryProxyFactory repositoryProxyFactory(RepositoryOperations repositoryOperations,
                                                            WcdkR2dbcProperties properties,
-                                                           RepositoryXmlRegistry repositoryXmlRegistry) {
-        return new RepositoryProxyFactory(repositoryOperations, properties, repositoryXmlRegistry);
+                                                           RepositoryXmlRegistry repositoryXmlRegistry,
+                                                           SnowflakeIdGenerator snowflakeIdGenerator) {
+        return new RepositoryProxyFactory(repositoryOperations, properties, repositoryXmlRegistry,
+                snowflakeIdGenerator);
     }
 
     @Bean

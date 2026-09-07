@@ -15,7 +15,7 @@ import java.util.List;
  * 仓储实体元数据。
  *
  * @author WCDK
- * @date 2026/7/21
+ *
  * @version 1.0
  **/
 public final class RepositoryMetadata {

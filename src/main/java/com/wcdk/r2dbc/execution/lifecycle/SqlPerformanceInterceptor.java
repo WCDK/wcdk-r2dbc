@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
  * 记录SQL执行耗时，超过阈值的SQL会输出警告日志。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 @Component

@@ -7,7 +7,7 @@ import java.util.Map;
  * resultMap 定义。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 public record ResultMapDefinition(String id, String type, Map<String, String> idMappings,

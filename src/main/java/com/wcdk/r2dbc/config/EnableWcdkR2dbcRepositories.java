@@ -12,7 +12,7 @@ import java.lang.annotation.Target;
  * Enables wcdk R2DBC repository proxy scanning.
  *
  * @author WCDK
- * @date 2026/7/21
+ *
  * @version 1.0
  **/
 @Target(ElementType.TYPE)

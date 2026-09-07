@@ -10,7 +10,7 @@ import reactor.core.publisher.Mono;
  * 提供手动控制事务的能力，支持显式的提交和回滚操作。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 public interface ManualTransaction {

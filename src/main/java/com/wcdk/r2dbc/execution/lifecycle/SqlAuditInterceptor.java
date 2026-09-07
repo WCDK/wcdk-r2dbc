@@ -14,7 +14,7 @@ import java.time.format.DateTimeFormatter;
  * 记录所有SQL操作的审计信息。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 @Component

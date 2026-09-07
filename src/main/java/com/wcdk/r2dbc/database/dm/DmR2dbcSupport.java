@@ -6,7 +6,7 @@ import io.r2dbc.spi.ConnectionFactory;
  * 达梦 R2DBC 识别工具。
  *
  * @author WCDK
- * @date 2026/7/20
+ *
  * @version 1.0
  **/
 final class DmR2dbcSupport {

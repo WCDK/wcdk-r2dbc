@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @auther WCDK
- * @date 2026/7/27
+ *
  * @version 1.0
  **/
 public class DynamicRoutingConnectionFactory implements ConnectionFactory, Disposable {

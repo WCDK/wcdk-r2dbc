@@ -8,7 +8,7 @@ import org.springframework.beans.factory.FactoryBean;
  * 仓储代理 Bean 工厂。
  *
  * @author WCDK
- * @date 2026/7/21
+ *
  * @version 1.0
  **/
 public class WcdkR2dbcRepositoryFactoryBean<T> implements FactoryBean<T> {

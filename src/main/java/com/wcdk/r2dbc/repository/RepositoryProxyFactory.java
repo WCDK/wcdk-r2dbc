@@ -15,7 +15,7 @@ import java.util.Map;
  * 仓储代理工厂。
  *
  * @author WCDK
- * @date 2026/7/21
+ *
  * @version 1.0
  **/
 public class RepositoryProxyFactory {
@@ -28,11 +28,28 @@ public class RepositoryProxyFactory {
 
     private final SnowflakeIdGenerator snowflakeIdGenerator;
 
-    public RepositoryProxyFactory(RepositoryOperations repositoryOperations, WcdkR2dbcProperties properties, RepositoryXmlRegistry repositoryXmlRegistry) {
+    /**
+     * 兼容直接构造仓储代理工厂的旧调用方式。
+     *
+     * @author wcdk
+     */
+    public RepositoryProxyFactory(RepositoryOperations repositoryOperations, WcdkR2dbcProperties properties,
+                                  RepositoryXmlRegistry repositoryXmlRegistry) {
+        this(repositoryOperations, properties, repositoryXmlRegistry, new SnowflakeIdGenerator());
+    }
+
+    /**
+     * 创建仓储代理工厂并复用容器中的雪花 ID 生成器。
+     *
+     * @author wcdk
+     */
+    public RepositoryProxyFactory(RepositoryOperations repositoryOperations, WcdkR2dbcProperties properties,
+                                  RepositoryXmlRegistry repositoryXmlRegistry,
+                                  SnowflakeIdGenerator snowflakeIdGenerator) {
         this.repositoryOperations = repositoryOperations;
         this.properties = properties;
         this.repositoryXmlRegistry = repositoryXmlRegistry;
-        this.snowflakeIdGenerator = properties.isSnowflakeId() ? new SnowflakeIdGenerator() : null;
+        this.snowflakeIdGenerator = properties.isSnowflakeId() ? snowflakeIdGenerator : null;
     }
 
     public Object create(Class<?> repositoryInterface) {

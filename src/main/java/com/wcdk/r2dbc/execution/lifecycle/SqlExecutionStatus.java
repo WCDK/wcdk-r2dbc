@@ -4,7 +4,7 @@ package com.wcdk.r2dbc.execution.lifecycle;
  * SQL执行状态枚举，用于区分不同的执行结果。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 public enum SqlExecutionStatus {

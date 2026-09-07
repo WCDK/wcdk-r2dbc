@@ -4,7 +4,7 @@ package com.wcdk.r2dbc.transaction;
  * 事务状态枚举。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 public enum TransactionStatus {

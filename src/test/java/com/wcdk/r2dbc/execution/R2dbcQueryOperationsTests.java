@@ -32,8 +32,10 @@ class R2dbcQueryOperationsTests {
         org.mockito.Mockito.when(row.get("created_at")).thenReturn(instant);
 
         Date value = R2dbcQueryOperations.compatibleRow(row).get("created_at", Date.class);
+        Date rawValue = (Date) R2dbcQueryOperations.compatibleRow(row).get("created_at");
 
         assertThat(value).isEqualTo(Date.from(instant));
+        assertThat(rawValue).isEqualTo(Date.from(instant));
     }
 
     @Test

@@ -28,7 +28,7 @@ import java.util.Set;
  * XML 仓储语句注册表。
  *
  * @author WCDK
- * @date 2026/7/21
+ *
  * @version 1.0
  **/
 public class RepositoryXmlRegistry {

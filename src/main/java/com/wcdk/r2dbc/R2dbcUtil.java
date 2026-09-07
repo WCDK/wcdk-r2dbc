@@ -4,6 +4,7 @@ import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;
+import com.wcdk.r2dbc.execution.DmParameterValueConverter;
 import com.wcdk.r2dbc.execution.R2dbcQueryOperations;
 import com.wcdk.r2dbc.execution.R2dbcRowMapper;
 import com.wcdk.r2dbc.execution.R2dbcTransactionOperations;
@@ -35,7 +36,7 @@ import java.util.function.Function;
  *
  * @version 1.0
  * @auther WCDK
- * @date 2026/7/20
+ *
  **/
 public class R2dbcUtil {
 
@@ -104,7 +105,8 @@ public class R2dbcUtil {
         this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
 
         // 初始化基础组件
-        this.parameterBinder = new ParameterBinder();
+        // 兼容直接实例化 R2dbcUtil 时的达梦时间参数绑定。
+        this.parameterBinder = new ParameterBinder(new DmParameterValueConverter());
         this.lifecycleExecutor = new SqlLifecycleExecutor(interceptorChain);
         this.rowMapper = new R2dbcRowMapper();
         this.sqlLogger = new R2dbcSqlLogger(this.properties, this.springR2dbcProperties);

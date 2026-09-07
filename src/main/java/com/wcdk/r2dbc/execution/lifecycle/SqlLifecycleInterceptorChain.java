@@ -20,7 +20,7 @@ import java.util.List;
  * 执行顺序：异步拦截器在同步拦截器之前执行。
  *
  * @author WCDK
- * @date 2026/8/5
+ *
  * @version 1.0
  **/
 public class SqlLifecycleInterceptorChain {
