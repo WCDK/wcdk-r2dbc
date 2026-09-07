@@ -23,6 +23,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * XML 仓储语句注册表。
@@ -32,6 +33,16 @@ import java.util.Set;
  * @version 1.0
  **/
 public class RepositoryXmlRegistry {
+
+    /**
+     * SQL mapper files commonly contain comparison operators such as {@code <>}
+     * and {@code <=}.  XML requires the less-than character in text nodes to be
+     * escaped, but requiring every SQL author to wrap plain SQL in CDATA is
+     * unnecessarily strict.  Only operator-shaped less-than characters are
+     * normalized; XML markup and dynamic SQL elements remain untouched.
+     */
+    private static final Pattern SQL_LESS_THAN_OPERATOR = Pattern.compile(
+            "<(?=\\s*(?:=|>|#|[0-9]))|<(?=\\s+[^/!?])");
 
     private final Map<String, RepositoryStatement> statements = new LinkedHashMap<>();
 
@@ -85,7 +96,8 @@ public class RepositoryXmlRegistry {
             factory.setExpandEntityReferences(false);
             var documentBuilder = factory.newDocumentBuilder();
             documentBuilder.setEntityResolver((publicId, systemId) -> resolveLocalDtd(publicId, systemId));
-            Document document = documentBuilder.parse(new ByteArrayInputStream(xmlBytes));
+            Document document = documentBuilder.parse(new ByteArrayInputStream(
+                    normalizeSqlOperators(xmlContent).getBytes(StandardCharsets.UTF_8)));
             Element root = document.getDocumentElement();
             if (root == null || !"repository".equals(root.getTagName())) {
                 throw new IllegalStateException("R2DBC XML root element must be <repository>: "
@@ -118,6 +130,10 @@ public class RepositoryXmlRegistry {
         } catch (Exception e) {
             throw new IllegalStateException("解析 R2DBC XML 仓储失败：" + resource.getDescription(), e);
         }
+    }
+
+    private String normalizeSqlOperators(String xmlContent) {
+        return SQL_LESS_THAN_OPERATOR.matcher(xmlContent).replaceAll("&lt;");
     }
 
     /***

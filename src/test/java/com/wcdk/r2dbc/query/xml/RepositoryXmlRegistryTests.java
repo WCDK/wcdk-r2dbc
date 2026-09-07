@@ -64,6 +64,18 @@ class RepositoryXmlRegistryTests {
     }
 
     @Test
+    void acceptsUnescapedSqlComparisonOperators() throws Exception {
+        String xml = """
+                <repository namespace="%s">
+                  <select id="find">SELECT 1 WHERE A &lt;= 2 AND B &lt;&gt; 3</select>
+                  <select id="findPlain">SELECT 1 WHERE A <= 2 AND B <> 3</select>
+                </repository>
+                """.formatted(TestRepository.class.getName());
+
+        assertThat(registry(xml).find(TestRepository.class, "findPlain")).isPresent();
+    }
+
+    @Test
     void rejectsUnknownElementsAndStatementsWithoutIdsWithContext() {
         String unknown = """
                 <repository namespace="%s"><unknown>SELECT 1</unknown></repository>
