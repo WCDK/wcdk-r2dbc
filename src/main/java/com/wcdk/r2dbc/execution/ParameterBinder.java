@@ -121,7 +121,7 @@ public class ParameterBinder {
                         : Parameters.in(parameter.databaseType(), parameterValueConverter.convert(parameter.value())));
             }
             return parameter.value() == null
-                    ? spec.bindNull(index, parameter.javaType())
+                    ? spec.bindNull(index, parameterValueConverter.nullType(parameter.javaType()))
                     : spec.bind(index, parameterValueConverter.convert(parameter.value()));
         }
         if (value == null) {
@@ -147,7 +147,7 @@ public class ParameterBinder {
                         : Parameters.in(parameter.databaseType(), parameterValueConverter.convert(parameter.value())));
             }
             return parameter.value() == null
-                    ? spec.bindNull(identifier, parameter.javaType())
+                    ? spec.bindNull(identifier, parameterValueConverter.nullType(parameter.javaType()))
                     : spec.bind(identifier, parameterValueConverter.convert(parameter.value()));
         }
         if (value == null) {

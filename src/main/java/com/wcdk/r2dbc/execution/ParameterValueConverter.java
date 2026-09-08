@@ -13,4 +13,14 @@ public interface ParameterValueConverter {
      * @return 绑定参数值
      */
     Object convert(Object value);
+
+    /**
+     * 转换空参数绑定时使用的 Java 类型，默认保持原类型。
+     *
+     * @param javaType 原始参数 Java 类型
+     * @return 驱动实际支持的空参数类型
+     */
+    default Class<?> nullType(Class<?> javaType) {
+        return javaType;
+    }
 }

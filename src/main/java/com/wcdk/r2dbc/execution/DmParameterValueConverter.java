@@ -28,4 +28,13 @@ public class DmParameterValueConverter extends DefaultParameterValueConverter {
         if (value instanceof LocalTime time) return Time.valueOf(time);
         return value;
     }
+
+    @Override
+    public Class<?> nullType(Class<?> javaType) {
+        if (javaType == LocalDate.class) return java.sql.Date.class;
+        if (javaType == LocalDateTime.class) return Timestamp.class;
+        if (javaType == LocalTime.class) return Time.class;
+        if (javaType == Instant.class) return Date.class;
+        return javaType;
+    }
 }

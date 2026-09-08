@@ -79,6 +79,10 @@ class ParameterBinderTests {
                 .isInstanceOf(Timestamp.class);
         assertThat(new DmParameterValueConverter().convert(LocalDate.of(2026, 8, 11)))
                 .isInstanceOf(java.sql.Date.class);
+        assertThat(new DmParameterValueConverter().nullType(LocalDate.class))
+                .isEqualTo(java.sql.Date.class);
+        assertThat(new DmParameterValueConverter().nullType(LocalDateTime.class))
+                .isEqualTo(Timestamp.class);
     }    @Test
     void scannerIgnoresCastsQuotedTextAndComments() {
         String sql = "SELECT value::text, ':quoted' -- :line\n/* :block */ WHERE id = :id";
