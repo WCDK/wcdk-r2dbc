@@ -84,6 +84,20 @@ class ParameterBinderTests {
         assertThat(new DmParameterValueConverter().nullType(LocalDateTime.class))
                 .isEqualTo(Timestamp.class);
     }    @Test
+    void dmBinderUsesJdbcTypesForTemporalNulls() {
+        DatabaseClient client = mock(DatabaseClient.class);
+        DatabaseClient.GenericExecuteSpec spec = mock(DatabaseClient.GenericExecuteSpec.class);
+        String sql = "INSERT INTO assets (scrap_date) VALUES (:scrapDate)";
+        when(client.sql(sql)).thenReturn(spec);
+        when(spec.bindNull("scrapDate", java.sql.Date.class)).thenReturn(spec);
+
+        new ParameterBinder(new DmParameterValueConverter()).bind(client, sql,
+                Map.of("scrapDate", SqlParameter.nullOf(LocalDate.class)));
+
+        verify(spec).bindNull("scrapDate", java.sql.Date.class);
+    }
+
+    @Test
     void scannerIgnoresCastsQuotedTextAndComments() {
         String sql = "SELECT value::text, ':quoted' -- :line\n/* :block */ WHERE id = :id";
         DatabaseClient client = mock(DatabaseClient.class);

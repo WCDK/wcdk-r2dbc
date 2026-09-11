@@ -413,6 +413,100 @@ public class UserService {
 
 事务中应保持数据库操作链的响应式特性，不要在事务范围内调用阻塞 JDBC、阻塞 HTTP 或长时间外部服务。
 
+### 使用 `@Transactional`
+
+WCDK R2DBC 提供响应式 `ReactiveTransactionManager`，因此 Spring 的
+`org.springframework.transaction.annotation.Transactional` 可以用于 `Mono` 和
+`Flux` 返回值的方法。事务在 Publisher 被订阅时开启，在 Publisher 正常完成时提交，
+发生异常或取消时回滚。
+
+#### 方式一：使用 Spring 标准事务 Advisor（推荐）
+
+应用中启用 Spring 注解事务管理：
+
+```java
+import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+@Configuration
+@EnableTransactionManagement
+public class TransactionConfiguration {
+}
+```
+
+然后在 Spring 管理的 Service Bean 上使用 `@Transactional`：
+
+```java
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Mono;
+
+@Service
+public class UserService {
+
+    private final UserRepository userRepository;
+
+    public UserService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @Transactional
+    public Mono<User> create(User user) {
+        return userRepository.insert(user)
+                .flatMap(saved -> userRepository.updateById(saved)
+                        .thenReturn(saved));
+    }
+}
+```
+
+WCDK 自动配置会提供 `ReactiveTransactionManager`。如果应用已经启用了 Spring 标准事务
+Advisor，WCDK 自定义事务切面会自动让位，不会重复拦截。
+
+#### 方式二：启用 WCDK `@Transactional` 响应式切面
+
+如果应用没有启用 Spring 标准事务 Advisor，可以显式开启 WCDK 切面：
+
+```yaml
+wcdk:
+  r2dbc:
+    enabled: true
+    transaction:
+      aspect-enabled: true
+```
+
+WCDK 切面会将 `@Transactional` 方法转换为基于 `TransactionalOperator` 的响应式事务，
+并支持 `propagation`、`isolation`、`readOnly` 和 `timeout` 等事务属性。
+
+#### 生效条件和注意事项
+
+- 方法必须由 Spring Bean 代理调用；直接 `new` 对象或同一个类中使用 `this.method()` 自调用，
+  不会经过事务代理。
+- 响应式事务方法应返回 `Mono` 或 `Flux`，不要在方法中调用 `block()` 或手动 `subscribe()`。
+- 只有返回的响应式链真正被订阅时，事务才会执行；仅创建 Publisher 不会立即开启事务。
+- 事务边界内应只放置相关的 R2DBC 数据库操作，不要包含阻塞 JDBC、阻塞 HTTP 或长时间外部调用。
+- 事务中的数据库操作必须使用同一个 `ConnectionFactory`。多数据源场景下，应在事务开始前确定数据源，
+  事务中不能切换到其他数据源。
+- 如果方法返回普通对象而不是 `Mono`/`Flux`，不能按响应式事务使用；推荐改为返回 `Mono<T>` 或 `Flux<T>`。
+- 默认情况下，WCDK 自定义事务切面关闭；既没有 Spring 标准事务 Advisor，也没有配置
+  `wcdk.r2dbc.transaction.aspect-enabled=true` 时，`@Transactional` 不会生效。
+
+#### 何时使用 `TransactionalOperator`
+
+需要明确控制事务边界，或不希望依赖 AOP 代理时，直接使用 `TransactionalOperator`：
+
+```java
+public Mono<User> create(User user) {
+    return transactionalOperator.transactional(
+            userRepository.insert(user)
+                    .flatMap(saved -> userRepository.updateById(saved)
+                            .thenReturn(saved))
+    );
+}
+```
+
+`@Transactional` 和 `TransactionalOperator` 使用同一个响应式事务管理器，不能在同一条业务链上
+重复包裹事务，除非确实需要通过 `REQUIRES_NEW` 等传播行为创建独立事务。
+
 ## XML SQL
 
 默认扫描路径为 `classpath*:repository/**/*.xml`。例如 `src/main/resources/repository/UserRepository.xml`：
