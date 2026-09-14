@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /***
@@ -27,7 +26,9 @@ import java.util.regex.Pattern;
  */
 public final class DynamicSqlSource {
 
-    private static final Pattern PARAMETER_PATTERN = Pattern.compile("#\\{\\s*([a-zA-Z0-9_.$]+)\\s*}");
+    private static final Pattern SQL_FUNCTION_PATTERN = Pattern.compile(
+            "(?i)[a-z_][a-z0-9_$.]*\\s*\\((?:[^'\"()]|\\([^()]*\\))*\\)");
+    private static final Pattern PROPERTY_PATH_PATTERN = Pattern.compile("[a-zA-Z0-9_.$]+");
     private static final SpelExpressionParser EXPRESSION_PARSER = new SpelExpressionParser();
 
     private final SqlNode root;
@@ -158,20 +159,7 @@ public final class DynamicSqlSource {
 
         @Override
         public void apply(RenderContext context, StringBuilder sql) {
-            Matcher matcher = PARAMETER_PATTERN.matcher(text);
-            StringBuilder rendered = new StringBuilder();
-            while (matcher.find()) {
-                String path = matcher.group(1);
-                String rootName = path.split("\\.", 2)[0];
-                if (!context.localNames().contains(rootName)) {
-                    matcher.appendReplacement(rendered, Matcher.quoteReplacement(matcher.group()));
-                    continue;
-                }
-                String parameterName = context.addLocalParameter(context.value(path));
-                matcher.appendReplacement(rendered, Matcher.quoteReplacement("#{" + parameterName + "}"));
-            }
-            matcher.appendTail(rendered);
-            sql.append(rendered);
+            sql.append(context.renderText(text));
         }
     }
 
@@ -309,5 +297,140 @@ public final class DynamicSqlSource {
             additionalParameters.put(name, value);
             return name;
         }
+
+        String renderText(String text) {
+            StringBuilder rendered = new StringBuilder();
+            SqlLexicalState state = SqlLexicalState.NORMAL;
+            for (int i = 0; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                char next = i + 1 < text.length() ? text.charAt(i + 1) : 0;
+                if (state != SqlLexicalState.NORMAL) {
+                    rendered.append(ch);
+                    if (state == SqlLexicalState.LINE_COMMENT && (ch == '\n' || ch == '\r')) {
+                        state = SqlLexicalState.NORMAL;
+                    } else if (state == SqlLexicalState.BLOCK_COMMENT && ch == '*' && next == '/') {
+                        rendered.append(next);
+                        i++;
+                        state = SqlLexicalState.NORMAL;
+                    } else if ((state == SqlLexicalState.SINGLE_QUOTE && ch == '\'')
+                            || (state == SqlLexicalState.DOUBLE_QUOTE && ch == '"')
+                            || (state == SqlLexicalState.BACKTICK && ch == '`')) {
+                        if (next == ch) {
+                            rendered.append(next);
+                            i++;
+                        } else {
+                            state = SqlLexicalState.NORMAL;
+                        }
+                    }
+                    continue;
+                }
+                if (ch == '\'') { state = SqlLexicalState.SINGLE_QUOTE; rendered.append(ch); continue; }
+                if (ch == '"') { state = SqlLexicalState.DOUBLE_QUOTE; rendered.append(ch); continue; }
+                if (ch == '`') { state = SqlLexicalState.BACKTICK; rendered.append(ch); continue; }
+                if (ch == '-' && next == '-') {
+                    state = SqlLexicalState.LINE_COMMENT;
+                    rendered.append(ch).append(next);
+                    i++;
+                    continue;
+                }
+                if (ch == '/' && next == '*') {
+                    state = SqlLexicalState.BLOCK_COMMENT;
+                    rendered.append(ch).append(next);
+                    i++;
+                    continue;
+                }
+                if (ch == '#' && next == '{') {
+                    int end = text.indexOf('}', i + 2);
+                    if (end < 0) {
+                        throw new IllegalArgumentException("SQL 参数表达式缺少结束符 '}': " + text.substring(i));
+                    }
+                    String expression = text.substring(i + 2, end).trim();
+                    if (expression.isEmpty()) {
+                        throw new IllegalArgumentException("SQL 参数表达式不能为空");
+                    }
+                    if (PROPERTY_PATH_PATTERN.matcher(expression).matches()
+                            && !localNames.contains(expression.split("\\.", 2)[0])) {
+                        rendered.append(text, i, end + 1);
+                        i = end;
+                        continue;
+                    }
+                    rendered.append(renderExpression(expression));
+                    i = end;
+                    continue;
+                }
+                if (ch == ':' && isParameterStart(next)
+                        && (i == 0 || text.charAt(i - 1) != ':') && next != '=') {
+                    int end = i + 2;
+                    while (end < text.length() && isParameterPart(text.charAt(end))) end++;
+                    rendered.append("#{").append(text, i + 1, end).append('}');
+                    i = end - 1;
+                    continue;
+                }
+                rendered.append(ch);
+            }
+            return rendered.toString();
+        }
+
+        private String renderExpression(String expression) {
+            int question = topLevelCharacter(expression, '?');
+            if (question >= 0) {
+                int colon = topLevelCharacter(expression, ':', question + 1);
+                if (colon < 0) {
+                    throw new IllegalArgumentException("SQL 参数三元表达式缺少 ':'：" + expression);
+                }
+                String condition = expression.substring(0, question).trim();
+                String whenTrue = expression.substring(question + 1, colon).trim();
+                String whenFalse = expression.substring(colon + 1).trim();
+                if (whenTrue.isEmpty() || whenFalse.isEmpty()) {
+                    throw new IllegalArgumentException("SQL 参数三元表达式分支不能为空：" + expression);
+                }
+                boolean matches = Boolean.TRUE.equals(EXPRESSION_PARSER.parseExpression(condition)
+                        .getValue(evaluationContext(), Boolean.class));
+                return renderValue(matches ? whenTrue : whenFalse);
+            }
+            return renderValue(expression);
+        }
+
+        private String renderValue(String expression) {
+            if (SQL_FUNCTION_PATTERN.matcher(expression).matches()) {
+                return expression;
+            }
+            Object value = EXPRESSION_PARSER.parseExpression(expression).getValue(evaluationContext());
+            return "#{" + addLocalParameter(value) + "}";
+        }
+
+        private int topLevelCharacter(String expression, char target) {
+            return topLevelCharacter(expression, target, 0);
+        }
+
+        private int topLevelCharacter(String expression, char target, int start) {
+            int depth = 0;
+            char quote = 0;
+            for (int i = start; i < expression.length(); i++) {
+                char ch = expression.charAt(i);
+                if (quote != 0) {
+                    if (ch == quote) {
+                        if (i + 1 < expression.length() && expression.charAt(i + 1) == quote) i++;
+                        else quote = 0;
+                    }
+                    continue;
+                }
+                if (ch == '\'' || ch == '"') { quote = ch; continue; }
+                if (ch == '(' || ch == '[') depth++;
+                else if (ch == ')' || ch == ']') depth--;
+                else if (ch == target && depth == 0) return i;
+            }
+            return -1;
+        }
+
+        private boolean isParameterStart(char ch) {
+            return Character.isLetter(ch) || ch == '_';
+        }
+
+        private boolean isParameterPart(char ch) {
+            return Character.isLetterOrDigit(ch) || ch == '_';
+        }
     }
+
+    private enum SqlLexicalState { NORMAL, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, LINE_COMMENT, BLOCK_COMMENT }
 }

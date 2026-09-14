@@ -34,6 +34,35 @@ class DynamicSqlSourceTests {
     }
 
     @Test
+    void acceptsColonParametersAndDoesNotRewriteSqlStringsOrCasts() throws Exception {
+        DynamicSqlSource source = parse("""
+                <select>SELECT ':ignored', value::text FROM users WHERE name = :name AND id = #{id}</select>
+                """);
+
+        DynamicSqlSource.RenderedSql rendered = source.render(Map.of("name", "Ada", "id", 7));
+
+        assertThat(rendered.sql()).isEqualTo("SELECT ':ignored', value::text FROM users WHERE name = #{name} AND id = #{id}");
+        assertThat(rendered.additionalParameters()).isEmpty();
+    }
+
+    @Test
+    void evaluatesExpressionsToEntityValuesAndSqlFunctions() throws Exception {
+        DynamicSqlSource source = parse("""
+                <update>UPDATE users SET update_time = #{updateTime != null ? updateTime : now()}, note = #{note != null ? note : 'fallback'}, amount = #{amount != null ? amount : 2.5}</update>
+                """);
+
+        DynamicSqlSource.RenderedSql missing = source.render(mapWithNull("updateTime", null, "note", null, "amount", null));
+        assertThat(missing.sql()).isEqualTo("UPDATE users SET update_time = now(), note = #{__foreach_0}, amount = #{__foreach_1}");
+        assertThat(missing.additionalParameters()).containsExactly(
+                Map.entry("__foreach_0", "fallback"), Map.entry("__foreach_1", 2.5));
+
+        DynamicSqlSource.RenderedSql present = source.render(Map.of("updateTime", "2026-09-14", "note", "custom", "amount", 4.0));
+        assertThat(present.sql()).isEqualTo("UPDATE users SET update_time = #{__foreach_0}, note = #{__foreach_1}, amount = #{__foreach_2}");
+        assertThat(present.additionalParameters()).containsExactly(
+                Map.entry("__foreach_0", "2026-09-14"), Map.entry("__foreach_1", "custom"), Map.entry("__foreach_2", 4.0));
+    }
+
+    @Test
     void omitsWhereWhenNoConditionMatches() throws Exception {
         DynamicSqlSource source = parse("""
                 <select>SELECT * FROM sys_user<where><if test="name != null">AND name = #{name}</if></where></select>
@@ -102,7 +131,7 @@ class DynamicSqlSourceTests {
     void rejectsLiteralSubstitutionByDefault() {
         assertThatThrownBy(() -> parse("<select>SELECT * FROM ${table}</select>"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("does not allow literal");
+                .hasMessageContaining("不允许使用字面量");
     }
 
     private static DynamicSqlSource parse(String xml) throws Exception {

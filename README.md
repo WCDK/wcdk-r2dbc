@@ -532,6 +532,21 @@ Mono<User> findActiveByEmail(String email);
 
 XML 语句支持动态 SQL、参数绑定、`resultType`、`resultMap`、`discriminator` 和 `<foreach>`。XML 文件中的 namespace、语句 ID、参数和返回类型必须与仓储接口一致。
 
+参数可以使用 `#{name}` 或 `:name` 两种写法；两者都会转换为绑定参数，SQL 字符串和注释中的同名文本不会被当成参数。`#{...}` 还支持条件表达式，可以根据当前方法参数或实体属性选择要写入的值：
+
+```xml
+<update id="updateProfile">
+    UPDATE sys_user
+    SET user_name = #{userName},
+        update_time = #{updateTime != null ? updateTime : now()},
+        remark = #{remark != null ? remark : '未填写'},
+        score = #{score != null ? score : 0.5}
+    WHERE id = :id
+</update>
+```
+
+条件和普通属性表达式使用 Spring SpEL 读取当前参数；表达式选中的属性值、字符串和数字会作为绑定参数传给数据库。字符串字面量请用单引号包裹。像 `now()` 这样的数据库函数会作为 SQL 表达式直接写入 SQL，不会作为字符串参数绑定。实体作为方法参数时可以直接引用其属性，例如 `#{updateTime}`；也可以用 `#{updateTime != null ? updateTime : now()}` 在属性为空时采用数据库函数。
+
 ## SQL 生命周期与观测
 
 可以通过 `SqlLifecycleInterceptor`、`ReactiveSqlLifecycleInterceptor` 和 `SqlExecutionObserver` 扩展 SQL 执行生命周期：
