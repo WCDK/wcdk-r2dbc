@@ -56,8 +56,8 @@ public final class RepositoryMethodPlanCompiler {
     }
 
     private RepositoryMethodPlan compile(Method method) {
-        return crudCompiler.compile(method)
-                .or(() -> xmlCompiler.compile(method))
+        return xmlCompiler.compile(method)
+                .or(() -> crudCompiler.compile(method))
                 .or(() -> derivedCompiler.compile(method))
                 .orElseGet(() -> new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.UNSUPPORTED,
                         null, repositoryInterface.getName() + "." + method.getName()));
