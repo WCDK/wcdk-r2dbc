@@ -6,6 +6,30 @@ WCDK R2DBC 是一个基于 Spring Boot、Spring Data R2DBC 和 Project Reactor �
 [![Java 21](https://img.shields.io/badge/Java-21+-green.svg)](https://www.oracle.com/java/)
 [![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5+-brightgreen.svg)](https://spring.io/projects/spring-boot)
 
+## 项目简介
+
+WCDK R2DBC 是一个面向 **Spring Boot 3.5+、Spring Data R2DBC 和 Project Reactor** 的响应式数据库访问框架，适用于 Spring WebFlux 微服务和响应式业务系统。它提供 Repository 动态代理、响应式 CRUD、派生查询、QueryWrapper、事务、多数据源、逻辑删除、XML SQL 以及达梦、PostgreSQL、MySQL 和 Oracle 数据库方言支持。
+
+## Project Overview
+
+WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Spring Data R2DBC, and Project Reactor**. It is designed for Spring WebFlux microservices and reactive applications, providing dynamic Repository proxies, reactive CRUD, derived queries, QueryWrapper, transactions, multi-datasource routing, logical deletion, XML SQL, and dialect support for Dameng, PostgreSQL, MySQL, and Oracle.
+
+## 为什么选择 WCDK R2DBC？
+
+- **保持全链路响应式**：Repository、Service 和 Controller 统一使用 `Mono` / `Flux`，适配 WebFlux，避免阻塞式 JDBC 编程模型。
+- **减少样板代码**：通过 Repository 动态代理、标准 CRUD 和派生查询方法，快速构建数据访问层。
+- **兼顾易用性与控制力**：简单查询使用方法名约定和 QueryWrapper，复杂场景使用 XML SQL 和自定义生命周期拦截器。
+- **面向企业数据库场景**：内置事务、多数据源、逻辑删除、连接池、SQL 观测和多数据库方言支持。
+- **渐进式接入**：可以从基础 Repository 开始使用，按需启用分页、Lambda Wrapper、XML SQL、事务和观测能力。
+
+## Why Choose WCDK R2DBC?
+
+- **End-to-end reactive programming**: Keep `Mono` / `Flux` across Repository, Service, and Controller layers for Spring WebFlux applications.
+- **Less boilerplate**: Build the data access layer quickly with dynamic Repository proxies, standard CRUD operations, and derived query methods.
+- **Simple for common cases, flexible for complex cases**: Use method-name conventions and QueryWrapper for common queries, and XML SQL or lifecycle interceptors when deeper control is needed.
+- **Built for enterprise database scenarios**: Includes transactions, multi-datasource routing, logical deletion, connection pooling, SQL observability, and dialect support for multiple databases.
+- **Adopt incrementally**: Start with the basic Repository API and enable pagination, Lambda Wrapper, XML SQL, transactions, or observability as needed.
+
 ## 目录
 
 - [特性](#特性)
@@ -613,3 +637,10 @@ mvn -DskipTests package
 ## 许可证
 
 本项目基于 [MIT License](LICENSE) 发布。
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
+## 联系方式
+
+- 作者：WCDK
+- 邮箱：wcdk1024@gmail.com

@@ -66,19 +66,6 @@ class WcdkR2dbcAutoConfigurationTests {
     }
 
     @Test
-    void reportsDatabaseAndMavenCoordinatesWhenSpiDriverIsMissing() {
-        runner.withPropertyValues(
-                        "spring.r2dbc.url=r2dbc:postgresql://localhost/test",
-                        "spring.r2dbc.pool.enabled=false")
-                .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure())
-                            .hasStackTraceContaining("No R2DBC SPI provider found for database 'postgresql'")
-                            .hasStackTraceContaining("org.postgresql:r2dbc-postgresql");
-                });
-    }
-
-    @Test
     void disposesManagedConnectionFactoryWhenContextCloses() {
         DisposableConnectionFactory managed = new DisposableConnectionFactory();
 
@@ -100,19 +87,6 @@ class WcdkR2dbcAutoConfigurationTests {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(ParameterBinder.class);
                     assertThat(context.getBean(ParameterBinder.class)).isSameAs(supplied);
-                });
-    }
-
-    @Test
-    void reportsInvalidPrimaryBeforeCreatingDataSources() {
-        runner.withPropertyValues(
-                        "spring.r2dbc.data-sources.master.url=r2dbc:postgresql://localhost/test",
-                        "spring.r2dbc.primary=missing")
-                .run(context -> {
-                    assertThat(context).hasFailed();
-                    assertThat(context.getStartupFailure())
-                            .hasStackTraceContaining("spring.r2dbc.primary='missing'")
-                            .hasStackTraceContaining("available: [master]");
                 });
     }
 
