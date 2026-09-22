@@ -179,6 +179,9 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
         }
         if (StringUtils.hasText(resultType)) {
             Class<?> targetClass = resolveClass(resultType);
+            if (Map.class.isAssignableFrom(targetClass)) {
+                return rowToMap(row);
+            }
             if (Number.class.isAssignableFrom(targetClass) || targetClass == String.class || targetClass == Boolean.class || targetClass == boolean.class) {
                 return sqlExecutionEngine.convertValue(row.get(0), targetClass);
             }
@@ -190,10 +193,20 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
             }
             return sqlExecutionEngine.map(row, metadata.entityClass());
         }
+        if (Map.class.isAssignableFrom(valueType)) {
+            return rowToMap(row);
+        }
         if (Number.class.isAssignableFrom(valueType) || valueType == String.class || valueType == Boolean.class || valueType == boolean.class) {
             return sqlExecutionEngine.convertValue(row.get(0), valueType);
         }
         return sqlExecutionEngine.map(row, valueType);
+    }
+
+    private Map<String, Object> rowToMap(Row row) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        row.getMetadata().getColumnMetadatas().forEach(column ->
+                map.put(column.getName(), row.get(column.getName())));
+        return map;
     }
 
     private Object mapRowByResultMap(Row row, String resultMapId) {

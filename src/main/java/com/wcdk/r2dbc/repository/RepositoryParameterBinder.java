@@ -22,6 +22,9 @@ import java.util.regex.Pattern;
  */
 final class RepositoryParameterBinder {
     private Field findField(Class<?> type, String name) {
+        if (type.getModule() != null && type.getModule().isNamed()) {
+            return null;
+        }
         Class<?> current = type;
         while (current != null && current != Object.class) {
             try {
@@ -147,7 +150,11 @@ final class RepositoryParameterBinder {
     }
 
     private void putBeanProperties(Map<String, Object> parameters, Object argument) {
-        for (Field field : argument.getClass().getDeclaredFields()) {
+        Class<?> type = argument.getClass();
+        if (type.getModule() != null && type.getModule().isNamed()) {
+            return;
+        }
+        for (Field field : type.getDeclaredFields()) {
             if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
                 continue;
             }
@@ -168,6 +175,9 @@ final class RepositoryParameterBinder {
     }
 
     private Field field(Class<?> type, String name) {
+        if (type.getModule() != null && type.getModule().isNamed()) {
+            throw new IllegalArgumentException("不支持反射访问JDK模块类型字段: " + type.getName() + "." + name);
+        }
         Class<?> searchType = type;
         while (searchType != null && searchType != Object.class) {
             try {
@@ -186,7 +196,9 @@ final class RepositoryParameterBinder {
                 || value instanceof CharSequence
                 || value instanceof Number
                 || value instanceof Boolean
-                || value instanceof Enum<?>;
+                || value instanceof Enum<?>
+                || value instanceof java.time.temporal.TemporalAccessor
+                || value instanceof java.time.ZoneId;
     }
 
 

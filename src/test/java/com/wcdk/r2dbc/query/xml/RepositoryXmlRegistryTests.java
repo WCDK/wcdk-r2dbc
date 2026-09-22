@@ -7,6 +7,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,6 +74,22 @@ class RepositoryXmlRegistryTests {
                 """.formatted(TestRepository.class.getName());
 
         assertThat(registry(xml).find(TestRepository.class, "findPlain")).isPresent();
+    }
+
+    @Test
+    void preservesComparisonOperatorsInsideCdata() throws Exception {
+        String xml = """
+                <repository namespace="%s">
+                  <update id="acquire"><![CDATA[
+                    UPDATE lock_table SET lock_until=:until
+                    WHERE lock_until < :now
+                  ]]></update>
+                </repository>
+                """.formatted(TestRepository.class.getName());
+
+        String sql = registry(xml).find(TestRepository.class, "acquire")
+                .orElseThrow().render(Map.of()).sql();
+        assertThat(sql).contains("lock_until < #{now}").doesNotContain("&lt;");
     }
 
     @Test

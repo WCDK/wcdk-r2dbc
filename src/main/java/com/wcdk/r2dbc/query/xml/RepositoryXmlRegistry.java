@@ -133,7 +133,31 @@ public class RepositoryXmlRegistry {
     }
 
     private String normalizeSqlOperators(String xmlContent) {
-        return SQL_LESS_THAN_OPERATOR.matcher(xmlContent).replaceAll("&lt;");
+        // CDATA is already XML-safe. Escaping comparison operators inside it
+        // changes the SQL text to a literal "&lt;" and later makes the named
+        // parameter parser see a fake parameter named "lt".
+        StringBuilder normalized = new StringBuilder(xmlContent.length());
+        int cursor = 0;
+        while (cursor < xmlContent.length()) {
+            int cdataStart = xmlContent.indexOf("<![CDATA[", cursor);
+            if (cdataStart < 0) {
+                normalized.append(normalizeXmlText(xmlContent.substring(cursor)));
+                break;
+            }
+            normalized.append(normalizeXmlText(xmlContent.substring(cursor, cdataStart)));
+            int cdataEnd = xmlContent.indexOf("]]>", cdataStart + 9);
+            if (cdataEnd < 0) {
+                normalized.append(xmlContent.substring(cdataStart));
+                break;
+            }
+            normalized.append(xmlContent, cdataStart, cdataEnd + 3);
+            cursor = cdataEnd + 3;
+        }
+        return normalized.toString();
+    }
+
+    private String normalizeXmlText(String xmlText) {
+        return SQL_LESS_THAN_OPERATOR.matcher(xmlText).replaceAll("&lt;");
     }
 
     /***

@@ -69,6 +69,9 @@ public class R2dbcRowMapper {
      * @return 实体对象
      */
     public <T> T map(Row row, Class<T> entityClass) {
+        if (Map.class.isAssignableFrom(entityClass)) {
+            return entityClass.cast(rowToMap(row));
+        }
         try {
             mappingRequests.increment();
             MappingPlan plan = mappingPlans.get(entityClass);
@@ -79,6 +82,13 @@ public class R2dbcRowMapper {
             }
             throw new IllegalStateException("实体映射失败: " + entityClass.getName(), e);
         }
+    }
+
+    private Map<String, Object> rowToMap(Row row) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        row.getMetadata().getColumnMetadatas().forEach(column ->
+                map.put(column.getName(), row.get(column.getName())));
+        return map;
     }
 
     public CacheStats cacheStats() {
