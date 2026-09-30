@@ -87,7 +87,7 @@ public final class DynamicSqlSource {
     }
 
     /***
-     * 解析 MyBatis 风格的 choose 分支节点。
+     * 解析  choose 分支节点。
      * @author wcdk
      */
     private static SqlNode parseChoose(Element chooseElement) {
