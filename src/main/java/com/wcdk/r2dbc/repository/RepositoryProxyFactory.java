@@ -4,6 +4,7 @@ import com.wcdk.r2dbc.execution.RepositoryOperations;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
+import com.wcdk.r2dbc.dialect.DatabaseDialects;
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
 import org.springframework.aop.framework.ProxyFactory;
@@ -54,7 +55,8 @@ public class RepositoryProxyFactory {
 
     public Object create(Class<?> repositoryInterface) {
         Class<?> entityClass = resolveEntityClass(repositoryInterface);
-        RepositoryMetadata metadata = entityClass != null ? new RepositoryMetadata(entityClass, properties) : null;
+        RepositoryMetadata metadata = entityClass != null ? new RepositoryMetadata(entityClass, properties,
+                DatabaseDialects.get(repositoryOperations.databaseClient().getConnectionFactory())) : null;
 
         Map<java.lang.reflect.Method, RepositoryMethodPlan> methodPlans =
                 new RepositoryMethodPlanCompiler(repositoryInterface, metadata, repositoryXmlRegistry, properties)

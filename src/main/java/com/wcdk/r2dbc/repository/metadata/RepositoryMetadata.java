@@ -1,6 +1,8 @@
 package com.wcdk.r2dbc.repository.metadata;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
+import com.wcdk.r2dbc.dialect.DatabaseDialect;
+import com.wcdk.r2dbc.dialect.PostgreSqlDatabaseDialect;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
@@ -30,10 +32,22 @@ public final class RepositoryMetadata {
 
     private final FieldColumn logicDeleteColumn;
 
+    private final WcdkR2dbcProperties properties;
+
+    private final DatabaseDialect dialect;
+
+    /*** 保留直接构造元数据时的ANSI引用行为。 @author wcdk ***/
     public RepositoryMetadata(Class<?> entityClass, WcdkR2dbcProperties properties) {
+        this(entityClass, properties, PostgreSqlDatabaseDialect.INSTANCE);
+    }
+
+    /*** 依据仓储实际连接的方言引用标识符。 @author wcdk ***/
+    public RepositoryMetadata(Class<?> entityClass, WcdkR2dbcProperties properties, DatabaseDialect dialect) {
+        this.properties = properties;
+        this.dialect = java.util.Objects.requireNonNull(dialect, "数据库方言不能为空");
         this.entityClass = entityClass;
-        this.tableName = tableName(entityClass, properties);
-        this.columns = columns(entityClass, properties);
+        this.tableName = tableName(entityClass);
+        this.columns = columns(entityClass);
         this.idColumn = columns.stream()
                 .filter(FieldColumn::id)
                 .findFirst()
@@ -80,31 +94,32 @@ public final class RepositoryMetadata {
 
     public FieldColumn columnByName(String columnName) {
         return columns.stream()
-                .filter(column -> column.field().getName().equals(columnName) || column.name().equals(columnName) || column.name().equals("\"" + columnName + "\""))
+                .filter(column -> column.field().getName().equals(columnName) || column.name().equals(columnName) || column.name().equals(identifier(columnName)))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("实体字段不存在：" + columnName));
     }
 
-    private static String tableName(Class<?> entityClass, WcdkR2dbcProperties properties) {
+    private String tableName(Class<?> entityClass) {
         Table table = entityClass.getAnnotation(Table.class);
         String name = table == null || table.value().isBlank() ? camelToUnderline(entityClass.getSimpleName()) : table.value();
-        return identifier(name, properties);
+        return identifier(name);
     }
 
-    private static List<FieldColumn> columns(Class<?> entityClass, WcdkR2dbcProperties properties) {
+    private List<FieldColumn> columns(Class<?> entityClass) {
         List<FieldColumn> result = new ArrayList<>();
         ReflectionUtils.doWithFields(entityClass, field -> {
             ReflectionUtils.makeAccessible(field);
             Column column = field.getAnnotation(Column.class);
             String name = column == null || column.value().isBlank() ? camelToUnderline(field.getName()) : column.value();
-            result.add(new FieldColumn(field, identifier(name, properties), field.isAnnotationPresent(Id.class)));
+            result.add(new FieldColumn(field, identifier(name), field.isAnnotationPresent(Id.class)));
         }, field -> !java.lang.reflect.Modifier.isStatic(field.getModifiers())
                 && !field.isAnnotationPresent(Transient.class));
         return List.copyOf(result);
     }
 
-    private static String identifier(String name, WcdkR2dbcProperties properties) {
-        return properties.isQuoteIdentifier() ? "\"" + name + "\"" : name;
+    /*** 使用方言统一引用与转义表名、列名，关闭配置时保留原名。 @author wcdk ***/
+    private String identifier(String name) {
+        return properties.isQuoteIdentifier() ? dialect.quoteIdentifier(name) : name;
     }
 
     private static String camelToUnderline(String value) {

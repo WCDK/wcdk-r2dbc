@@ -202,7 +202,7 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 | `wcdk.r2dbc.sql-log-enabled` | `true` | 是否输出 SQL 日志 |
 | `wcdk.r2dbc.observability-enabled` | `false` | 是否启用 Micrometer 观测 |
 | `wcdk.r2dbc.snowflake-id` | `false` | 是否启用雪花 ID 生成 |
-| `wcdk.r2dbc.quote-identifier` | `true` | 是否引用数据库标识符 |
+| `wcdk.r2dbc.quote-identifier` | `true` | 是否引用数据库标识符；仓储按连接方言生成，MySQL使用反引号，PostgreSQL/Oracle/达梦使用双引号 |
 | `wcdk.r2dbc.mapper-locations` | `classpath*:repository/**/*.xml` | XML Mapper 扫描位置 |
 | `wcdk.r2dbc.logic-delete-field` | `delFlg` | 逻辑删除字段 |
 | `wcdk.r2dbc.logic-not-delete-value` | `0` | 未删除值 |
