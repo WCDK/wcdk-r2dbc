@@ -12,6 +12,10 @@ import reactor.core.publisher.Mono;
  **/
 public interface BaseRepository<T> {
 
+    /***
+     * 插入并返回带主键的实体；record 自动生成主键时返回新实例，调用方需使用返回值。
+     * @author wcdk
+     **/
     Mono<T> insert(T entity);
 
     Mono<Long> deleteById(Object id);

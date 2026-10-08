@@ -135,5 +135,10 @@ public final class RepositoryMetadata {
     }
 
     public record FieldColumn(Field field, String name, boolean id) {
+        /*** 返回驱动请求生成值时使用的原始映射列名。 @author wcdk ***/
+        public String rawName() {
+            Column column = field.getAnnotation(Column.class);
+            return column == null || column.value().isBlank() ? camelToUnderline(field.getName()) : column.value();
+        }
     }
 }

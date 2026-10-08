@@ -12,6 +12,12 @@ public final class DmDatabaseDialect extends OracleDatabaseDialect {
     private DmDatabaseDialect() {
     }
 
+    /*** 达梦独立标识用于参数转换器选择。 @author wcdk ***/
+    @Override
+    public DatabaseType databaseType() {
+        return DatabaseType.DM;
+    }
+
     @Override
     public boolean supports(ConnectionFactory connectionFactory) {
         return DmDialectSupport.isDm(connectionFactory);

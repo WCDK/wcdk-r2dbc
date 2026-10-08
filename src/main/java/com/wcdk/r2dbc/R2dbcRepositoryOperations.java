@@ -57,6 +57,12 @@ public final class R2dbcRepositoryOperations implements RepositoryOperations {
         return delegate.updateWithoutLifecycle(sql, parameters);
     }
 
+    /*** 委托插入操作获取数据库生成的主键。 @author wcdk ***/
+    @Override
+    public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
+        return delegate.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
+    }
+
     @Override
     public <T> T map(Row row, Class<T> entityClass) {
         return delegate.map(row, entityClass);

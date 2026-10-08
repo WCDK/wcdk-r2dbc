@@ -42,8 +42,19 @@ final class RepositoryInvocationDispatcherFactory {
                                                   Class<?> repositoryInterface,
                                                   RepositoryXmlRegistry repositoryXmlRegistry,
                                                   SnowflakeIdGenerator snowflakeIdGenerator) {
+        return create(repositoryOperations, properties, metadata, repositoryInterface, repositoryXmlRegistry,
+                snowflakeIdGenerator, DatabaseDialects.get(repositoryOperations.databaseClient().getConnectionFactory()));
+    }
+
+    /*** 使用目标数据源的方言组装执行器。 @author wcdk ***/
+    static RepositoryInvocationDispatcher create(RepositoryOperations repositoryOperations,
+                                                  WcdkR2dbcProperties properties,
+                                                  RepositoryMetadata metadata,
+                                                  Class<?> repositoryInterface,
+                                                  RepositoryXmlRegistry repositoryXmlRegistry,
+                                                  SnowflakeIdGenerator snowflakeIdGenerator,
+                                                  DatabaseDialect dialect) {
         SqlExecutionEngine sqlExecutionEngine = new SqlExecutionEngine(repositoryOperations);
-        DatabaseDialect dialect = DatabaseDialects.get(sqlExecutionEngine.connectionFactory());
         RepositoryParameterBinder parameterBinder = new RepositoryParameterBinder();
         CrudRepositoryExecutor crudExecutor = new CrudRepositoryExecutor(
                 properties, metadata, repositoryInterface, repositoryXmlRegistry,

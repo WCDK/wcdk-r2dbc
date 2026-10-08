@@ -129,7 +129,14 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         return number;
     }
 
+    /*** 插入实体，在返回前回填数据库生成的主键。 @author wcdk ***/
     private Mono<?> insert(Object entity) {
+        // 每次订阅独立保存有效实体，record 的替换实例不会在订阅间共享。
+        return Mono.defer(() -> insertEntity(entity));
+    }
+
+    /*** 编译并插入当前实体，支持不可变 record 的主键赋值。 @author wcdk ***/
+    private Mono<?> insertEntity(Object entity) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
                 findMethod("insert"), repositoryInterface, new Object[]{entity});
@@ -140,22 +147,17 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                         Object idValue = fieldValue(metadata.idColumn(), entity);
                         if (idValue == null || (idValue instanceof Number number && number.longValue() == 0)) {
                             long snowflakeId = snowflakeIdGenerator.nextId();
-                            try {
-                                Field idField = metadata.idColumn().field();
-                                idField.setAccessible(true);
-                                if (idField.getType() == Long.class || idField.getType() == long.class) {
-                                    idField.set(entity, snowflakeId);
-                                } else if (idField.getType() == String.class) {
-                                    idField.set(entity, String.valueOf(snowflakeId));
-                                }
-                            } catch (IllegalAccessException e) {
-                                throw new IllegalStateException("无法设置雪花ID到实体字段：" + metadata.idColumn().field().getName(), e);
+                            Class<?> idType = metadata.idColumn().field().getType();
+                            if (idType == Long.class || idType == long.class || idType == String.class) {
+                                context.getArguments()[0] = assignId(entity, snowflakeId);
                             }
                         }
                     }
                     Map<String, Object> parameters = new LinkedHashMap<>();
+                    Object insertEntity = context.getArguments()[0];
                     List<FieldColumn> insertColumns = metadata.columns().stream()
-                            .filter(column -> fieldValue(column, entity) != null)
+                            .filter(column -> fieldValue(column, insertEntity) != null)
+                            .filter(column -> column != metadata.idColumn() || !needsGeneratedId(insertEntity))
                             .toList();
                     String sql;
                     if (insertColumns.isEmpty()) {
@@ -163,7 +165,7 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                     } else {
                         String fields = insertColumns.stream().map(FieldColumn::name).collect(Collectors.joining(", "));
                         String values = insertColumns.stream()
-                                .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
+                                .peek(column -> parameters.put(column.field().getName(), fieldValue(column, insertEntity)))
                                 .map(column -> ":" + column.field().getName())
                                 .collect(Collectors.joining(", "));
                         sql = "INSERT INTO " + metadata.tableName() + " (" + fields + ") VALUES (" + values + ")";
@@ -173,8 +175,60 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                     context.setParameters(parameters);
                 }));
         return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters())
-                        .thenReturn(entity));
+                () -> {
+                    Object insertEntity = context.getArguments()[0];
+                    if (!needsGeneratedId(insertEntity)) {
+                        return sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters())
+                                .thenReturn(insertEntity);
+                    }
+                    FieldColumn idColumn = metadata.idColumn();
+                    return sqlExecutionEngine.insertReturningIdWithoutLifecycle(
+                                    context.getSql(), context.getParameters(), idColumn.rawName())
+                            .map(id -> {
+                                Object result = assignId(insertEntity, id);
+                                context.getArguments()[0] = result;
+                                return result;
+                            });
+                });
+    }
+
+    /*** 普通实体原地设置主键，record 通过规范构造器复制所有组件并替换主键。 @author wcdk ***/
+    private Object assignId(Object entity, Object id) {
+        Field idField = metadata.idColumn().field();
+        Object convertedId = sqlExecutionEngine.convertValue(id, idField.getType());
+        try {
+            Class<?> entityType = entity.getClass();
+            if (!entityType.isRecord()) {
+                idField.set(entity, convertedId);
+                return entity;
+            }
+            java.lang.reflect.RecordComponent[] components = entityType.getRecordComponents();
+            Class<?>[] parameterTypes = new Class<?>[components.length];
+            Object[] values = new Object[components.length];
+            for (int i = 0; i < components.length; i++) {
+                parameterTypes[i] = components[i].getType();
+                // 按组件顺序读取原值，包括未参与持久化的组件。
+                Field componentField = entityType.getDeclaredField(components[i].getName());
+                componentField.setAccessible(true);
+                values[i] = componentField.equals(idField) ? convertedId : componentField.get(entity);
+            }
+            var constructor = entityType.getDeclaredConstructor(parameterTypes);
+            constructor.setAccessible(true);
+            return constructor.newInstance(values);
+        } catch (ReflectiveOperationException | IllegalArgumentException e) {
+            throw new IllegalStateException("无法设置实体主键：" + idField.getName(), e);
+        }
+    }
+
+    /*** 空主键及基本数值类型的默认零值由数据库生成，已有主键予以保留。 @author wcdk ***/
+    private boolean needsGeneratedId(Object entity) {
+        if (!metadata.hasIdColumn()) {
+            return false;
+        }
+        Field idField = metadata.idColumn().field();
+        Object value = fieldValue(idField, entity);
+        return value == null || (idField.getType().isPrimitive()
+                && value instanceof Number number && number.longValue() == 0);
     }
 
     private Mono<Long> deleteById(Object id) {

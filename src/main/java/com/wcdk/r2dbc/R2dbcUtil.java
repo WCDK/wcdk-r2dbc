@@ -99,8 +99,8 @@ public class R2dbcUtil {
         this.springR2dbcProperties = springR2dbcProperties == null ? new WcdkSpringR2dbcProperties() : springR2dbcProperties;
 
         // 初始化基础组件
-        // 兼容直接实例化 R2dbcUtil 时的达梦时间参数绑定。
-        this.parameterBinder = new ParameterBinder(new DmParameterValueConverter());
+        // 直接实例化时也按执行数据源选择参数兼容转换。
+        this.parameterBinder = ParameterBinder.forConnectionFactory(databaseClient.getConnectionFactory());
         this.lifecycleExecutor = new SqlLifecycleExecutor(interceptorChain);
         this.rowMapper = new R2dbcRowMapper();
         this.sqlLogger = new R2dbcSqlLogger(this.properties, this.springR2dbcProperties);
@@ -208,6 +208,11 @@ public class R2dbcUtil {
 
     Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return updateOperations.updateWithoutLifecycle(sql, parameters);
+    }
+
+    /*** 获取插入语句生成的主键，保留外层生命周期。 @author wcdk ***/
+    Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
+        return updateOperations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
     }
 
     public Mono<Long> batch(List<String> sqlList) {

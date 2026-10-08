@@ -29,6 +29,9 @@ public interface RepositoryOperations {
 
     Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters);
 
+    /*** 插入并获取指定列的数据库生成主键。 @author wcdk ***/
+    Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn);
+
     <T> T map(Row row, Class<T> entityClass);
 
     Object convertValue(Object value, Class<?> targetType);

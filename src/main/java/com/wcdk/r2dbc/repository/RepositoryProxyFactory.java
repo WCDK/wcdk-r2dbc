@@ -68,6 +68,24 @@ public class RepositoryProxyFactory {
                 repositoryOperations, properties, metadata, repositoryInterface,
                 repositoryXmlRegistry, snowflakeIdGenerator);
         methodPlans = dispatcher.bindPlans(methodPlans);
+        if (repositoryOperations.databaseClient().getConnectionFactory()
+                instanceof com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing) {
+            // 表列引用及派生查询 SQL 都按目标数据库编译，避免仅分页切换方言。
+            Map<String, Map<java.lang.reflect.Method, RepositoryMethodPlan>> routedPlans = new java.util.LinkedHashMap<>();
+            routedPlans.put(routing.getPrimary(), methodPlans);
+            for (var entry : routing.getConnectionFactories().entrySet()) {
+                if (entry.getKey().equals(routing.getPrimary())) continue;
+                var dialect = DatabaseDialects.get(entry.getValue());
+                RepositoryMetadata targetMetadata = entityClass == null ? null
+                        : new RepositoryMetadata(entityClass, properties, dialect);
+                var targetDispatcher = RepositoryInvocationDispatcherFactory.create(repositoryOperations, properties,
+                        targetMetadata, repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator, dialect);
+                var targetPlans = new RepositoryMethodPlanCompiler(repositoryInterface, targetMetadata,
+                        repositoryXmlRegistry, properties).compile();
+                routedPlans.put(entry.getKey(), targetDispatcher.bindPlans(targetPlans));
+            }
+            dispatcher = new RepositoryInvocationDispatcher(routing, routedPlans);
+        }
         proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(methodPlans, dispatcher));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
     }

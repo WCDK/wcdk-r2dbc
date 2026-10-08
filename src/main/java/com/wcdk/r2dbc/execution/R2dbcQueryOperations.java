@@ -74,7 +74,7 @@ public class R2dbcQueryOperations {
             context.setSql(sql);
             Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
             return lifecycleExecutor.executeFlux(chain, context, preparation,
-                    () -> withExecutionLog(execute(context.getSql(), context.getParameters()).fetch().all(),
+                    () -> withExecutionLog(execute(context.getSql(), context.getParameters(), ignored).fetch().all(),
                             context.getSql(), context.getParameters()));
         });
     }
@@ -107,7 +107,7 @@ public class R2dbcQueryOperations {
             context.setSql(sql);
             Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
             return lifecycleExecutor.executeFlux(chain, context, preparation,
-                    () -> withExecutionLog(executeMapped(context.getSql(), context.getParameters(), mapper),
+                    () -> withExecutionLog(executeMapped(context.getSql(), context.getParameters(), mapper, ignored),
                             context.getSql(), context.getParameters()));
         });
     }
@@ -162,7 +162,7 @@ public class R2dbcQueryOperations {
     public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
                                               BiFunction<Row, RowMetadata, T> mapper) {
         return Flux.deferContextual(contextView -> {
-            return withExecutionLog(executeMapped(sql, parameters, mapper), sql, parameters);
+            return withExecutionLog(executeMapped(sql, parameters, mapper, contextView), sql, parameters);
         });
     }
 
@@ -176,8 +176,8 @@ public class R2dbcQueryOperations {
      * @return 映射后的结果流
      */
     private <T> Flux<T> executeMapped(String sql, Map<?, ?> parameters,
-                                      BiFunction<Row, RowMetadata, T> mapper) {
-        return execute(sql, parameters)
+                                      BiFunction<Row, RowMetadata, T> mapper, reactor.util.context.ContextView context) {
+        return execute(sql, parameters, context)
                 .map((row, metadata) -> MappingResult.capture(row, metadata, mapper))
                 .all()
                 .handle((result, sink) -> {
@@ -277,8 +277,9 @@ public class R2dbcQueryOperations {
     private static Object normalizeLegacyValue(Object value) {
         return value instanceof Instant instant ? Date.from(instant) : value;
     }
-    private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters) {
-        return parameterBinder.bind(databaseClient, sql, parameters);
+    private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters,
+                                                      reactor.util.context.ContextView context) {
+        return parameterBinder.bind(databaseClient, sql, parameters, context);
     }
 
     private Map<String, Object> copyParameters(Map<?, ?> parameters) {

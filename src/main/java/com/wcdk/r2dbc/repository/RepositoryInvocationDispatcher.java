@@ -15,9 +15,21 @@ import java.util.Map;
  */
 final class RepositoryInvocationDispatcher {
     private final List<RepositoryMethodExecutor> executors;
+    private final com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing;
+    private final Map<String, Map<java.lang.reflect.Method, RepositoryMethodPlan>> routedPlans;
 
     RepositoryInvocationDispatcher(List<RepositoryMethodExecutor> executors) {
         this.executors = List.copyOf(executors);
+        this.routing = null;
+        this.routedPlans = Map.of();
+    }
+
+    /*** 绑定各数据源的独立不可变计划，在订阅时按 Reactor Context 选择。 @author wcdk ***/
+    RepositoryInvocationDispatcher(com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing,
+                                   Map<String, Map<java.lang.reflect.Method, RepositoryMethodPlan>> routedPlans) {
+        this.executors = List.of();
+        this.routing = routing;
+        this.routedPlans = Map.copyOf(routedPlans);
     }
 
     /***
@@ -56,6 +68,12 @@ final class RepositoryInvocationDispatcher {
 
     private Object execute(RepositoryMethodPlan plan, Object[] args,
                            ContextView context, Object proxy) {
+        if (routing != null) {
+            String key = com.wcdk.r2dbc.datasource.R2dbcDataSourceContext.get(context);
+            routing.getConnectionFactory(key); // 与连接路由一致地校验数据源键。
+            key = key == null || key.isBlank() ? routing.getPrimary() : key;
+            plan = routedPlans.get(key).get(plan.method());
+        }
         return (plan.executor() == null ? findExecutor(plan) : plan.executor())
                 .execute(plan, args, context, proxy);
     }

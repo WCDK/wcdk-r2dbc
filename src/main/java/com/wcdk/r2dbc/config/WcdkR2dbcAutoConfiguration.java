@@ -237,15 +237,7 @@ public class WcdkR2dbcAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public ParameterBinder parameterBinder(ConnectionFactory connectionFactory) {
-        DatabaseType type = DatabaseDialects.get(connectionFactory).databaseType();
-        ParameterValueConverter converter = switch (type) {
-            case DM -> new DmParameterValueConverter();
-            case POSTGRESQL -> new PostgreSqlParameterValueConverter();
-            case MYSQL -> new MysqlParameterValueConverter();
-            case ORACLE -> new OracleParameterValueConverter();
-            default -> new DefaultParameterValueConverter();
-        };
-        return new ParameterBinder(converter);
+        return ParameterBinder.forConnectionFactory(connectionFactory);
     }
 
     @Bean

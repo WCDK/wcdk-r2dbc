@@ -32,6 +32,28 @@ public class ParameterBinder {
         this.parameterValueConverter = java.util.Objects.requireNonNull(parameterValueConverter);
     }
 
+    /*** 按连接工厂创建转换器，路由工厂在执行时选择目标转换器。 @author wcdk ***/
+    public static ParameterBinder forConnectionFactory(io.r2dbc.spi.ConnectionFactory factory) {
+        if (factory instanceof com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing) {
+            return new RoutingParameterBinder(routing);
+        }
+        if (factory == null || factory.getMetadata() == null) return new ParameterBinder();
+        ParameterValueConverter converter = switch (com.wcdk.r2dbc.dialect.DatabaseDialects.get(factory).databaseType()) {
+            case DM -> new DmParameterValueConverter();
+            case POSTGRESQL -> new PostgreSqlParameterValueConverter();
+            case MYSQL -> new MysqlParameterValueConverter();
+            case ORACLE -> new OracleParameterValueConverter();
+            default -> new DefaultParameterValueConverter();
+        };
+        return new ParameterBinder(converter);
+    }
+
+    /*** 接收执行时上下文，显式提供的普通绑定器继续使用自定义转换器。 @author wcdk ***/
+    public DatabaseClient.GenericExecuteSpec bind(DatabaseClient client, String sql, Map<?, ?> parameters,
+                                                  reactor.util.context.ContextView context) {
+        return bind(client, sql, parameters);
+    }
+
     /**
      * 创建绑定后的执行规范。
      *

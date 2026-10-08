@@ -65,7 +65,7 @@ public class R2dbcUpdateOperations {
             context.setSql(sql);
             Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
             return lifecycleExecutor.executeMono(chain, context, preparation,
-                    () -> execute(context.getSql(), context.getParameters()).fetch().rowsUpdated()
+                    () -> execute(context.getSql(), context.getParameters(), ignored).fetch().rowsUpdated()
                             .doOnSuccess(count -> sqlLogger.logExecution(context.getSql(), context.getParameters(),
                                     count == null ? 0 : count))
                             .doOnError(error -> sqlLogger.logExecution(
@@ -76,10 +76,26 @@ public class R2dbcUpdateOperations {
     /** Executes an already intercepted repository update without invoking the lifecycle chain again. */
     public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return Mono.deferContextual(contextView -> {
-            return execute(sql, parameters).fetch().rowsUpdated()
+            return execute(sql, parameters, contextView).fetch().rowsUpdated()
                     .doOnSuccess(count -> sqlLogger.logExecution(sql, parameters, count == null ? 0 : count))
             .doOnError(error -> sqlLogger.logExecution(sql, parameters, error));
         });
+    }
+
+    /***
+     * 请求并读取数据库生成的主键，复用仓储外层生命周期。
+     * @author wcdk
+     **/
+    public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
+        return Mono.deferContextual(context -> execute(sql, parameters, context)
+                // 在同一条插入语句上请求生成值，避免额外查询及连接切换。
+                .filter(statement -> statement.returnGeneratedValues(idColumn))
+                .map((row, metadata) -> java.util.Objects.requireNonNull(row.get(0), "数据库返回的主键为空"))
+                .all()
+                .singleOrEmpty()
+                .switchIfEmpty(Mono.error(new IllegalStateException("数据库未返回生成的主键：" + idColumn)))
+                .doOnSuccess(id -> sqlLogger.logExecution(sql, parameters, 1L))
+                .doOnError(error -> sqlLogger.logExecution(sql, parameters, error)));
     }
 
     /**
@@ -97,7 +113,8 @@ public class R2dbcUpdateOperations {
                 .reduce(0L, Long::sum);
     }
 
-    private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters) {
-        return parameterBinder.bind(databaseClient, sql, parameters);
+    private DatabaseClient.GenericExecuteSpec execute(String sql, Map<?, ?> parameters,
+                                                      reactor.util.context.ContextView context) {
+        return parameterBinder.bind(databaseClient, sql, parameters, context);
     }
 }

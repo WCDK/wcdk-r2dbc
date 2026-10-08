@@ -70,6 +70,11 @@ final class SqlExecutionEngine {
         return update(SqlExecutionRequest.update(sql, parameters));
     }
 
+    /*** 通过统一仓储入口执行插入并读取生成主键。 @author wcdk ***/
+    Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
+        return operations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
+    }
+
     <T> T map(Row row, Class<T> type) {
         return operations.map(row, type);
     }
