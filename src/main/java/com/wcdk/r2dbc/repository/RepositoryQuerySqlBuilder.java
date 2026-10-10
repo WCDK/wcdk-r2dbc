@@ -24,6 +24,7 @@ import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.core.ResolvableType;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import com.wcdk.r2dbc.dialect.DatabaseDialects;
 import com.wcdk.r2dbc.dialect.DatabaseDialect;
 import org.springframework.data.repository.query.Param;
@@ -94,6 +95,26 @@ final class RepositoryQuerySqlBuilder {
         return queryWrapper.orderByList().stream()
                 .map(orderBy -> metadata.columnByName(orderBy.column()).name() + (orderBy.asc() ? " ASC" : " DESC"))
                 .collect(Collectors.joining(", ", " ORDER BY ", ""));
+    }
+
+    /*** Pageable 排序优先，Wrapper 提供后续排序键；按映射列去重并校验两侧全部字段。 @author wcdk ***/
+    String orderBySql(Pageable pageable, QueryWrapper<?> queryWrapper) {
+        Map<FieldColumn, String> orders = new LinkedHashMap<>();
+        for (Sort.Order order : pageable.getSort()) {
+            FieldColumn column = metadata.columnByName(order.getProperty());
+            if (order.isIgnoreCase() || order.getNullHandling() != Sort.NullHandling.NATIVE) {
+                throw new IllegalArgumentException("分页排序仅支持 ASC/DESC 与数据库默认空值顺序："
+                        + order.getProperty());
+            }
+            orders.putIfAbsent(column, column.name() + (order.isAscending() ? " ASC" : " DESC"));
+        }
+        if (queryWrapper != null) {
+            for (QueryWrapper.OrderBy order : queryWrapper.orderByList()) {
+                FieldColumn column = metadata.columnByName(order.column());
+                orders.putIfAbsent(column, column.name() + (order.asc() ? " ASC" : " DESC"));
+            }
+        }
+        return orders.isEmpty() ? "" : " ORDER BY " + String.join(", ", orders.values());
     }
 
     String limitSql(QueryWrapper<?> queryWrapper, ContextView dialectContext) {

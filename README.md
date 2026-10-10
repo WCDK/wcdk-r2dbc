@@ -380,14 +380,21 @@ Flux<User> users = userRepository.selectList(wrapper);
 ```java
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 Mono<Page<User>> result = userRepository.selectPage(
-        PageRequest.of(0, 20),
+        PageRequest.of(0, 20, Sort.by(Sort.Order.desc("id"))),
         new QueryWrapper<User>().eq("status", 1)
 );
 ```
 
 `PageRequest` 的页码从 `0` 开始。QueryWrapper 的 `page(pageNo, pageSize)` 使用从 `1` 开始的业务页码，并自动设置 `limit` 和 `offset`。
+
+`selectPage` 将 `Pageable.getSort()` 应用到记录查询的 ORDER BY，COUNT 查询不排序。排序属性通过实体元数据白名单映射，支持 Java 属性名及 `@Column` 列名；未知字段、表别名限定名和 SQL 表达式会报错。支持 ASC/DESC，使用数据库默认的大小写和空值排序规则；`ignoreCase`、`nullsFirst` 和 `nullsLast` 暂不支持，传入时会报错。
+
+`selectPage(pageable)` 默认方法通过仓储代理调用双参数入口，相当于传入空 QueryWrapper，使用同一套排序和字段校验规则。
+
+同时设置两侧排序时，Pageable 排序键在前，QueryWrapper 的其他排序键依次追加；同一映射列只出现一次，使用 Pageable 中首次指定的方向。例如 Pageable 按 `id DESC`，Wrapper 按 `id ASC, name ASC`，最终为 `id DESC, name ASC`，且不会修改 Wrapper。Pageable 无排序时使用 Wrapper 排序，两侧均无排序时不生成 ORDER BY。`Pageable.unpaged(sort)` 仍应用排序，但不追加分页限制。迁移时应检查此前同时指定两侧排序的调用，因为原先被忽略的 Pageable 排序现在具有优先级。
 
 ## 逻辑删除
 

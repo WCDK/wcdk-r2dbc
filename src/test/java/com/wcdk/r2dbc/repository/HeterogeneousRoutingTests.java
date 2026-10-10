@@ -15,6 +15,8 @@ import io.r2dbc.spi.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 import org.springframework.r2dbc.connection.R2dbcTransactionManager;
@@ -85,11 +87,55 @@ class HeterogeneousRoutingTests {
     void pageCountAndRecordsBothUseTargetDialect() {
         Fixture fixture = new Fixture();
         StepVerifier.create(R2dbcDataSourceContext.use("oracle", fixture.repository.selectPage(
-                        PageRequest.of(1, 5), new QueryWrapper<Setting>().eq("settingKey", "测试"))))
+                        PageRequest.of(1, 5, Sort.by(Sort.Order.desc("settingKey"))),
+                        new QueryWrapper<Setting>().eq("settingKey", "测试"))))
                 .assertNext(page -> assertThat(page.getTotalElements()).isZero()).verifyComplete();
         assertThat(fixture.nodes.get("oracle").sql).hasSize(2)
                 .allSatisfy(sql -> assertThat(sql).contains("FROM \"order\"", "\"key\" = :"));
-        assertThat(fixture.nodes.get("oracle").sql.get(1)).contains("OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY");
+        assertThat(fixture.nodes.get("oracle").sql.getFirst()).doesNotContain("ORDER BY");
+        assertThat(fixture.nodes.get("oracle").sql.get(1))
+                .contains("ORDER BY \"key\" DESC OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY");
+    }
+
+    @Test
+    void pageableSortCombinesWithWrapperAcrossRoutes() {
+        Fixture fixture = new Fixture();
+        var wrapper = new QueryWrapper<Setting>().orderByAsc("key").orderByAsc("id");
+        var pageable = PageRequest.of(0, 5, Sort.by(Sort.Order.desc("settingKey")));
+        var publisher = fixture.repository.selectPage(pageable, wrapper);
+        for (String key : fixture.nodes.keySet()) {
+            StepVerifier.create(R2dbcDataSourceContext.use(key, publisher))
+                    .assertNext(page -> {
+                        assertThat(page.getSort()).isEqualTo(pageable.getSort());
+                        assertThat(page.getTotalElements()).isZero();
+                    }).verifyComplete();
+            List<String> sql = fixture.nodes.get(key).sql;
+            assertThat(sql).hasSize(2);
+            assertThat(sql.getFirst()).doesNotContain("ORDER BY");
+            assertThat(sql.get(1)).contains(key.equals("mysql")
+                    ? "ORDER BY `key` DESC, `id` ASC" : "ORDER BY \"key\" DESC, \"id\" ASC");
+        }
+        assertThat(wrapper.orderByList()).containsExactly(
+                new QueryWrapper.OrderBy("key", true), new QueryWrapper.OrderBy("id", true));
+    }
+
+    @Test
+    void defaultPageOverloadAppliesUnpagedSortWithoutLimit() {
+        Fixture fixture = new Fixture();
+        StepVerifier.create(fixture.repository.selectPage(Pageable.unpaged(Sort.by("settingKey"))))
+                .assertNext(page -> assertThat(page.getSort()).isEqualTo(Sort.by("settingKey")))
+                .verifyComplete();
+        assertThat(fixture.nodes.get("mysql").sql.get(1))
+                .contains("ORDER BY `key` ASC").doesNotContain("LIMIT", "OFFSET");
+    }
+
+    @Test
+    void invalidPageSortFailsBeforeCountOrRecordStatements() {
+        Fixture fixture = new Fixture();
+        StepVerifier.create(fixture.repository.selectPage(PageRequest.of(0, 5, Sort.by("missing"))))
+                .expectErrorMatches(error -> error.getMessage().contains("实体字段不存在"))
+                .verify();
+        fixture.nodes.values().forEach(node -> assertThat(node.sql).isEmpty());
     }
 
     @Test

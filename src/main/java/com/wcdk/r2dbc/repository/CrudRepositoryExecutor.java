@@ -385,7 +385,7 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         }
         RepositoryQuerySqlBuilder.SqlWhere where = querySqlBuilder.buildWhere(queryWrapper);
         String sql = "SELECT " + querySqlBuilder.selectColumns() + " FROM " + metadata.tableName() + where.sql()
-                + querySqlBuilder.orderBySql(queryWrapper)
+                + querySqlBuilder.orderBySql(pageable, queryWrapper)
                 + querySqlBuilder.pageSql(pageable, dialectContext);
         Mono<List<Object>> records = sqlExecutionEngine.query(sql, where.parameters(), (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass()))
                 .cast(Object.class)

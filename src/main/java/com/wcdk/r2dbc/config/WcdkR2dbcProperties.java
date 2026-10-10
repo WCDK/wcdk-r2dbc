@@ -16,7 +16,7 @@ public class WcdkR2dbcProperties {
 
     private boolean enabled;
 
-    private boolean sqlLogEnabled = true;
+    private boolean sqlLogEnabled = false;
 
     /** Enables optional Micrometer observations when an ObservationRegistry bean is available. */
     private boolean observabilityEnabled;

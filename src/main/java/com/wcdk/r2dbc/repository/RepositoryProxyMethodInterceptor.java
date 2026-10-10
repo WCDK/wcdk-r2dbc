@@ -3,6 +3,7 @@ package com.wcdk.r2dbc.repository;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
+import org.springframework.aop.ProxyMethodInvocation;
 import reactor.core.publisher.Mono;
 
 import java.lang.invoke.MethodHandle;
@@ -103,7 +104,9 @@ final class RepositoryProxyMethodInterceptor implements MethodInterceptor {
                     method.getDeclaringClass(), method.getName(),
                     MethodType.methodType(method.getReturnType(), method.getParameterTypes()),
                     method.getDeclaringClass())
-                    .bindTo(invocation.getThis());
+                    // 无目标对象的仓储必须绑定代理，默认方法内部调用才能重新进入执行链。
+                    .bindTo(invocation instanceof ProxyMethodInvocation proxyInvocation
+                            ? proxyInvocation.getProxy() : invocation.getThis());
             return handle.invokeWithArguments(invocation.getArguments());
         } catch (Throwable exception) {
             throw new IllegalStateException("执行 Repository 默认方法失败：" + method, exception);
