@@ -93,9 +93,16 @@ public final class RepositoryMetadata {
     }
 
     public FieldColumn columnByName(String columnName) {
+        // 优先保留精确匹配，再以白名单匹配大小写变体；不接受 SQL 表达式或表别名。
         return columns.stream()
-                .filter(column -> column.field().getName().equals(columnName) || column.name().equals(columnName) || column.name().equals(identifier(columnName)))
+                .filter(column -> column.field().getName().equals(columnName)
+                        || column.rawName().equals(columnName) || column.name().equals(columnName))
                 .findFirst()
+                .or(() -> columns.stream()
+                        .filter(column -> column.field().getName().equalsIgnoreCase(columnName)
+                                || column.rawName().equalsIgnoreCase(columnName)
+                                || column.name().equalsIgnoreCase(columnName))
+                        .findFirst())
                 .orElseThrow(() -> new IllegalArgumentException("实体字段不存在：" + columnName));
     }
 

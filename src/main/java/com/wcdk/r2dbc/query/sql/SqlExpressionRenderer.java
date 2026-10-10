@@ -31,6 +31,21 @@ public final class SqlExpressionRenderer {
         return new RenderedPredicate(sql.isBlank() ? "" : " WHERE " + sql, bindings);
     }
 
+    /*** 基于实体字段白名单判断 AST 是否显式引用指定列。 @author wcdk ***/
+    public boolean referencesColumn(SqlExpression expression, FieldColumn target) {
+        if (expression == null) {
+            return false;
+        }
+        return switch (expression) {
+            case SqlExpression.Empty ignored -> false;
+            case SqlExpression.Comparison comparison -> column(comparison.column()).equals(target);
+            case SqlExpression.In in -> column(in.column()).equals(target);
+            case SqlExpression.NullCheck check -> column(check.column()).equals(target);
+            case SqlExpression.Logical logical -> logical.operands().stream()
+                    .anyMatch(operand -> referencesColumn(operand, target));
+        };
+    }
+
     private String renderExpression(SqlExpression expression) {
         return switch (expression) {
             case SqlExpression.Empty ignored -> "";

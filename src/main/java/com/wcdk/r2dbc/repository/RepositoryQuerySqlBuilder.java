@@ -61,10 +61,12 @@ final class RepositoryQuerySqlBuilder {
     }
     SqlWhere buildWhere(QueryWrapper<?> queryWrapper) {
         QueryWrapper<?> wrapper = queryWrapper == null ? new QueryWrapper<>() : queryWrapper;
-        RenderedPredicate rendered = new SqlExpressionRenderer(metadata).render(wrapper.expression());
+        SqlExpressionRenderer renderer = new SqlExpressionRenderer(metadata);
+        RenderedPredicate rendered = renderer.render(wrapper.expression());
         String sql = rendered.sql();
         Map<String, Object> parameters = new LinkedHashMap<>(rendered.bindings());
-        if (metadata.logicDeleteColumn() != null && !sql.contains(metadata.logicDeleteColumn().name())) {
+        if (metadata.logicDeleteColumn() != null
+                && !renderer.referencesColumn(wrapper.expression(), metadata.logicDeleteColumn())) {
             sql = sql.isBlank() ? " WHERE " : sql + " AND ";
             sql += metadata.logicDeleteColumn().name() + " = :logicNotDeleteValue";
             parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(

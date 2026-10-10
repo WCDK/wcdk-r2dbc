@@ -620,12 +620,15 @@ public class CustomMethodResolver {
     // ==================== 工具方法 ====================
 
     private FieldColumn findColumn(String fieldName) {
-        return metadata.columns().stream()
-                .filter(col -> col.field().getName().equalsIgnoreCase(fieldName)
-                        || col.name().equalsIgnoreCase(fieldName)
-                        || col.name().equalsIgnoreCase(camelToUnderline(fieldName)))
-                .findFirst()
-                .orElse(null);
+        try {
+            return metadata.columnByName(fieldName);
+        } catch (IllegalArgumentException ignored) {
+            try {
+                return metadata.columnByName(camelToUnderline(fieldName));
+            } catch (IllegalArgumentException missingColumn) {
+                return null;
+            }
+        }
     }
 
     private String selectColumns() {
