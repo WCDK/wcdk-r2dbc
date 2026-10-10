@@ -4,7 +4,9 @@ import com.wcdk.r2dbc.R2dbcRepositoryOperations;
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
-import com.wcdk.r2dbc.dialect.MySqlDatabaseDialect;
+import com.wcdk.r2dbc.dialect.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptor;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
@@ -214,6 +216,44 @@ class CrudInsertGeneratedIdTests {
         verify(fixture.connection).close();
     }
 
+    @Test
+    void unsupportedGeneratedKeyStrategyFailsBeforeOpeningConnection() throws Exception {
+        Fixture fixture = new Fixture(User.class, false, 42L);
+        DatabaseDialect unsupported = mock(DatabaseDialect.class);
+        when(unsupported.generatedKeyStrategy()).thenReturn(GeneratedKeyStrategy.NONE);
+        when(unsupported.databaseType()).thenReturn(DatabaseType.MYSQL);
+        try (var dialects = mockStatic(DatabaseDialects.class)) {
+            dialects.when(() -> DatabaseDialects.get(any(ConnectionFactory.class))).thenReturn(unsupported);
+            StepVerifier.create(fixture.insert(new User()))
+                    .expectError(UnsupportedOperationException.class).verify();
+        }
+        verifyNoInteractions(fixture.connection);
+        verify(fixture.statement, never()).returnGeneratedValues(any(String[].class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void oracleGeneratedColumnUsesInsertQuotingPolicy(boolean quoted) throws Exception {
+        Fixture fixture = new Fixture(User.class, false, 42L, OracleDatabaseDialect.INSTANCE, quoted);
+        User user = new User();
+        StepVerifier.create(fixture.insert(user)).expectNext(user).verifyComplete();
+        verify(fixture.statement).returnGeneratedValues(quoted ? "\"user_key\"" : "user_key");
+        assertThat(user.userId).isEqualTo(42L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void postgresUsesSqlReturningWithInsertQuotingPolicy(boolean quoted) throws Exception {
+        Fixture fixture = new Fixture(User.class, false, 42L, PostgreSqlDatabaseDialect.INSTANCE, quoted);
+        User user = new User();
+        StepVerifier.create(fixture.insert(user)).expectNext(user).verifyComplete();
+        verify(fixture.connection).createStatement(quoted
+                ? "INSERT INTO \"user\" (\"name\") VALUES ($1) RETURNING \"user_key\""
+                : "INSERT INTO user (name) VALUES ($1) RETURNING user_key");
+        verify(fixture.statement, never()).returnGeneratedValues(any(String[].class));
+        assertThat(user.userId).isEqualTo(42L);
+    }
+
     /*** 使用真实 DatabaseClient 和仓储适配器，仅替换数据库驱动边界。 @author wcdk ***/
     private static class Fixture {
         final Connection connection = mock(Connection.class);
@@ -222,7 +262,12 @@ class CrudInsertGeneratedIdTests {
         final CrudRepositoryExecutor executor;
 
         Fixture(Class<?> type, boolean snowflake, Object generatedId) {
+            this(type, snowflake, generatedId, MySqlDatabaseDialect.INSTANCE, true);
+        }
+
+        Fixture(Class<?> type, boolean snowflake, Object generatedId, DatabaseDialect dialect, boolean quoted) {
             ConnectionFactory factory = mock(ConnectionFactory.class);
+            when(factory.getMetadata()).thenReturn(() -> dialect.databaseType().name());
             doReturn(Mono.just(connection)).when(factory).create();
             when(connection.createStatement(anyString())).thenReturn(statement);
             doReturn(Mono.empty()).when(connection).close();
@@ -239,12 +284,13 @@ class CrudInsertGeneratedIdTests {
                     .bindMarkers(BindMarkersFactory.indexed("$", 1)).build();
             WcdkR2dbcProperties properties = new WcdkR2dbcProperties();
             properties.setSnowflakeId(snowflake);
+            properties.setQuoteIdentifier(quoted);
             properties.setSqlLogEnabled(false);
             R2dbcUtil util = new R2dbcUtil(client, null, null, properties, new WcdkSpringR2dbcProperties(),
                     null, new SqlLifecycleInterceptorChain(List.of(interceptor), List.of()));
             executor = new CrudRepositoryExecutor(properties,
-                    new RepositoryMetadata(type, properties, MySqlDatabaseDialect.INSTANCE),
-                    BaseRepository.class, null, MySqlDatabaseDialect.INSTANCE, new SnowflakeIdGenerator(1),
+                    new RepositoryMetadata(type, properties, dialect),
+                    BaseRepository.class, null, dialect, new SnowflakeIdGenerator(1),
                     new SqlExecutionEngine(new R2dbcRepositoryOperations(util)), new RepositoryParameterBinder());
         }
 

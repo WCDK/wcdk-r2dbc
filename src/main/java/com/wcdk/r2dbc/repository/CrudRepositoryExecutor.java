@@ -164,7 +164,8 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                             .toList();
                     String sql;
                     if (insertColumns.isEmpty()) {
-                        sql = "INSERT INTO " + metadata.tableName() + " DEFAULT VALUES";
+                        sql = dialect.emptyInsert(metadata.tableName(),
+                                metadata.idColumn() == null ? null : metadata.idColumn().name());
                     } else {
                         String fields = insertColumns.stream().map(FieldColumn::name).collect(Collectors.joining(", "));
                         String values = insertColumns.stream()
@@ -186,7 +187,7 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                     }
                     FieldColumn idColumn = metadata.idColumn();
                     return sqlExecutionEngine.insertReturningIdWithoutLifecycle(
-                                    context.getSql(), context.getParameters(), idColumn.rawName())
+                                    context.getSql(), context.getParameters(), idColumn.rawName(), idColumn.name())
                             .map(id -> {
                                 Object result = assignId(insertEntity, id);
                                 context.getArguments()[0] = result;
@@ -416,7 +417,21 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     }
 
     private Mono<Boolean> exists(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
-        return selectCount(queryWrapper, dialectContext).map(count -> count > 0);
+        SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
+        SqlExecutionContext context = new SqlExecutionContext(
+                findMethod("exists"), repositoryInterface, new Object[]{queryWrapper});
+        Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
+                () -> Mono.fromRunnable(() -> {
+                    RepositoryQuerySqlBuilder.SqlWhere where = querySqlBuilder.buildWhere(queryWrapper);
+                    String sql = "SELECT 1 FROM " + metadata.tableName() + where.sql()
+                            + querySqlBuilder.paginationSql(1, null, dialectContext);
+                    context.setSql(sql);
+                    context.setParameters(where.parameters());
+                }));
+        return lifecycleExecutor().executeMono(chain, context, lifecycle,
+                () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
+                                (row, rowMetadata) -> numberValue(row).longValue() > 0)
+                        .defaultIfEmpty(false));
     }
 
     private SqlLifecycleExecutor lifecycleExecutor() {

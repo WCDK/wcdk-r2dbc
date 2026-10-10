@@ -20,7 +20,7 @@ final class DialectPagination {
      * @author wcdk
      */
     static String render(DatabaseDialect dialect, long limit, Long offset) {
-        String clause = dialect.renderLimitOffset((int) limit, offset);
+        String clause = dialect.renderLimitOffset(limit, offset);
         return clause == null || clause.isBlank() ? "" : " " + clause;
     }
 }

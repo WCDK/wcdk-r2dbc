@@ -215,6 +215,11 @@ public class R2dbcUtil {
         return updateOperations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
     }
 
+    Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                        String idColumn, String renderedIdColumn) {
+        return updateOperations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn, renderedIdColumn);
+    }
+
     public Mono<Long> batch(List<String> sqlList) {
         return updateOperations.batch(sqlList);
     }

@@ -390,6 +390,8 @@ Mono<Page<User>> result = userRepository.selectPage(
 
 `PageRequest` 的页码从 `0` 开始。QueryWrapper 的 `page(pageNo, pageSize)` 使用从 `1` 开始的业务页码，并自动设置 `limit` 和 `offset`。
 
+分页 `limit` 支持 `1..Integer.MAX_VALUE`，超出范围在执行 SQL 前抛出 `IllegalArgumentException`，不会截断为负数。`offset` 保持 long，允许超过 Integer.MAX_VALUE，但不能为负数；页码计算溢出同样会报错。
+
 `selectPage` 将 `Pageable.getSort()` 应用到记录查询的 ORDER BY，COUNT 查询不排序。排序属性通过实体元数据白名单映射，支持 Java 属性名及 `@Column` 列名；未知字段、表别名限定名和 SQL 表达式会报错。支持 ASC/DESC，使用数据库默认的大小写和空值排序规则；`ignoreCase`、`nullsFirst` 和 `nullsLast` 暂不支持，传入时会报错。
 
 `selectPage(pageable)` 默认方法通过仓储代理调用双参数入口，相当于传入空 QueryWrapper，使用同一套排序和字段校验规则。
@@ -640,6 +642,14 @@ SqlExecutionObserver sqlExecutionObserver(ObservationRegistry registry) {
 mvn -Pall test
 ```
 
+数据库生成主键策略按实际连接方言选择：PostgreSQL 生成 `RETURNING` SQL，MySQL 使用 INSERT 响应中的 last insert id，Oracle/达梦通过驱动请求指定生成列；不支持生成键的策略会在执行插入前报错。空业务字段插入由方言统一生成：PostgreSQL 使用 `DEFAULT VALUES`，MySQL 使用 `() VALUES ()`，Oracle 使用生成主键列的 `VALUES (DEFAULT)`（要求实体有生成主键列），达梦使用省略自增列的 `DEFAULT VALUES`。
+
+`generatedValueColumn(rawColumn, renderedColumn)` 为驱动选择生成列参数：Oracle 使用与 INSERT 一致的引用形式，MySQL/达梦使用列名。仓储传递实体元数据渲染的列名，保持 `quote-identifier` 开关一致。
+
+`supportsReturning` 表示支持 PostgreSQL 式 SQL RETURNING；Oracle/达梦的驱动生成列能力由 `generatedKeyStrategy` 声明。`supportsUpsert` 表示原生 INSERT upsert 能力，Oracle/达梦为 false，MERGE 需自行提供 SQL。未接入执行链的 `renderBoolean`、`renderCurrentTimestamp` 已移除，扩展实现需删除对应 override，自定义 XML SQL 继续自行指定常量和时间表达式。
+
+`exists` 使用限定一条记录的 `SELECT 1`，不执行 COUNT；派生 `existsBy` 使用短路 EXISTS 并返回数值 1/0，由映射层转为 boolean，避免 Oracle/达梦的 BOOLEAN SQL 差异。
+
 ## 响应式使用约束
 
 - Controller、Service、Repository 链路统一返回 `Mono` 或 `Flux`。
@@ -670,10 +680,13 @@ com.wcdk.r2dbc
 
 ```bash
 mvn test
+mvn verify
 mvn -DskipTests package
 ```
 
 响应式单元测试推荐使用 `StepVerifier`，WebFlux 接口测试推荐使用 `WebTestClient`。
+
+`mvn verify` 必须有 Docker，实际运行 PostgreSQL/MySQL Testcontainers 矩阵。Oracle/达梦通过环境变量启用真实库用例；未配置时显示 skipped。CI 包含 Oracle-XE。测试范围、驱动配置和达梦发布前记录模板见 [数据库真实库验收](docs/database-matrix.md)。SQL 桩测试用于快速回归，不替代真实库验证。
 
 ## 许可证
 

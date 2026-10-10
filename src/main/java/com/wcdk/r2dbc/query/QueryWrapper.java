@@ -157,8 +157,8 @@ public class QueryWrapper<T> {
      * @return 当前查询条件构造器
      **/
     public QueryWrapper<T> limit(long value) {
-        if (value <= 0) {
-            throw new IllegalArgumentException("查询条数必须大于0");
+        if (value <= 0 || value > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("查询条数必须在 1 到 Integer.MAX_VALUE 之间");
         }
         limit = value;
         return this;

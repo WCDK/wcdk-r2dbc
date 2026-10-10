@@ -145,17 +145,11 @@ public class CustomMethodResolver {
     // ==================== exists ====================
 
     private ParsedMethod resolveExists(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
-        if (fieldPart == null || fieldPart.isEmpty()) {
-            String sql = "SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END FROM "
-                    + metadata.tableName() + logicalNotDeleteSql();
-            return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
-        }
-
         List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
         String whereSql = buildWhereSql(conditions, true);
-
-        String sql = "SELECT CASE WHEN COUNT(1) > 0 THEN TRUE ELSE FALSE END FROM "
-                + metadata.tableName() + whereSql;
+        String query = "SELECT 1 FROM " + metadata.tableName() + whereSql
+                + DialectPagination.render(metadata.dialect(), 1, null);
+        String sql = metadata.dialect().existsResult(query);
         Map<String, Object> parameters = buildParameters(conditions);
         return new ParsedMethod(sql, parameters, SqlCommandType.SELECT);
     }

@@ -75,6 +75,11 @@ final class SqlExecutionEngine {
         return operations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
     }
 
+    Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                        String idColumn, String renderedIdColumn) {
+        return operations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn, renderedIdColumn);
+    }
+
     <T> T map(Row row, Class<T> type) {
         return operations.map(row, type);
     }

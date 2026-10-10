@@ -63,6 +63,11 @@ public final class R2dbcRepositoryOperations implements RepositoryOperations {
         return delegate.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
     }
 
+    public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                        String idColumn, String renderedIdColumn) {
+        return delegate.insertReturningIdWithoutLifecycle(sql, parameters, idColumn, renderedIdColumn);
+    }
+
     @Override
     public <T> T map(Row row, Class<T> entityClass) {
         return delegate.map(row, entityClass);

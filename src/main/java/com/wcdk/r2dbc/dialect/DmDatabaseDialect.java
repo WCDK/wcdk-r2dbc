@@ -18,6 +18,18 @@ public final class DmDatabaseDialect extends OracleDatabaseDialect {
         return DatabaseType.DM;
     }
 
+    /** DM generates identity values only when the identity column is omitted. */
+    @Override
+    public String emptyInsert(String table, String idColumn) {
+        return "INSERT INTO " + table + " DEFAULT VALUES";
+    }
+
+    /** DM uses JDBC column names for getGeneratedKeys, rather than an appended SQL expression. */
+    @Override
+    public String generatedValueColumn(String rawColumn, String renderedColumn) {
+        return rawColumn;
+    }
+
     @Override
     public boolean supports(ConnectionFactory connectionFactory) {
         return DmDialectSupport.isDm(connectionFactory);

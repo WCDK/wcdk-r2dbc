@@ -55,9 +55,16 @@ class QueryWrapperTests {
 
     @Test
     void validatesLongPaginationAndOverflow() {
-        QueryWrapper<Object> wrapper = new QueryWrapper<>().limit(3_000_000_000L).offset(4_000_000_000L);
-        assertThat(wrapper.limit()).isEqualTo(3_000_000_000L);
+        QueryWrapper<Object> wrapper = new QueryWrapper<>().limit(Integer.MAX_VALUE).offset(4_000_000_000L);
+        assertThat(wrapper.limit()).isEqualTo((long) Integer.MAX_VALUE);
         assertThat(wrapper.offset()).isEqualTo(4_000_000_000L);
+
+        for (long value : new long[]{0, -1, (long) Integer.MAX_VALUE + 1, Long.MAX_VALUE}) {
+            assertThatThrownBy(() -> new QueryWrapper<>().limit(value))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> new QueryWrapper<>().page(1, value))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
 
         assertThatThrownBy(() -> new QueryWrapper<>().offset((Integer) null))
                 .isInstanceOf(IllegalArgumentException.class);

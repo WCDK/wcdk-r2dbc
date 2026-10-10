@@ -3,6 +3,11 @@ package com.wcdk.r2dbc.execution;
 import com.wcdk.r2dbc.execution.lifecycle.SqlExecutionContext;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.execution.log.R2dbcSqlLogger;
+import com.wcdk.r2dbc.dialect.DatabaseDialect;
+import com.wcdk.r2dbc.dialect.DatabaseDialects;
+import com.wcdk.r2dbc.dialect.GeneratedKeyStrategy;
+import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
+import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -87,15 +92,40 @@ public class R2dbcUpdateOperations {
      * @author wcdk
      **/
     public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
-        return Mono.deferContextual(context -> execute(sql, parameters, context)
-                // 在同一条插入语句上请求生成值，避免额外查询及连接切换。
-                .filter(statement -> statement.returnGeneratedValues(idColumn))
+        return insertReturningIdWithoutLifecycle(sql, parameters, idColumn, null);
+    }
+
+    /** Uses the same identifier quoting as the INSERT, including Oracle driver RETURNING INTO. */
+    public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                          String idColumn, String renderedIdColumn) {
+        return Mono.deferContextual(context -> {
+            var factory = databaseClient.getConnectionFactory();
+            if (factory instanceof DynamicRoutingConnectionFactory routing) {
+                factory = routing.getConnectionFactory(R2dbcDataSourceContext.get(context));
+            }
+            DatabaseDialect dialect = DatabaseDialects.get(factory);
+            String renderedColumn = renderedIdColumn == null
+                    ? dialect.quoteIdentifier(idColumn) : renderedIdColumn;
+            GeneratedKeyStrategy strategy = dialect.generatedKeyStrategy();
+            if (strategy == GeneratedKeyStrategy.NONE) {
+                return Mono.error(new UnsupportedOperationException("方言不支持数据库生成主键：" + dialect.databaseType()));
+            }
+            // PostgreSQL 拼接 SQL RETURNING；Oracle/达梦由驱动请求生成值。
+            String insertSql = strategy == GeneratedKeyStrategy.RETURNING
+                    ? sql + dialect.renderGeneratedKey(renderedColumn) : sql;
+            var spec = execute(insertSql, parameters, context);
+            if (strategy == GeneratedKeyStrategy.LAST_INSERT_ID || !dialect.supportsReturning()) {
+                // MySQL 从本条 INSERT 的响应读取 last insert id，避免额外连接上的 SELECT。
+                spec = spec.filter(statement -> statement.returnGeneratedValues(dialect.generatedValueColumn(idColumn, renderedColumn)));
+            }
+            return spec
                 .map((row, metadata) -> java.util.Objects.requireNonNull(row.get(0), "数据库返回的主键为空"))
                 .all()
                 .singleOrEmpty()
                 .switchIfEmpty(Mono.error(new IllegalStateException("数据库未返回生成的主键：" + idColumn)))
-                .doOnSuccess(id -> sqlLogger.logExecution(sql, parameters, 1L))
-                .doOnError(error -> sqlLogger.logExecution(sql, parameters, error)));
+                .doOnSuccess(id -> sqlLogger.logExecution(insertSql, parameters, 1L))
+                .doOnError(error -> sqlLogger.logExecution(insertSql, parameters, error));
+        });
     }
 
     /**

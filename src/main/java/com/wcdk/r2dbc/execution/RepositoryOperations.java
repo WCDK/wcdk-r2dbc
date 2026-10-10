@@ -32,6 +32,12 @@ public interface RepositoryOperations {
     /*** 插入并获取指定列的数据库生成主键。 @author wcdk ***/
     Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn);
 
+    /** Carries the identifier rendered from entity metadata, including its quoting policy. */
+    default Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
+                                                         String idColumn, String renderedIdColumn) {
+        return insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
+    }
+
     <T> T map(Row row, Class<T> entityClass);
 
     Object convertValue(Object value, Class<?> targetType);

@@ -23,12 +23,36 @@ public class OracleDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
+    public String generatedValueColumn(String rawColumn, String renderedColumn) {
+        return renderedColumn;
+    }
+
+    @Override
     public boolean supportsReturning() {
         return false;
     }
 
     @Override
     public boolean supportsUpsert() {
-        return true;
+        return false;
+    }
+
+    /*** 驱动通过 RETURNING INTO 返回指定列，不支持 PostgreSQL 式 RETURNING 子句。 @author wcdk ***/
+    @Override
+    public GeneratedKeyStrategy generatedKeyStrategy() {
+        return GeneratedKeyStrategy.RETURNING;
+    }
+
+    @Override
+    public String emptyInsert(String table, String idColumn) {
+        if (idColumn == null) {
+            throw new IllegalArgumentException("Oracle/达梦空字段插入需要生成主键列");
+        }
+        return "INSERT INTO " + table + " (" + idColumn + ") VALUES (DEFAULT)";
+    }
+
+    @Override
+    public String existsResult(String query) {
+        return super.existsResult(query) + " FROM DUAL";
     }
 }

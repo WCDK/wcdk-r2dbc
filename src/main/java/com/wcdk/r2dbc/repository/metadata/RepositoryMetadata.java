@@ -65,6 +65,10 @@ public final class RepositoryMetadata {
         return entityClass;
     }
 
+    public DatabaseDialect dialect() {
+        return dialect;
+    }
+
     public String tableName() {
         return tableName;
     }

@@ -32,11 +32,56 @@
         <!-- MySQL数据库驱动版本 -->
         <r2dbc-mysql.version>1.3.0</r2dbc-mysql.version>
         <!-- Oracle数据库驱动版本 -->
-        <r2dbc-oracle.version>23.4.0</r2dbc-oracle.version>
-        <oracle-jdbc.version>23.4.0</oracle-jdbc.version>
+        <r2dbc-oracle.version>1.3.0</r2dbc-oracle.version>
+        <oracle-jdbc.version>23.6.0.24.10</oracle-jdbc.version>
+        <testcontainers.version>1.21.3</testcontainers.version>
     </properties>
 
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
+            <version>${r2dbc-postgresql.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.asyncer</groupId>
+            <artifactId>r2dbc-mysql</artifactId>
+            <version>${r2dbc-mysql.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Spring Boot核心 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -242,7 +287,7 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>${maven.failsafe.plugin.version}</version>
                 <configuration>
-                    <failIfNoTests>false</failIfNoTests>
+                    <failIfNoTests>true</failIfNoTests>
                     <includes>
                         <include>**/*IT.java</include>
                     </includes>

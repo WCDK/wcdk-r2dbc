@@ -27,6 +27,16 @@ public final class MySqlDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
+    public GeneratedKeyStrategy generatedKeyStrategy() {
+        return GeneratedKeyStrategy.LAST_INSERT_ID;
+    }
+
+    @Override
+    public String emptyInsert(String table, String idColumn) {
+        return "INSERT INTO " + table + " () VALUES ()";
+    }
+
+    @Override
     public boolean supportsUpsert() {
         return true;
     }

@@ -37,6 +37,26 @@ import static org.mockito.Mockito.*;
 /*** 异构路由下真实仓储代理、参数绑定和事务连接的回归测试。 @author wcdk ***/
 class HeterogeneousRoutingTests {
     @Test
+    void existenceQueriesUseOneRowAndNumericResultsAcrossRoutes() {
+        Fixture fixture = new Fixture();
+        for (String key : fixture.nodes.keySet()) {
+            StepVerifier.create(R2dbcDataSourceContext.use(key, fixture.repository.exists(new QueryWrapper<>())))
+                    .expectNext(false).verifyComplete();
+            StepVerifier.create(R2dbcDataSourceContext.use(key, fixture.repository.exists(
+                            new QueryWrapper<Setting>().eq("settingKey", "missing"))))
+                    .expectNext(false).verifyComplete();
+            StepVerifier.create(R2dbcDataSourceContext.use(key, fixture.repository.existsBySettingKey("missing")))
+                    .expectNext(false).verifyComplete();
+            var sql = fixture.nodes.get(key).sql;
+            assertThat(sql).hasSize(3).allSatisfy(query -> {
+                assertThat(query).contains("SELECT 1 FROM").doesNotContain("COUNT(", "THEN TRUE", "ELSE FALSE");
+                assertThat(query).contains(key.equals("mysql") || key.equals("postgres")
+                        ? "LIMIT 1" : "FETCH");
+            });
+            assertThat(sql.get(2)).contains("THEN 1 ELSE 0 END");
+        }
+    }
+    @Test
     void samePublisherUsesTargetQuotesMarkersAndPaginationAcrossConcurrentSubscriptions() {
         Fixture fixture = new Fixture();
         var publisher = fixture.repository.selectList(new QueryWrapper<Setting>()
@@ -267,6 +287,7 @@ class HeterogeneousRoutingTests {
     /*** 包含派生查询的路由仓储。 @author wcdk ***/
     interface SettingRepository extends BaseRepository<Setting> {
         Mono<Long> countBySettingKey(String value);
+        Mono<Boolean> existsBySettingKey(String value);
     }
 
     /*** 保留字表列及时间参数实体。 @author wcdk ***/

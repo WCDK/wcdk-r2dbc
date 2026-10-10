@@ -31,7 +31,7 @@ abstract class AbstractDatabaseDialect implements DatabaseDialect {
 
     @Override
     public String pagination(String sql, long offset, long limit) {
-        String clause = renderLimitOffset((int) limit, offset);
+        String clause = renderLimitOffset(limit, offset);
         return clause == null || clause.isBlank() ? sql : sql + " " + clause;
     }
 
@@ -44,16 +44,6 @@ abstract class AbstractDatabaseDialect implements DatabaseDialect {
     public String renderGeneratedKey(String... columns) {
         if (!supportsReturning()) return "";
         return columns == null || columns.length == 0 ? " RETURNING *" : " RETURNING " + String.join(", ", columns);
-    }
-
-    @Override
-    public String renderBoolean(boolean value) {
-        return value ? "TRUE" : "FALSE";
-    }
-
-    @Override
-    public String renderCurrentTimestamp() {
-        return "CURRENT_TIMESTAMP";
     }
 
     @Override
