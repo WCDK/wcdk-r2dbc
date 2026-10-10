@@ -6,7 +6,6 @@ import io.r2dbc.spi.ConnectionFactoryMetadata;
 import org.reactivestreams.Publisher;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
-import reactor.util.context.ContextView;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -44,7 +43,12 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
 
     @Override
     public Publisher<? extends Connection> create() {
-        return Mono.deferContextual(contextView -> Mono.from(determineConnectionFactory(contextView).create()));
+        return Mono.deferContextual(contextView -> {
+            String dataSource = R2dbcDataSourceContext.get(contextView);
+            String selected = dataSource == null ? primary : dataSource;
+            return R2dbcDataSourceContext.guardTransactionDataSource(contextView, selected, primary)
+                    .then(Mono.from(getConnectionFactory(selected).create()));
+        });
     }
 
     @Override
@@ -101,7 +105,4 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
         return disposed.get();
     }
 
-    private ConnectionFactory determineConnectionFactory(ContextView contextView) {
-        return getConnectionFactory(R2dbcDataSourceContext.get(contextView));
-    }
 }

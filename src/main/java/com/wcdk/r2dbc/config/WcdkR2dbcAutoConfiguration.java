@@ -43,6 +43,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration;
+import org.springframework.boot.autoconfigure.r2dbc.R2dbcTransactionManagerAutoConfiguration;
+import org.springframework.boot.autoconfigure.transaction.TransactionAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -78,9 +81,10 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
  *
  **/
 @AutoConfiguration
-@AutoConfigureAfter(name = {
-        "org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration",
-        "org.springframework.boot.autoconfigure.transaction.TransactionAutoConfiguration"
+@AutoConfigureAfter({
+        R2dbcAutoConfiguration.class,
+        R2dbcTransactionManagerAutoConfiguration.class,
+        TransactionAutoConfiguration.class
 })
 @ConditionalOnClass(DatabaseClient.class)
 @EnableConfigurationProperties({WcdkR2dbcProperties.class, WcdkSpringR2dbcProperties.class})

@@ -84,11 +84,46 @@ public final class R2dbcDataSourceContext {
         return dataSource;
     }
 
+    /**
+     * 在连接工厂边界登记并校验事务选定的数据源。
+     * <p>
+     * 首次获取事务连接时登记数据源，后续无论事务由 Spring Advisor、WCDK 切面、
+     * {@code TransactionalOperator} 还是用户提供的响应式事务管理器发起，均使用同一规则校验。
+     * 非事务调用没有 {@link TransactionSynchronizationManager}，直接放行。
+     *
+     * @param context 当前 Reactor 上下文
+     * @param requested 路由工厂即将使用的数据源
+     * @param primary 路由工厂的主数据源
+     * @return 校验完成信号
+     */
+    static Mono<Void> guardTransactionDataSource(ContextView context, String requested, String primary) {
+        assertTransactionDataSource(context, requested, primary);
+        return TransactionSynchronizationManager.forCurrentTransaction()
+                .flatMap(manager -> {
+                    Object pinned = manager.getResource(TRANSACTION_RESOURCE_KEY);
+                    if (pinned != null && !pinned.equals(requested)) {
+                        return Mono.error(transactionDataSourceSwitchException(pinned.toString(), requested));
+                    }
+                    if (pinned == null) {
+                        manager.bindResource(TRANSACTION_RESOURCE_KEY, requested);
+                    }
+                    return Mono.<Void>empty();
+                })
+                .onErrorResume(NoTransactionException.class, ignored -> Mono.empty());
+    }
+
+    private static void assertTransactionDataSource(ContextView context, String requested, String primary) {
+        String pinned = context.getOrDefault(TRANSACTION_KEY, null);
+        boolean defaultPrimary = PRIMARY.equals(pinned) && primary.equals(requested);
+        if (pinned != null && !pinned.equals(requested) && !defaultPrimary) {
+            throw transactionDataSourceSwitchException(pinned, requested);
+        }
+    }
+
     private static void assertTransactionDataSource(ContextView context, String requested) {
         String pinned = context.getOrDefault(TRANSACTION_KEY, null);
         if (pinned != null && !pinned.equals(requested)) {
-            throw new IllegalStateException("事务开始后无法将R2DBC数据源从 "
-                    + pinned + " 切换到 " + requested);
+            throw transactionDataSourceSwitchException(pinned, requested);
         }
     }
     /***

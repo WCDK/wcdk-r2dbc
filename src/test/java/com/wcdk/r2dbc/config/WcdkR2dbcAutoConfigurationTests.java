@@ -5,10 +5,15 @@ import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryMetadata;
 import com.wcdk.r2dbc.execution.ParameterBinder;
 import com.wcdk.r2dbc.transaction.TransactionalAspect;
+import com.wcdk.r2dbc.transaction.WcdkReactiveTransactionManager;
 import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.r2dbc.R2dbcTransactionManagerAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.r2dbc.connection.R2dbcTransactionManager;
+import org.springframework.transaction.ReactiveTransactionManager;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 
@@ -63,6 +68,51 @@ class WcdkR2dbcAutoConfigurationTests {
                 .withBean(ConnectionFactory.class, () -> connectionFactory)
                 .withBean("org.springframework.transaction.config.internalTransactionAdvisor", Object.class, Object::new)
                 .run(context -> assertThat(context).doesNotHaveBean(TransactionalAspect.class));
+    }
+
+    @Test
+    void springBootTransactionManagerWinsWhenItsAutoConfigurationIsEnabled() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+        ApplicationContextRunner orderedRunner = new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(
+                        WcdkR2dbcAutoConfiguration.class,
+                        R2dbcTransactionManagerAutoConfiguration.class))
+                .withPropertyValues("wcdk.r2dbc.enabled=true")
+                .withBean(ConnectionFactory.class, () -> connectionFactory);
+
+        orderedRunner.run(context -> {
+            assertThat(context).hasSingleBean(ReactiveTransactionManager.class);
+            assertThat(context.getBean(ReactiveTransactionManager.class))
+                    .isExactlyInstanceOf(R2dbcTransactionManager.class);
+            assertThat(context).doesNotHaveBean(WcdkReactiveTransactionManager.class);
+        });
+    }
+
+    @Test
+    void userTransactionManagerHasPriorityAndWcdkBacksOff() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+        ReactiveTransactionManager supplied = mock(ReactiveTransactionManager.class);
+
+        runner.withBean(ConnectionFactory.class, () -> connectionFactory)
+                .withBean(ReactiveTransactionManager.class, () -> supplied)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(ReactiveTransactionManager.class);
+                    assertThat(context.getBean(ReactiveTransactionManager.class)).isSameAs(supplied);
+                    assertThat(context).doesNotHaveBean(WcdkReactiveTransactionManager.class);
+                    assertThat(context).hasSingleBean(TransactionalOperator.class);
+                });
+    }
+
+    @Test
+    void wcdkTransactionManagerIsFallbackWhenNoOtherManagerExists() {
+        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
+        when(connectionFactory.getMetadata()).thenReturn(() -> "PostgreSQL");
+
+        runner.withBean(ConnectionFactory.class, () -> connectionFactory)
+                .run(context -> assertThat(context)
+                        .hasSingleBean(WcdkReactiveTransactionManager.class));
     }
 
     @Test

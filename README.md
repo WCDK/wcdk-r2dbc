@@ -415,6 +415,13 @@ public Flux<UserReport> queryReport() {
 
 数据源标识通过 Reactor Context 传递；不要使用普通 `ThreadLocal` 假设数据源上下文一定存在。
 
+事务第一次获取连接时，`DynamicRoutingConnectionFactory` 会把当时选中的数据源锁定到响应式事务
+上下文。之后无论通过 `@Transactional`、WCDK 切面、`TransactionalOperator`、WCDK
+`TransactionTemplate`，还是应用提供的 `ReactiveTransactionManager` 执行，只要同一事务链尝试选择
+其他数据源，就会以 `IllegalStateException` 失败，并在消息中给出原数据源和目标数据源。请在事务开始前
+完成数据源选择；需要访问多个数据源时应拆分事务边界，WCDK 不提供跨数据源的分布式事务语义。
+没有事务时，各条响应式链可以独立选择数据源。
+
 ## 事务
 
 Spring 环境下优先使用响应式事务：
@@ -483,8 +490,13 @@ public class UserService {
 }
 ```
 
-WCDK 自动配置会提供 `ReactiveTransactionManager`。如果应用已经启用了 Spring 标准事务
-Advisor，WCDK 自定义事务切面会自动让位，不会重复拦截。
+事务管理器按以下顺序选择：应用声明的 `ReactiveTransactionManager` 优先；否则使用 Spring Boot
+`R2dbcTransactionManagerAutoConfiguration` 提供的标准管理器；仅在前两者都不存在时，WCDK 才提供
+`WcdkReactiveTransactionManager` 作为回退。WCDK 自动配置显式排在 Spring Boot 的 R2DBC 事务
+自动配置之后，因此选择结果不依赖自动配置发现顺序。跨数据源守卫位于动态连接工厂，不依赖最终选择的
+事务管理器类型。
+
+如果应用已经启用了 Spring 标准事务 Advisor，WCDK 自定义事务切面会自动让位，不会重复拦截。
 
 #### 方式二：启用 WCDK `@Transactional` 响应式切面
 
@@ -509,7 +521,7 @@ WCDK 切面会将 `@Transactional` 方法转换为基于 `TransactionalOperator`
 - 只有返回的响应式链真正被订阅时，事务才会执行；仅创建 Publisher 不会立即开启事务。
 - 事务边界内应只放置相关的 R2DBC 数据库操作，不要包含阻塞 JDBC、阻塞 HTTP 或长时间外部调用。
 - 事务中的数据库操作必须使用同一个 `ConnectionFactory`。多数据源场景下，应在事务开始前确定数据源，
-  事务中不能切换到其他数据源。
+  事务中不能切换到其他数据源；切换会在执行 SQL 前抛出 `IllegalStateException`。
 - 如果方法返回普通对象而不是 `Mono`/`Flux`，不能按响应式事务使用；推荐改为返回 `Mono<T>` 或 `Flux<T>`。
 - 默认情况下，WCDK 自定义事务切面关闭；既没有 Spring 标准事务 Advisor，也没有配置
   `wcdk.r2dbc.transaction.aspect-enabled=true` 时，`@Transactional` 不会生效。
