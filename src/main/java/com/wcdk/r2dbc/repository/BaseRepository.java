@@ -20,7 +20,18 @@ public interface BaseRepository<T> {
 
     Mono<Long> deleteById(Object id);
 
+    /*** 按 ID 更新非 null 字段，兼容历史行为；返回实际影响行数，无字段可更新时返回 0。 @author wcdk ***/
     Mono<Long> updateById(T entity);
+
+    /*** 按 ID 更新非 null 字段，null 表示保留原值；返回实际影响行数。 @author wcdk ***/
+    Mono<Long> updateByIdIgnoringNulls(T entity);
+
+    /***
+     * 按 ID 更新全部非主键持久化字段，null 表示将对应列置为 NULL。
+     * 包括逻辑删除字段，调用方应提供需保留的字段值；无可更新字段时返回 0。
+     * @author wcdk
+     ***/
+    Mono<Long> updateByIdIncludingNulls(T entity);
 
     Mono<T> selectById(Object id);
 

@@ -232,7 +232,9 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 |---|---|---|
 | `insert(entity)` | `Mono<T>` | 插入并返回实体 |
 | `deleteById(id)` | `Mono<Long>` | 按 ID 删除，返回影响行数 |
-| `updateById(entity)` | `Mono<Long>` | 按 ID 更新，返回影响行数 |
+| `updateById(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段，兼容历史行为 |
+| `updateByIdIgnoringNulls(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段，null 表示保留原值 |
+| `updateByIdIncludingNulls(entity)` | `Mono<Long>` | 按 ID 更新全部非主键持久化字段，null 表示将列置为 NULL |
 | `selectById(id)` | `Mono<T>` | 按 ID 查询 |
 | `findAll()` | `Flux<T>` | 查询全部数据 |
 | `selectList(wrapper)` | `Flux<T>` | 条件查询列表 |
@@ -242,6 +244,24 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 | `selectPage(pageable, wrapper)` | `Mono<Page<T>>` | 分页查询 |
 
 更新和删除方法支持 `Mono<Long>`、`Mono<Integer>`、`Mono<Boolean>`、`Mono<Void>` 等兼容返回形式，具体以方法声明为准。
+
+### 更新 null 语义与迁移
+
+`updateById` 保持忽略 null 的行为。建议局部更新迁移到 `updateByIdIgnoringNulls`，让 null 表示保留数据库原值。需要将列置空时，使用 `updateByIdIncludingNulls`：它更新全部非主键持久化字段（包括逻辑删除字段），因此应提供其他字段需保留的值；`@Transient` 字段不参与更新，数据库 NOT NULL 约束仍然生效。
+
+```java
+// 局部更新：null 字段保持原值。
+Mono<Long> patchRows = userRepository.updateByIdIgnoringNulls(patch);
+
+// 完整更新：先加载实体以保留其他字段，再将指定字段置空。
+Mono<Long> clearRows = userRepository.selectById(id)
+        .flatMap(user -> {
+            user.setName(null);
+            return userRepository.updateByIdIncludingNulls(user);
+        });
+```
+
+三个入口都返回数据库实际影响行数。没有可更新字段时直接返回 `0`，不会生成空 `SET` SQL；忽略 null 模式下全 null 会短路，包含 null 模式下则会执行置空。未匹配记录或逻辑删除过滤导致的 `0` 不会被当作成功更新。更新入口不提供自动乐观锁版本校验；需要乐观锁时可用 XML 在 WHERE 中显式校验版本，并检查影响行数是否为 `1`。XML 更新按 SQL 指定列执行，`#{name}` 的 null 参数绑定为带类型的 NULL，也可直接写 `SET name = NULL`；其他列保持原值。
 
 ## `@Transient` 字段
 

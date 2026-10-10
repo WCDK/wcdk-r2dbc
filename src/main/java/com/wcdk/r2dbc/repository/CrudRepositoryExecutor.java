@@ -111,7 +111,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         return switch (methodName) {
             case "insert" -> insert(arguments[0]);
             case "deleteById" -> deleteById(arguments[0]);
-            case "updateById" -> updateById(arguments[0]);
+            case "updateById", "updateByIdIgnoringNulls" ->
+                    Mono.defer(() -> updateById(arguments[0], method, false));
+            case "updateByIdIncludingNulls" ->
+                    Mono.defer(() -> updateById(arguments[0], method, true));
             case "selectById" -> selectById(arguments[0]);
             case "findAll" -> selectList(new QueryWrapper<>(), context);
             case "selectList" -> selectList(querySqlBuilder.queryWrapper(arguments), context);
@@ -280,26 +283,31 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         return fieldValue(idColumn, value);
     }
 
-    private Mono<Long> updateById(Object entity) {
+    private Mono<Long> updateById(Object entity, Method method, boolean includeNulls) {
         FieldColumn idColumn = metadata.requireIdColumn();
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("updateById"), repositoryInterface, new Object[]{entity});
+                method, repositoryInterface, new Object[]{entity});
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
                     Map<String, Object> parameters = new LinkedHashMap<>();
+                    Object updateEntity = context.getArguments()[0];
                     String setSql = metadata.columns().stream()
                             .filter(column -> column != idColumn)
-                            .filter(column -> fieldValue(column, entity) != null)
-                            .peek(column -> parameters.put(column.field().getName(), fieldValue(column, entity)))
+                            .filter(column -> includeNulls || fieldValue(column, updateEntity) != null)
+                            .peek(column -> {
+                                Object value = fieldValue(column, updateEntity);
+                                parameters.put(column.field().getName(), value == null
+                                        ? SqlParameter.nullOf(column.field().getType()) : value);
+                            })
                             .map(column -> column.name() + " = :" + column.field().getName())
                             .collect(Collectors.joining(", "));
                     if (setSql.isBlank()) {
                         context.cacheHit(0L);
                         return;
                     }
-                    Object id = fieldValue(idColumn, entity);
+                    Object id = fieldValue(idColumn, updateEntity);
                     parameters.put("id", id);
                     if (metadata.logicDeleteColumn() != null) {
                         parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(
