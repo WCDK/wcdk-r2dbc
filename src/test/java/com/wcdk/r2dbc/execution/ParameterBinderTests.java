@@ -61,6 +61,33 @@ class ParameterBinderTests {
                 .hasMessageContaining("不能为负数");
     }
 
+
+    @Test
+    void rejectsExtrasEvenWhenSqlHasNoMarkers() {
+        var client = mock(DatabaseClient.class);
+        assertThatThrownBy(() -> binder.bind(client, "SELECT 1", Map.of("extra", 1)))
+                .hasMessageContaining("未使用").hasMessageContaining("extra");
+        assertThatThrownBy(() -> binder.bind(client, "SELECT 1", Map.of(0, 1)))
+                .hasMessageContaining("未使用");
+        org.mockito.Mockito.verifyNoInteractions(client);
+    }
+
+    @Test
+    void validatesIndexedMarkersAndIgnoresQuotedMarkers() {
+        for (String sql : java.util.List.of("SELECT ? + ?", "SELECT $1 + $2", "SELECT :1 + :2")) {
+            var client = mock(DatabaseClient.class);
+            var spec = mock(DatabaseClient.GenericExecuteSpec.class, org.mockito.Answers.RETURNS_SELF);
+            when(client.sql(sql)).thenReturn(spec);
+            assertThat(binder.bind(client, sql, Map.of(0, 10, 1, 20))).isSameAs(spec);
+            verify(spec).bind(0, 10); verify(spec).bind(1, 20);
+            assertThatThrownBy(() -> binder.bind(client, sql, Map.of(0, 10)))
+                    .hasMessageContaining("缺少").hasMessageContaining("1");
+            assertThatThrownBy(() -> binder.bind(client, sql, Map.of(0, 10, 1, 20, 2, 30)))
+                    .hasMessageContaining("未使用").hasMessageContaining("2");
+        }
+        assertThat(NamedParameterParser.placeholders("SELECT '$1 ?', $$ $2 ? $$, q'[ :1 ? ]' -- ?\n/* $3 */" ).indexes()).isEmpty();
+    }
+
     @Test
     void defaultConverterKeepsR2dbcNativeJavaTypes() {
         Instant instant = Instant.parse("2026-08-11T04:05:06Z");

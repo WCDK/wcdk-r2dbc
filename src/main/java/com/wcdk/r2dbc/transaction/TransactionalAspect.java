@@ -23,28 +23,11 @@ import java.lang.reflect.Method;
 import java.time.Duration;
 
 /**
- * 声明式事务切面（响应式适配）。
- * <p>
- * 仅作为 WCDK 特殊扩展拦截带有 {@link Transactional} 注解的方法。
- * 默认不注册，标准场景由 Spring Transaction Advisor 负责。
- * 完全适配响应式架构，支持 Mono、Flux 和非响应式返回类型。
- * <p>
- * 事务传播行为说明：
- * <ul>
- *   <li>REQUIRED（默认）：如果当前存在事务则加入，否则新建事务</li>
- *   <li>REQUIRES_NEW：始终新建事务</li>
- *   <li>SUPPORTS：有事务则加入，无事务则非事务执行</li>
- *   <li>NOT_SUPPORTED：不使用事务（直接执行）</li>
- *   <li>MANDATORY：必须存在事务（直接执行）</li>
- *   <li>NEVER：不能存在事务（直接执行）</li>
- * </ul>
- * <p>
- * 注意：非响应式返回类型会被包装为 Mono 执行，确保事务上下文正确传播。
- *
- * @author WCDK
- *
- * @version 1.0
- **/
+ * WCDK 可选响应式事务切面，默认关闭，标准场景使用 Spring Transaction Advisor。
+ * 带 {@link Transactional} 的方法必须声明返回 {@link Publisher}，通常为 {@link Mono} 或 {@link Flux}。
+ * 同步返回类型会在调用业务方法前被拒绝；事务及方法执行均发生在订阅时。
+ * 传播、隔离级别、只读和超时属性传递给 {@link TransactionalOperator}。
+ */
 @Aspect
 @Order(Ordered.LOWEST_PRECEDENCE - 1)
 public class TransactionalAspect {
@@ -89,20 +72,10 @@ public class TransactionalAspect {
         if (Mono.class.isAssignableFrom(method.getReturnType())) {
             return wrapMono(invokeMono(joinPoint, method), operator, timeout);
         }
-        if (Flux.class.isAssignableFrom(method.getReturnType())) {
-            return wrapFlux(invokeFlux(joinPoint, method), operator, timeout);
-        }
         return wrapFlux(invokeFlux(joinPoint, method), operator, timeout);
     }
 
-    /**
-     * 包装 Mono 到事务中。
-     * <p>
-     * 事务在订阅时开始，完成时提交，异常时回滚。
-     */
-    /**
-     * Invoke the intercepted method only when the returned publisher is subscribed.
-     */
+    /** 在订阅时调用被拦截方法。 */
     private Mono<?> invokeMono(ProceedingJoinPoint joinPoint, Method method) {
         return Mono.defer(() -> {
             try {
@@ -125,7 +98,6 @@ public class TransactionalAspect {
 
     private Publisher<?> toPublisher(Object result, Method method) {
         if (result instanceof Publisher<?> publisher) {
-
             return publisher;
         }
         throw new IllegalStateException("响应式事务方法必须返回Publisher： " + method.toGenericString());
@@ -141,7 +113,6 @@ public class TransactionalAspect {
 
     /**
      * 包装 Flux 到事务中。
- 到事务中。
      * <p>
      * 事务在订阅时开始，所有元素完成后提交，异常时回滚。
      */
@@ -153,18 +124,7 @@ public class TransactionalAspect {
         return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
     }
 
-    /**
-     * 包装非响应式返回类型到事务中。
-     * <p>
-     * 将同步方法包装为 Mono 执行，确保事务上下文正确传播。
-     * 如果方法执行成功，事务自动提交；如果异常，事务自动回滚。
-     *
-     * @param result           原始结果
-     * @param readOnly         是否只读
-     * @param timeout          超时时间（秒）
-     * @param transactionName  事务名称
-     * @return 包装后的 Mono
-     */
+    /** 将注解属性传给响应式事务管理器。 */
     private TransactionalOperator operator(Transactional transactional) {
         DefaultTransactionDefinition definition = new DefaultTransactionDefinition();
         definition.setPropagationBehavior(transactional.propagation().value());

@@ -9,24 +9,13 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * 类型安全的删除条件构造器，通过方法引用指定字段。
- *
- * <p>使用示例：
- * <pre>{@code
- * // 基本使用
- * LambdaDeleteWrapper<User> wrapper = new LambdaDeleteWrapper<>(User.class);
- * wrapper.eq(User::getStatus, 0)
- *        .lt(User::getCreateTime, LocalDateTime.now().minusDays(30));
- *
- * // 配合 Repository 使用
- * userRepository.delete(wrapper);
- * }</pre>
- *
+ * 历史 Lambda 条件构造器；未接入 BaseRepository 执行入口。
+ * @deprecated 自 3.5.16 起弃用，计划在 4.0.0 移除。
+ * 查询请使用 {@link QueryWrapper}；更新和删除请使用
+ * {@link com.wcdk.r2dbc.repository.BaseRepository} 或派生方法。
  * @param <T> 实体类型
- * @author WCDK
- *
- * @version 1.0
- **/
+ */
+@Deprecated(since = "3.5.16", forRemoval = true)
 public class LambdaDeleteWrapper<T> {
 
     private final Class<T> entityClass;

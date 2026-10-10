@@ -11,7 +11,6 @@ import java.util.function.Consumer;
  **/
 public class QueryWrapper<T> {
 
-    private final List<Condition> conditions = new ArrayList<>();
     private final List<OrderBy> orderByList = new ArrayList<>();
     private SqlExpression expression = new SqlExpression.Empty();
     private Long limit;
@@ -25,7 +24,6 @@ public class QueryWrapper<T> {
     }
 
     private QueryWrapper(QueryWrapper<T> source) {
-        conditions.addAll(source.conditions);
         orderByList.addAll(source.orderByList);
         expression = source.expression;
         limit = source.limit;
@@ -229,9 +227,7 @@ public class QueryWrapper<T> {
         validateColumn(column, "条件字段");
         Object snapshot = ("IN".equals(operator) || "NOT IN".equals(operator))
                 ? snapshotCollection(value) : value;
-        conditions.add(new Condition(column, operator, snapshot));
-
-        // 同步更新条件兼容列表和唯一执行来源 AST。
+        // 条件只保存在执行使用的 AST 中。
         if ("IN".equals(operator) || "NOT IN".equals(operator)) {
             expression = append(new SqlExpression.In(column, "NOT IN".equals(operator), (List<?>) snapshot), SqlExpression.Operator.AND);
         } else if ("IS NULL".equals(operator) || "IS NOT NULL".equals(operator)) {

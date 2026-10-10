@@ -84,6 +84,10 @@ final class SqlExecutionEngine {
         return operations.map(row, type);
     }
 
+    <T> T mapProperties(Map<String, Object> values, Class<T> type, String context) {
+        return operations.mapProperties(values, type, context);
+    }
+
     Object convertValue(Object value, Class<?> type) {
         return operations.convertValue(value, type);
     }

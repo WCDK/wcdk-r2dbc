@@ -54,6 +54,7 @@ import org.springframework.context.annotation.Role;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.core.env.Environment;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.ReactiveTransactionManager;
@@ -93,6 +94,19 @@ public class WcdkR2dbcAutoConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(WcdkR2dbcAutoConfiguration.class);
 
+    /** Resolves the deprecated alias once, even when Spring Boot provides the connection factory. */
+    @Bean
+    public DatabaseTypeHint databaseTypeHint(WcdkR2dbcProperties properties, Environment environment) {
+        String legacy = environment.getProperty("database.type");
+        if (StringUtils.hasText(legacy)) {
+            log.warn("database.type 已弃用，兼容至 3.x，计划在 4.0.0 移除；请迁移到 wcdk.r2dbc.database-type，配置两者时新属性优先");
+        }
+        String value = StringUtils.hasText(properties.getDatabaseType()) ? properties.getDatabaseType() : legacy;
+        return new DatabaseTypeHint(StringUtils.hasText(value) ? value.trim().toLowerCase(java.util.Locale.ROOT) : "");
+    }
+
+    public record DatabaseTypeHint(String value) { }
+
     /**
      * 多数据源配置 - 动态路由连接工厂
      */
@@ -116,10 +130,11 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     /**
-     * 单数据源配置 - 基于 spring.r2dbc.url 配置
+     * 单数据源回退：仅当 Spring Boot/用户未提供连接工厂且没有多数据源配置时创建。
      */
     @Bean
     @ConditionalOnProperty(prefix = "spring.r2dbc", name = "url")
+    @Conditional(WcdkR2dbcSingleDataSourceCondition.class)
     @ConditionalOnMissingBean(ConnectionFactory.class)
     @Role(ROLE_INFRASTRUCTURE)
     public ConnectionFactory singleConnectionFactory(
@@ -127,7 +142,8 @@ public class WcdkR2dbcAutoConfiguration {
             @Value("${spring.r2dbc.url:}") String r2dbcUrl,
             @Value("${spring.r2dbc.username:}") String username,
             @Value("${spring.r2dbc.password:}") String password,
-            @Value("${database.type:}") String databaseType) {
+            DatabaseTypeHint databaseTypeHint) {
+        String databaseType = databaseTypeHint.value();
         
         if (r2dbcUrl == null || r2dbcUrl.isBlank()) {
             throw new IllegalArgumentException("spring.r2dbc.url不能为空");
@@ -359,8 +375,8 @@ public class WcdkR2dbcAutoConfiguration {
             ConnectionFactory connectionFactory,
             ResourcePatternResolver resourcePatternResolver,
             WcdkR2dbcProperties properties,
-            @Value("${database.type:}") String databaseType) {
-        return new DatabaseSchemaInitializer(databaseClient, connectionFactory, resourcePatternResolver, properties, databaseType);
+            DatabaseTypeHint databaseTypeHint) {
+        return new DatabaseSchemaInitializer(databaseClient, connectionFactory, resourcePatternResolver, properties, databaseTypeHint.value());
     }
 
     private ConnectionFactory createConnectionFactory(String name, WcdkSpringR2dbcProperties.DataSourceProperties dsProperties, WcdkSpringR2dbcProperties.Pool globalPool) {

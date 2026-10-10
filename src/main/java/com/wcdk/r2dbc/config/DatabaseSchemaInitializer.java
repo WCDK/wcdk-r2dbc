@@ -12,7 +12,6 @@ import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.R2dbcException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
@@ -48,7 +47,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
     private final WcdkR2dbcProperties properties;
 
     /**
-     * 外部配置的数据库类型（来自 database.type 配置项）
+     * 外部配置的数据库类型（由自动配置解析 wcdk.r2dbc.database-type 及历史别名）
      */
     private final String externalDatabaseType;
 
@@ -77,7 +76,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
                                      ConnectionFactory connectionFactory,
                                      ResourcePatternResolver resourcePatternResolver,
                                      WcdkR2dbcProperties properties,
-                                     @Value("${database.type:}") String externalDatabaseType) {
+                                     String externalDatabaseType) {
         this.databaseClient = databaseClient;
         this.connectionFactory = connectionFactory;
         this.resourcePatternResolver = resourcePatternResolver;

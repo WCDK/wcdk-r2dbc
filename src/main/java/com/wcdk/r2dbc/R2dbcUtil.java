@@ -301,6 +301,10 @@ public class R2dbcUtil {
         return rowMapper.map(row, entityClass);
     }
 
+    <T> T mapProperties(Map<String, Object> values, Class<T> type, String context) {
+        return rowMapper.mapProperties(values, type, context);
+    }
+
     Object convertValue(Object value, Class<?> targetType) {
         return rowMapper.convertValue(value, targetType);
     }

@@ -64,42 +64,35 @@ public class ParameterBinder {
      */
     public DatabaseClient.GenericExecuteSpec bind(DatabaseClient databaseClient, String sql, Map<?, ?> parameters) {
         String requiredSql = requireSql(sql);
-        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(requiredSql);
-        if (parameters == null || parameters.isEmpty()) {
-            Set<String> required = namedParameters(requiredSql);
-            if (!required.isEmpty()) {
-                throw new IllegalArgumentException("缺少SQL参数 " + required + "，SQL: " + requiredSql);
-            }
-            return spec;
-        }
-        Set<String> required = namedParameters(requiredSql);
-        Set<String> supplied = new LinkedHashSet<>();
-        for (Map.Entry<?, ?> entry : parameters.entrySet()) {
+        var markers = NamedParameterParser.placeholders(requiredSql);
+        Set<Object> required = new LinkedHashSet<>(markers.names());
+        required.addAll(markers.indexes());
+        Map<Object, Object> supplied = new java.util.LinkedHashMap<>();
+        if (parameters != null) for (Map.Entry<?, ?> entry : parameters.entrySet()) {
             Object key = entry.getKey();
-            Object value = entry.getValue();
-            if (key instanceof Number numberKey) {
-                int index = numberKey.intValue();
-                if (index < 0) {
-                    throw new IllegalArgumentException("SQL参数索引不能为负数: " + index
-                            + ", SQL: " + requiredSql);
+            if (key instanceof Number number) {
+                int index = number.intValue();
+                if (index < 0 || number.doubleValue() != index) {
+                    throw new IllegalArgumentException("Invalid SQL parameter index " + key + ", SQL: " + requiredSql);
                 }
-                spec = bind(spec, index, value);
-                continue;
+                key = index;
+            } else {
+                if (!(key instanceof String)) throw new IllegalArgumentException("Invalid SQL parameter key " + key);
+                requireIdentifier((String) key, requiredSql);
             }
-            String identifier = String.valueOf(key);
-            requireIdentifier(identifier, requiredSql);
-            supplied.add(identifier);
-            spec = bind(spec, identifier, value);
+            if (supplied.containsKey(key)) throw new IllegalArgumentException("Duplicate SQL parameter " + key);
+            supplied.put(key, entry.getValue());
         }
-        Set<String> missing = new LinkedHashSet<>(required);
-        missing.removeAll(supplied);
-        if (!missing.isEmpty()) {
-            throw new IllegalArgumentException("缺少SQL参数 " + missing + "，SQL: " + requiredSql);
-        }
-        Set<String> unused = new LinkedHashSet<>(supplied);
+        Set<Object> missing = new LinkedHashSet<>(required);
+        missing.removeAll(supplied.keySet());
+        if (!missing.isEmpty()) throw new IllegalArgumentException("缺少SQL参数 " + missing + ", SQL: " + requiredSql);
+        Set<Object> unused = new LinkedHashSet<>(supplied.keySet());
         unused.removeAll(required);
-        if (!unused.isEmpty() && !required.isEmpty()) {
-            throw new IllegalArgumentException("未使用的SQL参数 " + unused + "，SQL: " + requiredSql);
+        if (!unused.isEmpty()) throw new IllegalArgumentException("未使用的SQL参数 " + unused + ", SQL: " + requiredSql);
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(requiredSql);
+        for (Map.Entry<Object, Object> entry : supplied.entrySet()) {
+            spec = entry.getKey() instanceof Integer index
+                    ? bind(spec, index, entry.getValue()) : bind(spec, (String) entry.getKey(), entry.getValue());
         }
         return spec;
     }

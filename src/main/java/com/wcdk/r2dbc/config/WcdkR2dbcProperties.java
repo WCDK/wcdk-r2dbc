@@ -16,6 +16,9 @@ public class WcdkR2dbcProperties {
 
     private boolean enabled;
 
+    /** Optional driver hint for the WCDK single-source fallback and schema initializer. */
+    private String databaseType;
+
     private boolean sqlLogEnabled = false;
 
     /** Enables optional Micrometer observations when an ObservationRegistry bean is available. */

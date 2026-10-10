@@ -75,12 +75,29 @@ public class R2dbcRowMapper {
         try {
             mappingRequests.increment();
             MappingPlan plan = mappingPlans.get(entityClass);
-            return entityClass.cast(plan.map(row, rowColumns(row)));
+            return entityClass.cast(plan.map(row, rowColumns(row), null));
         } catch (ReflectiveOperationException | RuntimeException e) {
             if (e instanceof IllegalStateException illegalStateException) {
                 throw illegalStateException;
             }
             throw new IllegalStateException("实体映射失败: " + entityClass.getName(), e);
+        }
+    }
+
+    /** Maps explicitly named resultMap values through the same cached constructor/field plan. */
+    public <T> T mapProperties(Map<String, Object> values, Class<T> type, String context) {
+        try {
+            mappingRequests.increment();
+            MappingPlan plan = mappingPlans.get(type);
+            for (String property : values.keySet()) {
+                if (!plan.properties().contains(property)) {
+                    throw new IllegalStateException("未知属性 '" + property + "'");
+                }
+            }
+            return type.cast(plan.map(null, Set.of(), values));
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            throw new IllegalStateException("resultMap " + context + " 映射到 " + type.getName()
+                    + " 失败：" + error.getMessage(), error);
         }
     }
 
@@ -113,7 +130,10 @@ public class R2dbcRowMapper {
                 List<ValueTarget> targets = new ArrayList<>(components.length);
                 for (RecordComponent component : components) {
                     Field field = entityClass.getDeclaredField(component.getName());
-                    targets.add(new ValueTarget(component.getName(), columnName(field), component.getType()));
+                    com.wcdk.r2dbc.annotation.Column parameterColumn = constructor.getParameters()[targets.size()]
+                            .getAnnotation(com.wcdk.r2dbc.annotation.Column.class);
+                    targets.add(new ValueTarget(component.getName(), parameterColumn == null ? columnName(field)
+                            : parameterColumn.value(), component.getType()));
                 }
                 return new ConstructorMappingPlan(constructor, List.copyOf(targets), List.of());
             }
@@ -150,10 +170,16 @@ public class R2dbcRowMapper {
         constructor.setAccessible(true);
         List<ValueTarget> targets = new ArrayList<>();
         for (Parameter parameter : constructor.getParameters()) {
-            Field field = findField(entityClass, parameter.getName());
-            targets.add(new ValueTarget(parameter.getName(),
-                    field == null ? camelToUnderline(parameter.getName()) : columnName(field),
-                    parameter.getType()));
+            com.wcdk.r2dbc.annotation.Column column = parameter.getAnnotation(com.wcdk.r2dbc.annotation.Column.class);
+            if (column == null && !parameter.isNamePresent()) {
+                throw new IllegalStateException("构造器参数名不可用：" + constructor
+                        + "；请启用 -parameters 或为每个参数添加 @Column");
+            }
+            String name = parameter.isNamePresent() ? parameter.getName() : column.value();
+            Field field = findField(entityClass, name);
+            String columnName = column != null ? column.value()
+                    : field == null ? camelToUnderline(name) : columnName(field);
+            targets.add(new ValueTarget(name, columnName, parameter.getType()));
         }
         return new ConstructorMappingPlan(constructor, List.copyOf(targets), transientFields(entityClass));
     }
@@ -208,7 +234,15 @@ public class R2dbcRowMapper {
         return null;
     }
 
-    private Object mappedValue(Row row, Set<String> rowColumns, ValueTarget target) {
+    private Object mappedValue(Row row, Set<String> rowColumns, ValueTarget target, Map<String, Object> values) {
+        if (values != null) {
+            Object value = values.get(target.name());
+            if (value == null && target.type().isPrimitive()) throw new IllegalStateException("属性 '" + target.name() + "' 缺少非 null 值");
+            try { return convertValue(value, target.type()); }
+            catch (RuntimeException error) {
+                throw new IllegalStateException("属性 '" + target.name() + "' 无法转换到 " + target.type().getName(), error);
+            }
+        }
         String actualColumn = actualColumnName(rowColumns, target.column());
         if (actualColumn == null) {
             if (target.type().isPrimitive()) {
@@ -423,7 +457,8 @@ public class R2dbcRowMapper {
     }
 
     private interface MappingPlan {
-        Object map(Row row, Set<String> rowColumns) throws ReflectiveOperationException;
+        Object map(Row row, Set<String> rowColumns, Map<String, Object> values) throws ReflectiveOperationException;
+        Set<String> properties();
     }
 
     private record ValueTarget(String name, String column, Class<?> type) {
@@ -444,20 +479,28 @@ public class R2dbcRowMapper {
             this.transientFields = transientFields;
         }
 
+        @Override public Set<String> properties() {
+            Set<String> names = new HashSet<>();
+            targets.forEach(t -> names.add(t.name()));
+            transientFields.forEach(t -> names.add(t.field().getName()));
+            return names;
+        }
+
         @Override
-        public Object map(Row row, Set<String> rowColumns) throws ReflectiveOperationException {
+        public Object map(Row row, Set<String> rowColumns, Map<String, Object> values) throws ReflectiveOperationException {
             Object[] arguments = new Object[targets.size()];
             for (int i = 0; i < targets.size(); i++) {
-                arguments[i] = mappedValue(row, rowColumns, targets.get(i));
+                arguments[i] = mappedValue(row, rowColumns, targets.get(i), values);
             }
             Object entity = constructor.newInstance(arguments);
             for (FieldTarget target : transientFields) {
-                if (actualColumnName(rowColumns, target.column()) == null) {
+                if (values != null ? !values.containsKey(target.field().getName())
+                        : actualColumnName(rowColumns, target.column()) == null) {
                     continue;
                 }
                 ValueTarget valueTarget = new ValueTarget(target.field().getName(),
                         target.column(), target.field().getType());
-                target.field().set(entity, mappedValue(row, rowColumns, valueTarget));
+                target.field().set(entity, mappedValue(row, rowColumns, valueTarget, values));
             }
             return entity;
         }
@@ -472,11 +515,21 @@ public class R2dbcRowMapper {
             this.targets = targets;
         }
 
+        @Override public Set<String> properties() {
+            Set<String> names = new HashSet<>();
+            targets.forEach(t -> names.add(t.field().getName()));
+            return names;
+        }
+
         @Override
-        public Object map(Row row, Set<String> rowColumns) throws ReflectiveOperationException {
+        public Object map(Row row, Set<String> rowColumns, Map<String, Object> values) throws ReflectiveOperationException {
             Object entity = constructor.newInstance();
             for (FieldTarget target : targets) {
-                String actualColumn = actualColumnName(rowColumns, target.column());
+                String actualColumn = values == null ? actualColumnName(rowColumns, target.column()) : target.column();
+                if (values != null && !values.containsKey(target.field().getName())) {
+                    if (target.required() && target.field().getType().isPrimitive()) throw new IllegalStateException("属性 '" + target.field().getName() + "' 缺少值");
+                    continue;
+                }
                 if (actualColumn == null) {
                     if (target.required() && target.field().getType().isPrimitive()) {
                         throw new IllegalStateException("必需的基本类型属性 '" + target.field().getName()
@@ -486,7 +539,7 @@ public class R2dbcRowMapper {
                 }
                 ValueTarget valueTarget = new ValueTarget(target.field().getName(),
                         target.column(), target.field().getType());
-                target.field().set(entity, mappedValue(row, rowColumns, valueTarget));
+                target.field().set(entity, mappedValue(row, rowColumns, valueTarget, values));
             }
             return entity;
         }

@@ -22,7 +22,11 @@ public final class XmlStatementCompiler {
 
     public Optional<RepositoryMethodPlan> compile(Method method) {
         return registry.find(repositoryInterface, method.getName())
-                .map(statement -> new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.XML,
-                        statement, statement.statementId()));
+                .map(statement -> {
+                    if (statement.commandType() != com.wcdk.r2dbc.query.xml.SqlCommandType.SELECT) {
+                        XmlUpdateResultPlan.compile(method, repositoryInterface);
+                    }
+                    return new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.XML, statement, statement.statementId());
+                });
     }
 }

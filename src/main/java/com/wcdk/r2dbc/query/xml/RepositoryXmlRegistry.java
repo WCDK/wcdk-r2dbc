@@ -83,21 +83,31 @@ public class RepositoryXmlRegistry {
         try (InputStream inputStream = resource.getInputStream()) {
             byte[] xmlBytes = inputStream.readAllBytes();
             String xmlContent = new String(xmlBytes, StandardCharsets.UTF_8);
-            boolean hasExternalDtd = xmlContent.matches("(?s).*<!DOCTYPE\\s+\\w+\\s+(SYSTEM|PUBLIC)\\s+.*");
+            boolean hasExternalDtd = xmlContent.replaceAll("(?s)<!--.*?-->|<!\\[CDATA\\[.*?]]>", "").matches("(?s).*<!DOCTYPE\\s+\\w+\\s+(SYSTEM|PUBLIC)\\s+.*");
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
-            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
-            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", true);
-            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "file");
-            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-            factory.setValidating(hasExternalDtd);
-            factory.setXIncludeAware(false);
-            factory.setExpandEntityReferences(false);
+            configureSecureFactory(factory, hasExternalDtd);
             var documentBuilder = factory.newDocumentBuilder();
-            documentBuilder.setEntityResolver((publicId, systemId) -> resolveLocalDtd(publicId, systemId));
+            documentBuilder.setEntityResolver(new org.xml.sax.ext.DefaultHandler2() {
+                @Override public InputSource resolveEntity(String name, String publicId, String baseURI, String systemId) throws SAXException {
+                    return resolveLocalDtd(publicId, systemId);
+                }
+                @Override public InputSource resolveEntity(String publicId, String systemId) throws SAXException {
+                    return resolveLocalDtd(publicId, systemId);
+                }
+            });
+            documentBuilder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler() {
+                @Override public void error(org.xml.sax.SAXParseException e) throws SAXException { throw e; }
+                @Override public void fatalError(org.xml.sax.SAXParseException e) throws SAXException { throw e; }
+            });
             Document document = documentBuilder.parse(new ByteArrayInputStream(
                     normalizeSqlOperators(xmlContent).getBytes(StandardCharsets.UTF_8)));
+            if (document.getDoctype() != null) {
+                var doctype = document.getDoctype();
+                if (doctype.getPublicId() != null || !allowedDtd(doctype.getSystemId())
+                        || StringUtils.hasText(doctype.getInternalSubset())) {
+                    throw new SAXException("DOCTYPE only permits the fixed built-in DTD; internal subsets are forbidden");
+                }
+            }
             Element root = document.getDocumentElement();
             if (root == null || !"repository".equals(root.getTagName())) {
                 throw new IllegalStateException("R2DBC XML root element must be <repository>: "
@@ -130,6 +140,27 @@ public class RepositoryXmlRegistry {
         } catch (Exception e) {
             throw new IllegalStateException("解析 R2DBC XML 仓储失败：" + resource.getDescription(), e);
         }
+    }
+
+    static void configureSecureFactory(DocumentBuilderFactory factory, boolean validating) {
+        try {
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", true);
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+            factory.setValidating(validating);
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
+        } catch (Exception error) {
+            throw new IllegalStateException("XML parser cannot enforce required security features", error);
+        }
+    }
+    private static boolean allowedDtd(String systemId) {
+        return "wcdk-r2dbc-repository.dtd".equals(systemId)
+                || "classpath:/dtd/wcdk-r2dbc-repository.dtd".equals(systemId);
     }
 
     private String normalizeSqlOperators(String xmlContent) {
@@ -165,7 +196,7 @@ public class RepositoryXmlRegistry {
      * @author wcdk
      **/
     private InputSource resolveLocalDtd(String publicId, String systemId) throws SAXException {
-        if (systemId == null || !systemId.endsWith("wcdk-r2dbc-repository.dtd")) {
+        if (publicId != null || !allowedDtd(systemId)) {
             throw new SAXException("仅允许加载项目内置 R2DBC DTD，禁止访问外部实体：" + systemId);
         }
         try {
@@ -203,6 +234,13 @@ public class RepositoryXmlRegistry {
                     if (StringUtils.hasText(column) && StringUtils.hasText(property)) {
                         builder.addIdMapping(column, property);
                     }
+                } else if ("association".equals(childElement.getTagName())) {
+                    String property = childElement.getAttribute("property");
+                    String reference = childElement.getAttribute("resultMap");
+                    if (!StringUtils.hasText(property) || !StringUtils.hasText(reference)) {
+                        throw new IllegalStateException("resultMap " + resultMapId + " association requires property and resultMap");
+                    }
+                    builder.addAssociationMapping(property, reference.contains(".") ? reference : namespace + "." + reference);
                 } else if ("discriminator".equals(childElement.getTagName())) {
                     String discriminatorColumn = childElement.getAttribute("column");
                     if (StringUtils.hasText(discriminatorColumn)) {
@@ -214,7 +252,7 @@ public class RepositoryXmlRegistry {
                                 String value = caseElement.getAttribute("value");
                                 String resultMapRef = caseElement.getAttribute("resultMap");
                                 if (StringUtils.hasText(value) && StringUtils.hasText(resultMapRef)) {
-                                    builder.addDiscriminatorMapping(value, namespace + "." + resultMapRef);
+                                    builder.addDiscriminatorMapping(value, resultMapRef.contains(".") ? resultMapRef : namespace + "." + resultMapRef);
                                 }
                             }
                         }
@@ -291,6 +329,9 @@ public class RepositoryXmlRegistry {
             throw new IllegalStateException("R2DBC XML resultMap 存在循环引用：" + visiting + " -> " + resultMapId);
         }
         for (String target : definition.discriminatorMappings().values()) {
+            validateResultMap(target, visiting, validated);
+        }
+        for (String target : definition.associationMappings().values()) {
             validateResultMap(target, visiting, validated);
         }
         visiting.remove(resultMapId);

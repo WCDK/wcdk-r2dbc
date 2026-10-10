@@ -34,7 +34,6 @@ import reactor.util.context.ContextView;
 import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -137,14 +136,15 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
 
     private Object executeXmlUpdate(RepositoryParameterBinder.BoundSql boundSql, Method method, Object[] arguments) {
         Mono<Long> rows = sqlExecutionEngine.updateWithoutLifecycle(boundSql.sql(), boundSql.parameters());
-        Class<?> valueType = reactiveValueType(method);
-        if (method.getReturnType() == Mono.class && valueType == Boolean.class) {
-            return rows.map(count -> count > 0);
-        }
-        if (method.getReturnType() == Mono.class && metadata != null && metadata.entityClass().isAssignableFrom(valueType)) {
-            Object entity = arguments == null || arguments.length == 0 ? null : arguments[0];
+        XmlUpdateResultPlan result = XmlUpdateResultPlan.compile(method, repositoryInterface);
+        if (result.entityArgumentIndex() >= 0) {
+            Object entity = arguments[result.entityArgumentIndex()];
+            if (entity == null) throw new IllegalArgumentException("XML 更新返回实体入参不能为 null：" + method);
             return rows.thenReturn(entity);
         }
+        if (result.valueType() == Boolean.class) return rows.map(count -> count > 0);
+        if (result.valueType() == Integer.class) return rows.map(Math::toIntExact);
+        if (result.valueType() == Void.class) return rows.then();
         return rows;
     }
 
@@ -215,32 +215,31 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
 
         String discriminatorColumn = resultMap.discriminatorColumn();
         if (StringUtils.hasText(discriminatorColumn)) {
-            Object discriminatorValue = row.get(discriminatorColumn);
-            if (discriminatorValue != null) {
-                String valueStr = String.valueOf(discriminatorValue);
-                String mappedResultMapId = resultMap.discriminatorMappings().get(valueStr);
-                if (StringUtils.hasText(mappedResultMapId)) {
-                    return mapRowByResultMap(row, mappedResultMapId);
-                }
+            Object value = resultMapColumn(row, discriminatorColumn, resultMap);
+            String reference = resultMap.discriminatorMappings().get(String.valueOf(value));
+            if (!StringUtils.hasText(reference)) {
+                throw new IllegalStateException("resultMap " + resultMapId + " discriminator property/column "
+                        + discriminatorColumn + " has no case for " + value + "; target " + resultMap.type());
             }
+            return mapRowByResultMap(row, reference);
         }
+        Map<String, Object> values = new LinkedHashMap<>();
+        resultMap.idMappings().forEach((column, property) ->
+                values.put(property, resultMapColumn(row, column, resultMap)));
+        resultMap.associationMappings().forEach((property, reference) ->
+                values.put(property, mapRowByResultMap(row, reference)));
+        return sqlExecutionEngine.mapProperties(values, resolveClass(resultMap.type()), resultMapId);
+    }
 
-        Class<?> targetClass = resolveClass(resultMap.type());
+    private Object resultMapColumn(Row row, String column, ResultMapDefinition resultMap) {
         try {
-            Object entity = targetClass.getDeclaredConstructor().newInstance();
-            for (Map.Entry<String, String> entry : resultMap.idMappings().entrySet()) {
-                String column = entry.getKey();
-                String property = entry.getValue();
-                Object value = row.get(column);
-                Field field = findField(targetClass, property);
-                if (field != null) {
-                    field.setAccessible(true);
-                    field.set(entity, sqlExecutionEngine.convertValue(value, field.getType()));
-                }
-            }
-            return entity;
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("通过 resultMap 映射实体失败：" + resultMapId, e);
+            String actual = row.getMetadata().getColumnMetadatas().stream()
+                    .map(io.r2dbc.spi.ColumnMetadata::getName)
+                    .filter(name -> name.equalsIgnoreCase(column)).findFirst().orElse(column);
+            return row.get(actual);
+        } catch (RuntimeException error) {
+            throw new IllegalStateException("resultMap " + resultMap.id() + " column " + column
+                    + " property " + resultMap.idMappings().get(column) + " target " + resultMap.type(), error);
         }
     }
 
@@ -250,18 +249,6 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
         } catch (ClassNotFoundException e) {
             throw new IllegalStateException("类不存在：" + className, e);
         }
-    }
-
-    private Field findField(Class<?> type, String name) {
-        Class<?> searchType = type;
-        while (searchType != null && searchType != Object.class) {
-            try {
-                return searchType.getDeclaredField(name);
-            } catch (NoSuchFieldException ignored) {
-                searchType = searchType.getSuperclass();
-            }
-        }
-        return null;
     }
 
     private Number numberValue(Row row) {

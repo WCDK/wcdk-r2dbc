@@ -73,6 +73,10 @@ public final class R2dbcRepositoryOperations implements RepositoryOperations {
         return delegate.map(row, entityClass);
     }
 
+    public <T> T mapProperties(Map<String, Object> values, Class<T> type, String context) {
+        return delegate.mapProperties(values, type, context);
+    }
+
     @Override
     public Object convertValue(Object value, Class<?> targetType) {
         return delegate.convertValue(value, targetType);

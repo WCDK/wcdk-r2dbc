@@ -74,6 +74,23 @@ class QueryWrapperTests {
     }
 
     @Test
+    void copyPreservesNestedAstAndCollectionSnapshotWithoutSharingBuilderChanges() {
+        List<Long> ids = new ArrayList<>(List.of(1L, 2L));
+        QueryWrapper<Object> original = new QueryWrapper<>().eq("status", 1)
+                .or(n -> n.in("id", ids).isNull("name"));
+        QueryWrapper<Object> copy = original.copy();
+        SqlExpression snapshot = copy.expression();
+        ids.clear();
+        original.eq("tenant", 9);
+        assertThat(copy.expression()).isSameAs(snapshot).isNotEqualTo(original.expression());
+        var root = (SqlExpression.Logical) snapshot;
+        var nested = (SqlExpression.Logical) root.operands().get(1);
+        assertThat(((SqlExpression.In) nested.operands().get(0)).values()).isEqualTo(List.of(1L, 2L));
+        copy.eq("tenant", 10);
+        assertThat(copy.expression()).isNotEqualTo(original.expression());
+    }
+
+    @Test
     void buildsNestedPredicateAst() {
         QueryWrapper<Object> wrapper = new QueryWrapper<>()
                 .eq("status", 1)
@@ -85,4 +102,5 @@ class QueryWrapperTests {
         assertThat(root.operands().get(1)).isInstanceOf(SqlExpression.Logical.class);
         assertThat(((SqlExpression.Logical) root.operands().get(1)).operator())
                 .isEqualTo(SqlExpression.Operator.AND);
-    }}
+    }
+}

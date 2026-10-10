@@ -25,6 +25,49 @@ class R2dbcRowMapperTests {
     private final R2dbcRowMapper mapper = new R2dbcRowMapper();
 
     @Test
+    void constructorParameterColumnOverridesFieldAndParameterName() {
+        var result = mapper.map(row(List.of("explicit_name"), List.of("alice")), ParameterColumnEntity.class);
+        assertThat(result.name).isEqualTo("alice");
+        assertThat(mapper.map(row(List.of("explicit_name"), List.of("bob")), ParameterColumnRecord.class))
+                .isEqualTo(new ParameterColumnRecord("bob"));
+    }
+
+    @Test
+    void constructorsWithoutParameterMetadataRequireColumnAnnotations(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        var source = directory.resolve("NoNames.java");
+        java.nio.file.Files.writeString(source, """
+            public class NoNames {
+                public final String name;
+                public NoNames(String name) { this.name = name; }
+                public static class Annotated {
+                    public final String name;
+                    public Annotated(@com.wcdk.r2dbc.annotation.Column("explicit_name") String name) { this.name = name; }
+                }
+            }
+            """);
+        assertThat(javax.tools.ToolProvider.getSystemJavaCompiler().run(null, null, null,
+                "-proc:none", "-classpath", System.getProperty("java.class.path"), "-d", directory.toString(), source.toString())).isZero();
+        try (var loader = new java.net.URLClassLoader(new java.net.URL[]{directory.toUri().toURL()}, getClass().getClassLoader())) {
+            Class<?> missing = loader.loadClass("NoNames");
+            assertThat(missing.getConstructors()[0].getParameters()[0].isNamePresent()).isFalse();
+            assertThatThrownBy(() -> mapper.map(row(List.of("name"), List.of("alice")), missing))
+                    .hasMessageContaining("-parameters").hasMessageContaining("@Column");
+            Class<?> annotated = loader.loadClass("NoNames$Annotated");
+            Object entity = mapper.map(row(List.of("explicit_name"), List.of("alice")), annotated);
+            assertThat(annotated.getField("name").get(entity)).isEqualTo("alice");
+        }
+    }
+
+    static class ParameterColumnEntity {
+        @org.springframework.data.relational.core.mapping.Column("field_name") final String name;
+        ParameterColumnEntity(@com.wcdk.r2dbc.annotation.Column("explicit_name") String name) { this.name = name; }
+    }
+    record ParameterColumnRecord(String name) {
+        ParameterColumnRecord(@com.wcdk.r2dbc.annotation.Column("explicit_name") String name) { this.name = name; }
+    }
+
+
+    @Test
     void mapsRecordEnumTimeAndSnakeCaseColumns() {
         LocalDateTime createdAt = LocalDateTime.of(2026, 8, 9, 12, 30);
         Row row = row(List.of("id", "user_name", "status", "created_at"),

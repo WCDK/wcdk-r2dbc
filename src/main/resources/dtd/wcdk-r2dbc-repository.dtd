@@ -42,7 +42,7 @@
 <!ATTLIST when test CDATA #REQUIRED>
 <!ELEMENT otherwise (%dynamic;)*>
 
-<!ELEMENT resultMap (id|result|discriminator)*>
+<!ELEMENT resultMap (id|result|association|discriminator)*>
 <!ATTLIST resultMap id CDATA #REQUIRED type CDATA #REQUIRED>
 <!ELEMENT id EMPTY>
 <!ATTLIST id column CDATA #REQUIRED property CDATA #REQUIRED>
@@ -52,3 +52,6 @@
 <!ATTLIST discriminator column CDATA #REQUIRED>
 <!ELEMENT case EMPTY>
 <!ATTLIST case value CDATA #REQUIRED resultMap CDATA #REQUIRED>
+
+<!ELEMENT association EMPTY>
+<!ATTLIST association property CDATA #REQUIRED resultMap CDATA #REQUIRED>

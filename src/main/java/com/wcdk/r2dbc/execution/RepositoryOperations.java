@@ -40,5 +40,9 @@ public interface RepositoryOperations {
 
     <T> T map(Row row, Class<T> entityClass);
 
+    default <T> T mapProperties(Map<String, Object> values, Class<T> type, String context) {
+        return new R2dbcRowMapper().mapProperties(values, type, context);
+    }
+
     Object convertValue(Object value, Class<?> targetType);
 }

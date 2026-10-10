@@ -37,7 +37,7 @@ class RepositoryXmlRegistryTests {
 
         assertThatThrownBy(() -> registry(externalEntity))
                 .isInstanceOf(IllegalStateException.class)
-                .hasStackTraceContaining("SQL 不能为空");
+                .hasStackTraceContaining("internal subsets are forbidden");
     }
 
     @Test
@@ -108,6 +108,59 @@ class RepositoryXmlRegistryTests {
         assertThatThrownBy(() -> registry(missingId))
                 .hasStackTraceContaining("缺少 id")
                 .hasStackTraceContaining(TestRepository.class.getName());
+    }
+
+
+    @Test
+    void rejectsExternalAndInvalidDtdsWithoutLoadingThem() {
+        for (String uri : java.util.List.of("file:///etc/wcdk-r2dbc-repository.dtd",
+                "http://127.0.0.1:9/wcdk-r2dbc-repository.dtd", "unknown.dtd")) {
+            String xml = "<!DOCTYPE repository SYSTEM \"%s\"><repository namespace=\"%s\"><select id=\"find\">SELECT 1</select></repository>"
+                    .formatted(uri, TestRepository.class.getName());
+            assertThatThrownBy(() -> registry(xml)).hasStackTraceContaining("DTD");
+        }
+        String invalid = "<!DOCTYPE repository SYSTEM \"wcdk-r2dbc-repository.dtd\"><repository namespace=\"%s\"><select>SELECT 1</select></repository>"
+                .formatted(TestRepository.class.getName());
+        assertThatThrownBy(() -> registry(invalid)).hasStackTraceContaining("id");
+    }
+
+    @Test
+    void failsClosedWhenParserDoesNotSupportSecurityFeatures() throws Exception {
+        var factory = mock(javax.xml.parsers.DocumentBuilderFactory.class);
+        var cause = new javax.xml.parsers.ParserConfigurationException("unsupported feature");
+        org.mockito.Mockito.doThrow(cause).when(factory)
+                .setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        assertThatThrownBy(() -> RepositoryXmlRegistry.configureSecureFactory(factory, false))
+                .hasMessageContaining("security features").hasCause(cause);
+    }
+
+
+    @Test
+    void acceptsExplicitClasspathDtdAndNestedReferences() throws Exception {
+        String xml = """
+                <!DOCTYPE repository SYSTEM "classpath:/dtd/wcdk-r2dbc-repository.dtd">
+                <repository namespace="%s">
+                  <resultMap id="outer" type="java.lang.Object"><association property="address" resultMap="inner"/></resultMap>
+                  <resultMap id="inner" type="java.lang.Object"><result column="city" property="city"/></resultMap>
+                  <select id="find" resultMap="outer">SELECT 1</select>
+                </repository>
+                """.formatted(TestRepository.class.getName());
+        String namespace = TestRepository.class.getName();
+        assertThat(registry(xml).findResultMap(namespace + ".outer").orElseThrow().associationMappings())
+                .containsEntry("address", namespace + ".inner");
+        assertThatThrownBy(() -> registry(xml.replace("resultMap=\"inner\"", "resultMap=\"outer\"")))
+                .hasStackTraceContaining("循环引用");
+    }
+
+    @Test
+    void rejectsFileAndNetworkEntitiesInInternalSubsets() {
+        for (String uri : java.util.List.of("file:///etc/passwd", "http://127.0.0.1:9/secret")) {
+            String xml = """
+                    <!DOCTYPE repository [<!ENTITY xxe SYSTEM "%s">]>
+                    <repository namespace="%s"><select id="find">SELECT 1 &xxe;</select></repository>
+                    """.formatted(uri, TestRepository.class.getName());
+            assertThatThrownBy(() -> registry(xml)).hasStackTraceContaining("internal subsets are forbidden");
+        }
     }
 
     private RepositoryXmlRegistry registry(String xml) throws Exception {

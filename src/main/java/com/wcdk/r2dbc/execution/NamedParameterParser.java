@@ -14,9 +14,15 @@ public final class NamedParameterParser {
     }
 
     public static Set<String> parse(String sql) {
+        return placeholders(sql).names();
+    }
+    public record Placeholders(Set<String> names, Set<Integer> indexes) {}
+    public static Placeholders placeholders(String sql) {
         Set<String> names = new LinkedHashSet<>();
+        Set<Integer> indexes = new LinkedHashSet<>();
+        int questionIndex = 0;
         if (sql == null || sql.isEmpty()) {
-            return names;
+            return new Placeholders(names, indexes);
         }
 
         LexerState state = LexerState.NORMAL;
@@ -80,6 +86,17 @@ public final class NamedParameterParser {
                     continue;
                 }
             }
+            if (ch == '?') { indexes.add(questionIndex++); continue; }
+            if ((ch == '$' || ch == ':') && Character.isDigit(next)
+                    && !(i > 0 && sql.charAt(i - 1) == ':')) {
+                int end = i + 2;
+                while (end < sql.length() && Character.isDigit(sql.charAt(end))) end++;
+                int ordinal = Integer.parseInt(sql.substring(i + 1, end));
+                if (ordinal < 1) throw new IllegalArgumentException("SQL positional markers are one-based: " + sql);
+                indexes.add(ordinal - 1);
+                i = end - 1;
+                continue;
+            }
             if (ch != ':' || !isParameterStart(next)) continue;
             if ((i > 0 && sql.charAt(i - 1) == ':') || next == '=') continue;
             int end = i + 2;
@@ -87,12 +104,13 @@ public final class NamedParameterParser {
             names.add(sql.substring(i + 1, end));
             i = end - 1;
         }
-        return names;
+        return new Placeholders(names, indexes);
     }
 
     private static String postgresDollarDelimiter(String sql, int index) {
         int end = sql.indexOf('$', index + 1);
         if (end <= index) return null;
+        if (end > index + 1 && !isParameterStart(sql.charAt(index + 1))) return null;
         for (int i = index + 1; i < end; i++) {
             char ch = sql.charAt(i);
             if (!(Character.isLetterOrDigit(ch) || ch == '_')) return null;

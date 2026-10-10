@@ -20,7 +20,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 - **减少样板代码**：通过 Repository 动态代理、标准 CRUD 和派生查询方法，快速构建数据访问层。
 - **兼顾易用性与控制力**：简单查询使用方法名约定和 QueryWrapper，复杂场景使用 XML SQL 和自定义生命周期拦截器。
 - **面向企业数据库场景**：内置事务、多数据源、逻辑删除、连接池、SQL 观测和多数据库方言支持。
-- **渐进式接入**：可以从基础 Repository 开始使用，按需启用分页、Lambda Wrapper、XML SQL、事务和观测能力。
+- **渐进式接入**：可以从基础 Repository 开始使用，按需启用分页、QueryWrapper、XML SQL、事务和观测能力。
 
 ## Why Choose WCDK R2DBC?
 
@@ -28,7 +28,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 - **Less boilerplate**: Build the data access layer quickly with dynamic Repository proxies, standard CRUD operations, and derived query methods.
 - **Simple for common cases, flexible for complex cases**: Use method-name conventions and QueryWrapper for common queries, and XML SQL or lifecycle interceptors when deeper control is needed.
 - **Built for enterprise database scenarios**: Includes transactions, multi-datasource routing, logical deletion, connection pooling, SQL observability, and dialect support for multiple databases.
-- **Adopt incrementally**: Start with the basic Repository API and enable pagination, Lambda Wrapper, XML SQL, transactions, or observability as needed.
+- **Adopt incrementally**: Start with the basic Repository API and enable pagination, QueryWrapper, XML SQL, transactions, or observability as needed.
 
 ## 目录
 
@@ -40,7 +40,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 - [@Transient 字段](#transient-字段)
 - [派生查询方法](#派生查询方法)
 - [QueryWrapper](#querywrapper)
-- [Lambda Wrapper](#lambda-wrapper)
+- [API 迁移](#api-迁移)
 - [分页](#分页)
 - [逻辑删除](#逻辑删除)
 - [多数据源](#多数据源)
@@ -57,7 +57,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 - **Repository 动态代理**：启动时扫描接口并生成仓储代理，业务代码只需定义接口。
 - **标准 CRUD**：提供新增、按 ID 查询、更新、删除、列表、单条、统计和存在性查询。
 - **派生方法**：支持 `findBy`、`countBy`、`existsBy`、`deleteBy`、`update...By...` 等方法名约定。
-- **查询构造器**：支持字符串字段和 Lambda 属性引用，覆盖等值、范围、模糊、集合、空值、嵌套 `AND` / `OR`、排序、分页。
+- **查询构造器**：支持实体属性名或映射列名，覆盖等值、范围、模糊、集合、空值、嵌套 `AND` / `OR`、排序、分页。
 - **逻辑删除**：查询、统计、更新和派生删除默认过滤已删除数据。
 - **多数据源路由**：支持通过 `@R2dbcDataSource` 和 Reactor Context 切换数据源。
 - **响应式事务**：提供 `TransactionalOperator`、模板事务和手动事务能力。
@@ -163,7 +163,7 @@ public interface UserRepository extends BaseRepository<User> {
 }
 ```
 
-> `com.wcdk.r2dbc.Repository` 仍作为仓储注解的兼容入口保留；基础仓储接口的推荐路径为 `com.wcdk.r2dbc.repository.BaseRepository`。
+> 历史注解 `com.wcdk.r2dbc.Repository` 已弃用，迁移到 `com.wcdk.r2dbc.annotation.Repository`；兼容入口计划在 4.0.0 移除。基础仓储接口使用 `com.wcdk.r2dbc.repository.BaseRepository`。
 
 ### 5. 在 Service 中使用
 
@@ -199,6 +199,7 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 | 配置项 | 默认值 | 说明 |
 |---|---:|---|
 | `wcdk.r2dbc.enabled` | `false` | 是否启用 WCDK R2DBC |
+| `wcdk.r2dbc.database-type` | 空 | 单数据源 WCDK 回退工厂的驱动提示及 Schema 初始化的类型提示；通常从 URL/连接元数据检测 |
 | `wcdk.r2dbc.sql-log-enabled` | `true` | 是否输出 SQL 日志 |
 | `wcdk.r2dbc.observability-enabled` | `false` | 是否启用 Micrometer 观测 |
 | `wcdk.r2dbc.snowflake-id` | `false` | 是否启用雪花 ID 生成 |
@@ -217,7 +218,9 @@ wcdk:
       aspect-enabled: true
 ```
 
-数据库初始化配置位于 `wcdk.r2dbc.database-initializer`，支持 `enabled`、`sql-location`、`database-type`、`mode`、`ignore-errors` 和 `execute-in-transaction`。
+数据库初始化配置位于 `wcdk.r2dbc.database-initializer`，支持 `enabled`、`sql-location`、`database-type`、`mode`、`ignore-errors` 和 `execute-in-transaction`。初始化类型优先级为初始化器专用 `database-type` > `wcdk.r2dbc.database-type` > 历史 `database.type` > 连接元数据。
+
+单数据源通常由 Spring Boot 的 `R2dbcAutoConfiguration` 创建连接工厂；WCDK 在它之后装配，仅当没有任何连接工厂、配置了 `spring.r2dbc.url` 且没有多数据源配置时创建回退工厂。可在排除 Spring Boot R2DBC 自动配置或仅导入 WCDK 自动配置的环境使用该回退。Boot 或用户提供的连接工厂优先，WCDK 类型提示不会覆盖其驱动；多数据源按各自 URL 和配置选择驱动。
 
 ## Repository API
 
@@ -368,12 +371,7 @@ Flux<User> users = userRepository.selectList(wrapper);
 `column IS NOT NULL`；空 `IN` 渲染为 `1 = 0`，空 `NOT IN` 渲染为 `1 = 1`。
 如果实体配置了逻辑删除字段，Repository 查询构建时还会自动追加未删除条件。
 
-`conditions()` 仅为历史兼容 API，新的执行链以 `expression()` 生成的条件表达式为准。
-
-### Lambda Wrapper
-
-需要避免手写字段名时，可以使用 `LambdaQueryWrapper`、`LambdaUpdateWrapper` 和
-`LambdaDeleteWrapper`。它们通过实体属性方法引用解析数据库列名。
+条件仅保存在 `expression()` 返回的 AST 中，普通条件、嵌套条件和 `copy()` 使用同一份表达式模型。`QueryWrapper` 没有 `conditions()` 访问器。
 
 ## 分页
 
@@ -548,12 +546,12 @@ WCDK 切面会将 `@Transactional` 方法转换为基于 `TransactionalOperator`
 
 - 方法必须由 Spring Bean 代理调用；直接 `new` 对象或同一个类中使用 `this.method()` 自调用，
   不会经过事务代理。
-- 响应式事务方法应返回 `Mono` 或 `Flux`，不要在方法中调用 `block()` 或手动 `subscribe()`。
+- 响应式事务方法必须声明返回 `Publisher`，通常选择 `Mono` 或 `Flux`，不要在方法中调用 `block()` 或手动 `subscribe()`。
 - 只有返回的响应式链真正被订阅时，事务才会执行；仅创建 Publisher 不会立即开启事务。
 - 事务边界内应只放置相关的 R2DBC 数据库操作，不要包含阻塞 JDBC、阻塞 HTTP 或长时间外部调用。
 - 事务中的数据库操作必须使用同一个 `ConnectionFactory`。多数据源场景下，应在事务开始前确定数据源，
   事务中不能切换到其他数据源；切换会在执行 SQL 前抛出 `IllegalStateException`。
-- 如果方法返回普通对象而不是 `Mono`/`Flux`，不能按响应式事务使用；推荐改为返回 `Mono<T>` 或 `Flux<T>`。
+- 同步返回普通对象或 `void` 的事务方法会在方法体执行前被 WCDK 切面拒绝；必须改为声明返回 `Publisher`（通常为 `Mono<T>` 或 `Flux<T>`）。
 - 默认情况下，WCDK 自定义事务切面关闭；既没有 Spring 标准事务 Advisor，也没有配置
   `wcdk.r2dbc.transaction.aspect-enabled=true` 时，`@Transactional` 不会生效。
 
@@ -660,6 +658,55 @@ mvn -Pall test
 - 大量元素使用 `flatMap` 时应设置合理并发上限。
 - 异常使用 `switchIfEmpty`、`onErrorMap`、`onErrorResume` 和 `doOnError` 按语义处理，不能无条件吞异常。
 
+## API 迁移
+
+自 3.5.16 起，下列兼容类型标注 `@Deprecated(since = "3.5.16", forRemoval = true)`，计划在 4.0.0 移除；3.x 中仍保留类型供旧代码编译。
+
+| 历史入口 | 替代入口 |
+|---|---|
+| `com.wcdk.r2dbc.Repository` | `com.wcdk.r2dbc.annotation.Repository` |
+| `LambdaQueryWrapper<T>` | `QueryWrapper<T>`，字段由实体元数据白名单校验 |
+| `LambdaUpdateWrapper<T>` | `updateByIdIgnoringNulls` / `updateByIdIncludingNulls` 或派生更新方法 |
+| `LambdaDeleteWrapper<T>` | `deleteById` 或派生删除方法 |
+
+三个历史 Lambda Wrapper 没有接入 `BaseRepository`，不能直接传入查询、更新或删除入口。更新和删除的迁移应使用明确支持的仓储方法：
+
+```java
+import com.wcdk.r2dbc.annotation.Repository;
+import com.wcdk.r2dbc.repository.BaseRepository;
+import com.wcdk.r2dbc.query.QueryWrapper;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+@Repository
+interface UserRepository extends BaseRepository<User> {
+    Flux<User> findByStatus(Integer status);
+    Mono<Long> updateStatusById(Integer status, Long id);
+    Mono<Long> deleteByStatus(Integer status);
+}
+```
+
+以上 `User` 使用快速开始中的实体声明，仓储调用如下（编译和执行回归见 [ReadmeApiTests](src/test/java/com/wcdk/r2dbc/ReadmeApiTests.java)）：
+
+```java
+QueryWrapper<User> wrapper = new QueryWrapper<User>()
+        .eq("status", 1).orderByDesc("id");
+Flux<User> users = userRepository.selectList(wrapper);
+Mono<Long> updated = userRepository.updateStatusById(1, 1L);
+Mono<Long> deleted = userRepository.deleteByStatus(0);
+```
+
+带事务注解的方法必须声明返回 `Publisher`，通常选择 `Mono<T>` / `Flux<T>`。同步返回 `T` 或 `void` 的方法会在执行方法体前被 WCDK 事务切面拒绝，不会自动包装；方法体与事务均在订阅时执行。
+
+历史配置 `database.type` 自 3.5.16 起弃用，3.x 继续兼容，计划在 4.0.0 移除。请迁移到 `wcdk.r2dbc.database-type`；同时配置非空值时新属性优先，新值为空时使用旧值，均为空时从 URL/元数据检测。启用 WCDK 后出现非空旧配置会输出弃用提示（即使新属性已覆盖旧值）。IDE 配置元数据同时提供新属性与旧属性的替代提示。该提示只作用于 WCDK 回退工厂和初始化器，不更改 Spring Boot 已创建的工厂。
+
+```yaml
+wcdk:
+  r2dbc:
+    enabled: true
+    database-type: postgresql
+```
+
 ## 项目结构
 
 ```text
@@ -670,7 +717,7 @@ com.wcdk.r2dbc
 ├── dialect          # 数据库方言
 ├── repository       # 仓储公共接口
 ├── execution        # 仓储执行接口
-├── query           # QueryWrapper、Lambda Wrapper 与查询表达式
+├── query           # QueryWrapper 与查询表达式（保留已弃用 Lambda 类型）
 │   ├── sql         # SQL 表达式渲染
 │   └── xml         # XML SQL 与结果映射
 └── database         # 各数据库驱动适配
@@ -698,3 +745,38 @@ mvn -DskipTests package
 
 - 作者：WCDK
 - 邮箱：wcdk1024@gmail.com
+
+
+### XML 仓储与实体映射契约
+
+XML 写操作返回值必须声明为 `Mono<Long>`、`Mono<Integer>`（影响行数）、`Mono<Boolean>`（行数大于零）、`Mono<Void>` 或 `Mono<Entity>`。返回实体时，方法签名必须有且只有一个类型匹配的实体入参，允许位于任意位置；框架在 SQL 完成后返回该对象，不会重新查询数据库或把首参当作实体。没有匹配实体、多个匹配实体、原始 `Mono`、通配符或嵌套泛型会在仓储编译时报告方法配置错误。
+
+`resultMap` 和普通查询复用同一映射计划，支持 record、无无参构造器的不可变对象和可变 POJO。优先选择 `@PersistenceCreator` 构造器；没有该注解时使用无参构造器，或唯一构造器。推荐开启 Java 编译器 `-parameters`，让构造器参数名与实体属性名一致。构造器参数可用 `com.wcdk.r2dbc.annotation.Column` 显式指定数据库列，优先级高于字段注解和参数名推导；字段上的列注解仍使用 `org.springframework.data.relational.core.mapping.Column`。未保留参数名时，每个构造器参数都须使用本项目的参数注解，此时显式 resultMap 的 property 使用注解值。
+
+```java
+public final class UserView {
+    private final String name;
+
+    public UserView(@com.wcdk.r2dbc.annotation.Column("display_name") String name) {
+        this.name = name;
+    }
+}
+```
+
+XML 中的 `property` 对应 Java 属性名（编译保留参数名时），`column` 对应查询结果列。嵌套对象通过 `association` 引用另一个 resultMap：
+
+```xml
+<resultMap id="addressMap" type="com.example.AddressView">
+    <result column="city" property="city"/>
+</resultMap>
+<resultMap id="userMap" type="com.example.UserViewWithAddress">
+    <result column="display_name" property="name"/>
+    <association property="address" resultMap="addressMap"/>
+</resultMap>
+```
+
+嵌套映射使用当前行构造对象，不执行额外查询或集合聚合。resultMap 不存在、引用循环、未知属性、discriminator 无匹配分支会报错；属性与分支错误包含 resultMap 标识、属性/列及目标类型。
+
+推荐仓储 XML 不声明 DOCTYPE。需要 DTD 校验时，仅允许 `SYSTEM "wcdk-r2dbc-repository.dtd"` 或 `SYSTEM "classpath:/dtd/wcdk-r2dbc-repository.dtd"`，二者均读取固定内置资源。文件、网络 DTD、PUBLIC 标识与内部实体声明被拒绝；解析器无法启用必需安全设置时启动失败并保留根因。
+
+原始 SQL 的参数 Map 必须与占位符完全匹配：无占位符时也不能传入额外参数。命名占位符使用字符串键；`?`、`$1`、`:1` 使用从 0 开始的整数索引键（后两种 SQL 标记从 1 开始）。缺失、多余、非法索引均在绑定前报错；字符串、标识符、注释中的占位符文本不参与校验。XML 动态 SQL 只绑定实际渲染出的 `#{...}` 参数。

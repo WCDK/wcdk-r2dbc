@@ -1,0 +1,19 @@
+{
+  "properties": [
+    {
+      "name": "database.type",
+      "type": "java.lang.String",
+      "description": "Legacy alias for the WCDK fallback driver/schema hint. The new property wins when both are nonblank. Removal planned for 4.0.0.",
+      "deprecation": {
+        "level": "warning",
+        "reason": "Deprecated since 3.5.16; supported through 3.x.",
+        "replacement": "wcdk.r2dbc.database-type"
+      }
+    },
+    {
+      "name": "wcdk.r2dbc.database-type",
+      "type": "java.lang.String",
+      "description": "Driver hint for the single-source WCDK fallback and schema initializer; does not override Spring Boot or multi-source URL drivers. Blank values fall back to database.type, then the URL/metadata."
+    }
+  ]
+}

@@ -66,6 +66,8 @@ spring:
 # WCDK R2DBC 配置
 wcdk:
   r2dbc:
+    # 可选：WCDK 单库回退/Schema 初始化类型提示，空值自动检测；替代旧 database.type
+    # database-type: dm
     enabled: true
     # SQL日志
     sql-log-enabled: true
