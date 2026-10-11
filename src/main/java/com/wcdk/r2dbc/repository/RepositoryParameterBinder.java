@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/***
+/**
  * XML SQL 参数绑定器。
  * @author wcdk
  */

@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.repository.plan;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 
 import com.wcdk.r2dbc.repository.RepositoryMethodExecutor;
 import com.wcdk.r2dbc.query.xml.RepositoryStatement;
@@ -10,10 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/***
+/**
  * Repository 方法统一不可变执行计划。
  * @author wcdk
- **/
+ */
 public record RepositoryMethodPlan(
         Method method,
         Kind kind,
@@ -30,7 +31,7 @@ public record RepositoryMethodPlan(
 
     public RepositoryMethodPlan(Method method, Kind kind, RepositoryStatement xmlStatement,
                                 String statementId) {
-        this(method, kind, methodType(kind), commandType(kind, method), xmlStatement, statementId,
+        this(method, kind, methodType(kind), xmlStatement == null ? commandType(kind, method) : xmlStatement.commandType(), xmlStatement, statementId,
                 new StatementDefinition(kind, statementId), SqlPlan.createDeferred(),
                 new StaticSqlSource(""), ParameterPlan.of(method), ResultPlan.of(method, null), null);
     }
@@ -39,7 +40,7 @@ public record RepositoryMethodPlan(
                                 String statementId, StatementDefinition statementDefinition,
                                 SqlPlan sqlPlan, ParameterPlan parameterPlan,
                                 ResultPlan resultPlan) {
-        this(method, kind, methodType(kind), commandType(kind, method), xmlStatement, statementId,
+        this(method, kind, methodType(kind), xmlStatement == null ? commandType(kind, method) : xmlStatement.commandType(), xmlStatement, statementId,
                 statementDefinition, sqlPlan, source(sqlPlan), parameterPlan, resultPlan, null);
     }
 
@@ -60,14 +61,14 @@ public record RepositoryMethodPlan(
         }
     }
 
-    /***
+    /**
      * 使用实体类型补全结果映射计划。
      *
      * @param plan 原始方法计划
      * @param entityType 实体类型
      * @return 补全后的不可变计划
      * @author wcdk
-     **/
+     */
     public static RepositoryMethodPlan enrich(RepositoryMethodPlan plan, Class<?> entityType) {
         ResultPlan mapping = ResultPlan.of(plan.method(), entityType);
         return new RepositoryMethodPlan(plan.method(), plan.kind(), plan.methodType(), plan.commandType(),
@@ -76,13 +77,13 @@ public record RepositoryMethodPlan(
                 plan.executor());
     }
 
-    /***
+    /**
      * 绑定启动阶段解析出的唯一执行器，返回新的不可变计划。
      *
      * @param executor Repository 方法执行器
      * @return 绑定执行器后的计划
      * @author wcdk
-     **/
+     */
     public RepositoryMethodPlan withExecutor(RepositoryMethodExecutor executor) {
         return new RepositoryMethodPlan(method, kind, methodType, commandType, xmlStatement, statementId,
                 statementDefinition, sqlPlan, sqlSource, parameterPlan, resultPlan, executor);
@@ -97,16 +98,9 @@ public record RepositoryMethodPlan(
 
     private static SqlCommandType commandType(Kind kind, Method method) {
         if (kind == Kind.OBJECT || kind == Kind.UNSUPPORTED) {
-            return SqlCommandType.NONE;
+            return SqlCommandType.UNKNOWN;
         }
-        if (kind == Kind.DERIVED) {
-            return SqlCommandType.SELECT;
-        }
-        String name = method.getName();
-        if (name.startsWith("insert")) return SqlCommandType.INSERT;
-        if (name.startsWith("delete") || name.startsWith("remove")) return SqlCommandType.DELETE;
-        if (name.startsWith("update")) return SqlCommandType.UPDATE;
-        return SqlCommandType.SELECT;
+        return SqlCommandType.fromMethodName(method.getName());
     }
 
     public record StatementDefinition(Kind kind, String statementId) {
@@ -137,7 +131,7 @@ public record RepositoryMethodPlan(
     public record ParameterDefinition(int index, String name, Class<?> type, Type genericType) {
     }
 
-    /***
+    /**
      * 兼容旧调用方的结果计划访问方法。
      * @return 统一结果计划
      * @author wcdk
@@ -146,13 +140,13 @@ public record RepositoryMethodPlan(
         return resultPlan;
     }
 
-    /***
+    /**
      * 统一结果计划工厂。
      * @param method Repository 方法
      * @param entityType 实体类型
      * @return 结果计划
      * @author wcdk
-     **/
+     */
     public static ResultPlan resultPlan(Method method, Class<?> entityType) {
         return ResultPlan.of(method, entityType);
     }

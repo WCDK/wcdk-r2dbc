@@ -15,10 +15,10 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * @auther WCDK
+ * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class DynamicRoutingConnectionFactory implements ConnectionFactory, Disposable {
 
     private final String primary;

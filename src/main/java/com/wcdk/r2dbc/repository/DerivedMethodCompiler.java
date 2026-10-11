@@ -13,7 +13,7 @@ import java.util.Optional;
  * 派生仓库方法分发的启动校验与编译器。
  *
  * @author wcdk
- **/
+ */
 public final class DerivedMethodCompiler {
     private final Class<?> repositoryInterface;
     private final CustomMethodResolver resolver;
@@ -31,13 +31,13 @@ public final class DerivedMethodCompiler {
         if (resolver == null || !CustomMethodResolver.supports(method)) {
             return Optional.empty();
         }
+        DerivedQueryDefinition derivedPlan;
         try {
-            resolver.validateMethod(method);
+            derivedPlan = resolver.compile(method);
         } catch (RuntimeException error) {
             throw new IllegalArgumentException("无效的派生仓库方法: "
                     + method.toGenericString(), error);
         }
-        DerivedQueryDefinition derivedPlan = resolver.compile(method);
         String statementId = repositoryInterface.getName() + "." + method.getName();
         return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.DERIVED, null, statementId,
                 new RepositoryMethodPlan.StatementDefinition(RepositoryMethodPlan.Kind.DERIVED, statementId),

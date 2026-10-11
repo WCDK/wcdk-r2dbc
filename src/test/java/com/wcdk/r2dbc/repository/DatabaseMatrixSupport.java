@@ -24,11 +24,14 @@ import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/*** 各真实数据库共享的行为验收；仅清理本次成功创建的专属表。 @author wcdk ***/
+/**
+ * 各真实数据库共享的行为验收；仅清理本次成功创建的专属表。
+ * @author wcdk
+ */
 final class DatabaseMatrixSupport {
     static final Duration TIMEOUT = Duration.ofSeconds(45);
 
-    /** DM 1.0.0 throws on foreign driver names in supports(); select the declared provider first. */
+    /** 达梦 1.0.0 的 supports() 遇到其他驱动名会抛出异常，因此先选择声明匹配的驱动提供者。 */
     static ConnectionFactory connectionFactory(ConnectionFactoryOptions options) {
         String driver = (String) options.getRequiredValue(ConnectionFactoryOptions.DRIVER);
         for (ConnectionFactoryProvider provider : ServiceLoader.load(ConnectionFactoryProvider.class)) {
@@ -81,7 +84,7 @@ final class DatabaseMatrixSupport {
             assertThat(repository.exists(new QueryWrapper<>()).block(TIMEOUT)).isFalse();
             assertThat(repository.existsByName("default").block(TIMEOUT)).isFalse();
 
-            // All business fields are null: exercise the dialect's empty INSERT and generated-key path.
+            // 所有业务字段均为空，验证方言的空字段插入及生成主键获取流程。
             var defaults = repository.insert(new MatrixRow()).block(TIMEOUT);
             assertThat(defaults).isNotNull();
             assertThat(defaults.id).isPositive();
@@ -118,7 +121,7 @@ final class DatabaseMatrixSupport {
             }
             assertThat(repository.existsByName("rollback").block(TIMEOUT)).isFalse();
 
-            // Direct numeric contract: SQL returns 1/0, never a database-specific boolean.
+            // 直接验证数值契约：SQL 返回 1/0，不依赖数据库特有的布尔类型。
             String query = dialect.pagination("SELECT 1 FROM " + table + " WHERE " + name + " = 'second'", 0, 1);
             assertThat(client.sql(dialect.existsResult(query)).map((row, metadata) -> ((Number) row.get(0)).intValue())
                     .one().block(TIMEOUT)).isEqualTo(1);

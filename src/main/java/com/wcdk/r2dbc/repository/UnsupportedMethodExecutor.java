@@ -1,7 +1,7 @@
 package com.wcdk.r2dbc.repository;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 
-/***
+/**
  * 不支持 Repository 方法执行器。
  * @author wcdk
  */

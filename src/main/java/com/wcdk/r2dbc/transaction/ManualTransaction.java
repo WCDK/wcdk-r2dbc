@@ -12,7 +12,7 @@ import reactor.core.publisher.Mono;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public interface ManualTransaction {
 
     /**

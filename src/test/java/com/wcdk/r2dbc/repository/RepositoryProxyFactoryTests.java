@@ -12,7 +12,7 @@ import java.lang.reflect.Method;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-/***
+/**
  * Repository 泛型解析测试。
  * @author wcdk
  */

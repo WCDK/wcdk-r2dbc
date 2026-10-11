@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.query.xml;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 
 /**
  * XML 仓储语句定义。
@@ -6,7 +7,7 @@ package com.wcdk.r2dbc.query.xml;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public record RepositoryStatement(String namespace, String id, SqlCommandType commandType, DynamicSqlSource sqlSource,
                                    String resultType, String resultMapId) {
 

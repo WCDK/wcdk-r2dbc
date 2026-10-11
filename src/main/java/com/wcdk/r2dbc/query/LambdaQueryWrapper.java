@@ -258,13 +258,13 @@ public List<OrderBy> orderByList() {
 
         // 从 getter/setter 方法名提取字段名
         if (methodName.startsWith("get") && methodName.length() > 3) {
-            return Character.toLowerCase(methodName.charAt(3)) + methodName.substring(4);
+            return java.beans.Introspector.decapitalize(methodName.substring(3));
         }
         if (methodName.startsWith("is") && methodName.length() > 2) {
-            return Character.toLowerCase(methodName.charAt(2)) + methodName.substring(3);
+            return java.beans.Introspector.decapitalize(methodName.substring(2));
         }
         if (methodName.startsWith("set") && methodName.length() > 3) {
-            return Character.toLowerCase(methodName.charAt(3)) + methodName.substring(4);
+            return java.beans.Introspector.decapitalize(methodName.substring(3));
         }
 
         return methodName;
@@ -309,20 +309,7 @@ public List<OrderBy> orderByList() {
     /**
      * 驼峰转下划线。
      */
-    private String camelToUnderline(String value) {
-        if (value == null || value.isEmpty()) {
-            return value;
-        }
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (Character.isUpperCase(ch) && i > 0) {
-                builder.append('_');
-            }
-            builder.append(Character.toLowerCase(ch));
-        }
-        return builder.toString();
-    }
+
 
     // ==================== 类型定义 ====================
 

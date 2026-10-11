@@ -134,6 +134,16 @@ class DynamicSqlSourceTests {
                 .hasMessageContaining("不允许使用字面量");
     }
 
+    @Test
+    void rejectsExpressionTypeConstructorAndMethodAccess() throws Exception {
+        for (String expression : List.of("T(java.lang.Runtime).getRuntime()", "name.toUpperCase()",
+                "new java.lang.String('x')")) {
+            var source = parse("<select><if test=\"" + expression + "\">SELECT 1</if></select>");
+            assertThatThrownBy(() -> source.render(Map.of("name", "value")))
+                    .isInstanceOf(org.springframework.expression.EvaluationException.class);
+        }
+    }
+
     private static DynamicSqlSource parse(String xml) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));

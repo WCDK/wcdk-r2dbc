@@ -34,7 +34,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/*** 异构路由下真实仓储代理、参数绑定和事务连接的回归测试。 @author wcdk ***/
+/**
+ * 异构路由下真实仓储代理、参数绑定和事务连接的回归测试。
+ * @author wcdk
+ */
 class HeterogeneousRoutingTests {
     @Test
     void existenceQueriesUseOneRowAndNumericResultsAcrossRoutes() {
@@ -214,7 +217,10 @@ class HeterogeneousRoutingTests {
         fixture.nodes.values().forEach(node -> assertThat(node.sql).isEmpty());
     }
 
-    /*** 共享一个路由工厂和代理，四个驱动边界分别记录执行结果。 @author wcdk ***/
+    /**
+     * 共享一个路由工厂和代理，四个驱动边界分别记录执行结果。
+     * @author wcdk
+     */
     private static class Fixture {
         final Map<String, Node> nodes = new LinkedHashMap<>();
         final DynamicRoutingConnectionFactory routing;
@@ -239,7 +245,10 @@ class HeterogeneousRoutingTests {
         }
     }
 
-    /*** 最小驱动边界，用真实 DatabaseClient 验证 SQL 和参数。 @author wcdk ***/
+    /**
+     * 最小驱动边界，用真实 DatabaseClient 验证 SQL 和参数。
+     * @author wcdk
+     */
     private static class Node {
         final ConnectionFactory factory = mock(ConnectionFactory.class);
         final Connection connection = mock(Connection.class);
@@ -284,13 +293,19 @@ class HeterogeneousRoutingTests {
         }
     }
 
-    /*** 包含派生查询的路由仓储。 @author wcdk ***/
+    /**
+     * 包含派生查询的路由仓储。
+     * @author wcdk
+     */
     interface SettingRepository extends BaseRepository<Setting> {
         Mono<Long> countBySettingKey(String value);
         Mono<Boolean> existsBySettingKey(String value);
     }
 
-    /*** 保留字表列及时间参数实体。 @author wcdk ***/
+    /**
+     * 保留字表列及时间参数实体。
+     * @author wcdk
+     */
     @Table("order")
     private record Setting(@Id Long id, @Column("key") String settingKey, Instant createdAt) {
     }

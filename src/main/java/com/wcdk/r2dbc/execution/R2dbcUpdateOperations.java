@@ -21,7 +21,7 @@ import java.util.Map;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class R2dbcUpdateOperations {
 
     private final DatabaseClient databaseClient;
@@ -78,7 +78,7 @@ public class R2dbcUpdateOperations {
         });
     }
 
-    /** Executes an already intercepted repository update without invoking the lifecycle chain again. */
+    /** 执行已经经过拦截器处理的仓储更新，避免重复调用生命周期链。 */
     public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return Mono.deferContextual(contextView -> {
             return execute(sql, parameters, contextView).fetch().rowsUpdated()
@@ -87,15 +87,15 @@ public class R2dbcUpdateOperations {
         });
     }
 
-    /***
+    /**
      * 请求并读取数据库生成的主键，复用仓储外层生命周期。
      * @author wcdk
-     **/
+     */
     public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
         return insertReturningIdWithoutLifecycle(sql, parameters, idColumn, null);
     }
 
-    /** Uses the same identifier quoting as the INSERT, including Oracle driver RETURNING INTO. */
+    /** 使用与插入语句一致的标识符引用规则，兼容 Oracle 驱动的 RETURNING INTO。 */
     public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
                                                           String idColumn, String renderedIdColumn) {
         return Mono.deferContextual(context -> {

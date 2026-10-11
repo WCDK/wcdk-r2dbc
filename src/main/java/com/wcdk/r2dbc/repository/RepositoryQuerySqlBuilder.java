@@ -45,7 +45,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/***
+/**
  * Repository 查询 SQL 构建器。
  * @author wcdk
  */
@@ -97,7 +97,10 @@ final class RepositoryQuerySqlBuilder {
                 .collect(Collectors.joining(", ", " ORDER BY ", ""));
     }
 
-    /*** Pageable 排序优先，Wrapper 提供后续排序键；按映射列去重并校验两侧全部字段。 @author wcdk ***/
+    /**
+     * Pageable 排序优先，Wrapper 提供后续排序键；按映射列去重并校验两侧全部字段。
+     * @author wcdk
+     */
     String orderBySql(Pageable pageable, QueryWrapper<?> queryWrapper) {
         Map<FieldColumn, String> orders = new LinkedHashMap<>();
         for (Sort.Order order : pageable.getSort()) {

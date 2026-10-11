@@ -4,7 +4,7 @@ import io.r2dbc.spi.ConnectionFactory;
 
 import java.util.Objects;
 
-/***
+/**
  * R2DBC 方言抽象基类。
  * @author wcdk
  */

@@ -22,10 +22,10 @@ import org.springframework.transaction.reactive.TransactionalOperator;
 import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRASTRUCTURE;
 
 /**
- * @auther WCDK
+ * @author WCDK
  *
  * @version 1.0
- **/
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({WcdkR2dbcProperties.class, WcdkSpringR2dbcProperties.class})
 @ConditionalOnProperty(prefix = "wcdk.r2dbc", name = "enabled", havingValue = "true")

@@ -3,7 +3,7 @@ package com.wcdk.r2dbc.execution;
 import com.wcdk.r2dbc.execution.lifecycle.ReactiveSqlLifecycleInterceptor;
 import com.wcdk.r2dbc.execution.lifecycle.SqlExecutionContext;
 import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
-import com.wcdk.r2dbc.query.xml.SqlCommandType;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;

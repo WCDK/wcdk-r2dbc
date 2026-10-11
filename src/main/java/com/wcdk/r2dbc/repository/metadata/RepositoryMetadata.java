@@ -19,7 +19,7 @@ import java.util.List;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public final class RepositoryMetadata {
 
     private final Class<?> entityClass;
@@ -36,12 +36,18 @@ public final class RepositoryMetadata {
 
     private final DatabaseDialect dialect;
 
-    /*** 保留直接构造元数据时的ANSI引用行为。 @author wcdk ***/
+    /**
+     * 保留直接构造元数据时的ANSI引用行为。
+     * @author wcdk
+     */
     public RepositoryMetadata(Class<?> entityClass, WcdkR2dbcProperties properties) {
         this(entityClass, properties, PostgreSqlDatabaseDialect.INSTANCE);
     }
 
-    /*** 依据仓储实际连接的方言引用标识符。 @author wcdk ***/
+    /**
+     * 依据仓储实际连接的方言引用标识符。
+     * @author wcdk
+     */
     public RepositoryMetadata(Class<?> entityClass, WcdkR2dbcProperties properties, DatabaseDialect dialect) {
         this.properties = properties;
         this.dialect = java.util.Objects.requireNonNull(dialect, "数据库方言不能为空");
@@ -111,8 +117,7 @@ public final class RepositoryMetadata {
     }
 
     private String tableName(Class<?> entityClass) {
-        Table table = entityClass.getAnnotation(Table.class);
-        String name = table == null || table.value().isBlank() ? camelToUnderline(entityClass.getSimpleName()) : table.value();
+        String name = com.wcdk.r2dbc.mapping.NamingStrategy.tableName(entityClass);
         return identifier(name);
     }
 
@@ -120,36 +125,28 @@ public final class RepositoryMetadata {
         List<FieldColumn> result = new ArrayList<>();
         ReflectionUtils.doWithFields(entityClass, field -> {
             ReflectionUtils.makeAccessible(field);
-            Column column = field.getAnnotation(Column.class);
-            String name = column == null || column.value().isBlank() ? camelToUnderline(field.getName()) : column.value();
+            String name = com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field);
             result.add(new FieldColumn(field, identifier(name), field.isAnnotationPresent(Id.class)));
         }, field -> !java.lang.reflect.Modifier.isStatic(field.getModifiers())
                 && !field.isAnnotationPresent(Transient.class));
         return List.copyOf(result);
     }
 
-    /*** 使用方言统一引用与转义表名、列名，关闭配置时保留原名。 @author wcdk ***/
+    /**
+     * 使用方言统一引用与转义表名、列名，关闭配置时保留原名。
+     * @author wcdk
+     */
     private String identifier(String name) {
         return properties.isQuoteIdentifier() ? dialect.quoteIdentifier(name) : name;
     }
 
-    private static String camelToUnderline(String value) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (Character.isUpperCase(ch) && i > 0) {
-                builder.append('_');
-            }
-            builder.append(Character.toLowerCase(ch));
-        }
-        return builder.toString();
-    }
-
     public record FieldColumn(Field field, String name, boolean id) {
-        /*** 返回驱动请求生成值时使用的原始映射列名。 @author wcdk ***/
+        /**
+         * 返回驱动请求生成值时使用的原始映射列名。
+         * @author wcdk
+         */
         public String rawName() {
-            Column column = field.getAnnotation(Column.class);
-            return column == null || column.value().isBlank() ? camelToUnderline(field.getName()) : column.value();
+            return com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field);
         }
     }
 }

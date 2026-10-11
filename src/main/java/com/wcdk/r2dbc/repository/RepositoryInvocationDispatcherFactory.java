@@ -14,17 +14,17 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
-/***
+/**
  * Repository 方法执行器组装器。
  *
  * @author wcdk
- **/
+ */
 final class RepositoryInvocationDispatcherFactory {
 
     private RepositoryInvocationDispatcherFactory() {
     }
 
-    /***
+    /**
      * 创建 Repository 方法分发器及其执行器。
      *
      * @param repositoryOperations 数据库操作
@@ -35,7 +35,7 @@ final class RepositoryInvocationDispatcherFactory {
      * @param snowflakeIdGenerator 雪花 ID 生成器
      * @return 方法分发器
      * @author wcdk
-     **/
+     */
     static RepositoryInvocationDispatcher create(RepositoryOperations repositoryOperations,
                                                   WcdkR2dbcProperties properties,
                                                   RepositoryMetadata metadata,
@@ -46,7 +46,10 @@ final class RepositoryInvocationDispatcherFactory {
                 snowflakeIdGenerator, DatabaseDialects.get(repositoryOperations.databaseClient().getConnectionFactory()));
     }
 
-    /*** 使用目标数据源的方言组装执行器。 @author wcdk ***/
+    /**
+     * 使用目标数据源的方言组装执行器。
+     * @author wcdk
+     */
     static RepositoryInvocationDispatcher create(RepositoryOperations repositoryOperations,
                                                   WcdkR2dbcProperties properties,
                                                   RepositoryMetadata metadata,

@@ -29,9 +29,8 @@ import java.util.function.Function;
  * R2DBC工具类（门面模式），提供统一的API入口。
  *
  * @version 1.0
- * @auther WCDK
- *
- **/
+ * @author WCDK
+ */
 public class R2dbcUtil {
 
     private final DatabaseClient databaseClient;
@@ -210,7 +209,10 @@ public class R2dbcUtil {
         return updateOperations.updateWithoutLifecycle(sql, parameters);
     }
 
-    /*** 获取插入语句生成的主键，保留外层生命周期。 @author wcdk ***/
+    /**
+     * 获取插入语句生成的主键，保留外层生命周期。
+     * @author wcdk
+     */
     Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
         return updateOperations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
     }

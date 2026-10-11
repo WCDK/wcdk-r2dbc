@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/***
+/**
  * 在创建代理时一次性编译仓库方法分类。
  * @author wcdk
  */
@@ -74,5 +74,25 @@ public final class RepositoryMethodPlanCompiler {
 
     static boolean isCrudMethod(Method method) {
         return CRUD_METHOD_SIGNATURES.contains(MethodSignature.of(method));
+    }
+
+    /**
+     * 将基础接口的泛型参数绑定到实际仓储，识别具体实体类型覆写及其桥接方法。
+     * @author wcdk
+     */
+    static boolean isCrudMethod(Method method, Class<?> repositoryInterface) {
+        if (isCrudMethod(method)) return true;
+        if (!BaseRepository.class.isAssignableFrom(repositoryInterface)) return false;
+        return Arrays.stream(BaseRepository.class.getMethods()).anyMatch(base -> {
+            if (!base.getName().equals(method.getName())
+                    || base.getParameterCount() != method.getParameterCount()
+                    || base.getReturnType() != method.getReturnType()) return false;
+            for (int index = 0; index < base.getParameterCount(); index++) {
+                Class<?> resolved = org.springframework.core.ResolvableType
+                        .forMethodParameter(base, index, repositoryInterface).resolve();
+                if (resolved != method.getParameterTypes()[index]) return false;
+            }
+            return true;
+        });
     }
 }

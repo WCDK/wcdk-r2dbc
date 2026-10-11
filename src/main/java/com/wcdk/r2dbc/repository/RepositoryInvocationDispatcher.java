@@ -9,7 +9,7 @@ import reactor.util.context.ContextView;
 import java.util.List;
 import java.util.Map;
 
-/***
+/**
  * Repository 方法执行分发器。
  * @author wcdk
  */
@@ -24,7 +24,10 @@ final class RepositoryInvocationDispatcher {
         this.routedPlans = Map.of();
     }
 
-    /*** 绑定各数据源的独立不可变计划，在订阅时按 Reactor Context 选择。 @author wcdk ***/
+    /**
+     * 绑定各数据源的独立不可变计划，在订阅时按 Reactor Context 选择。
+     * @author wcdk
+     */
     RepositoryInvocationDispatcher(com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing,
                                    Map<String, Map<java.lang.reflect.Method, RepositoryMethodPlan>> routedPlans) {
         this.executors = List.of();
@@ -32,21 +35,21 @@ final class RepositoryInvocationDispatcher {
         this.routedPlans = Map.copyOf(routedPlans);
     }
 
-    /***
+    /**
      * 根据编译计划分发 Repository 调用，并在此处统一处理响应式返回值。
      *
      * @param plan Repository 方法计划
      * @param invocation 方法调用
      * @return 方法调用结果
      * @author wcdk
-     **/
-    /***
+     */
+    /**
      * 为编译计划绑定唯一执行器。
      *
      * @param plans 编译计划
      * @return 已绑定执行器的不可变计划
      * @author wcdk
-     **/
+     */
     Map<java.lang.reflect.Method, RepositoryMethodPlan> bindPlans(
             Map<java.lang.reflect.Method, RepositoryMethodPlan> plans) {
         return plans.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(

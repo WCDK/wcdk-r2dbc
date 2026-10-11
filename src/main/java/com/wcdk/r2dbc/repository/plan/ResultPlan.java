@@ -5,7 +5,7 @@ import java.lang.reflect.Type;
 import java.util.Map;
 import java.util.Optional;
 
-/***
+/**
  * Repository 结果映射统一计划。
  * 启动阶段确定结果形态，执行阶段只负责按计划映射数据。
  * @author wcdk
@@ -16,7 +16,7 @@ public record ResultPlan(Class<?> returnType,
                          Class<?> entityType,
                          ResultShape shape) {
 
-    /***
+    /**
      * 结果形态。
      * @author wcdk
      */
@@ -24,7 +24,7 @@ public record ResultPlan(Class<?> returnType,
         SCALAR, ENTITY, DTO, MAP, OPTIONAL, MONO, FLUX, PAGE
     }
 
-    /***
+    /**
      * 从方法签名创建结果计划。
      *
      * @param method Repository 方法
@@ -40,12 +40,12 @@ public record ResultPlan(Class<?> returnType,
         return new ResultPlan(returnType, genericReturnType, elementType, entityType, shape);
     }
 
-    /***
+    /**
      * 判断结果是否为响应式流。
      * @return 是否为 Mono 或 Flux
      * @author wcdk
      */
-    /***
+    /**
      * 兼容旧结果访问命名。
      * @return 响应式元素类型
      * @author wcdk

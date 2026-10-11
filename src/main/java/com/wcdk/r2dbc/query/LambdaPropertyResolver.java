@@ -6,35 +6,35 @@ import java.io.Serializable;
 import java.lang.invoke.SerializedLambda;
 import java.lang.reflect.Method;
 
-/***
+/**
  * Lambda 属性解析器，统一通过实体元数据获取数据库列。
  * @author wcdk
-***/
+ */
 @FunctionalInterface
 public interface LambdaPropertyResolver {
 
-    /***
+    /**
      * 解析 Lambda 对应的实体字段，并返回统一元数据中的列定义。
      * @author wcdk
      * @param getter Lambda Getter
      * @param metadata 实体元数据
      * @return 字段列定义
-     ***/
+     */
     RepositoryMetadata.FieldColumn resolve(Serializable getter, RepositoryMetadata metadata);
 
-    /***
+    /**
      * 返回默认 Lambda 属性解析器。
      * @author wcdk
      * @return 默认解析器
-     ***/
+     */
     static LambdaPropertyResolver defaultResolver() {
         return Default.INSTANCE;
     }
 
-    /***
+    /**
      * 默认 Lambda 属性解析实现。
      * @author wcdk
-     ***/
+     */
     final class Default implements LambdaPropertyResolver {
         private static final Default INSTANCE = new Default();
 

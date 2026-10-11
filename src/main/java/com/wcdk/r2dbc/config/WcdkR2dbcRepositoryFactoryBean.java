@@ -10,7 +10,7 @@ import org.springframework.beans.factory.FactoryBean;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class WcdkR2dbcRepositoryFactoryBean<T> implements FactoryBean<T> {
 
     private final Class<T> repositoryInterface;

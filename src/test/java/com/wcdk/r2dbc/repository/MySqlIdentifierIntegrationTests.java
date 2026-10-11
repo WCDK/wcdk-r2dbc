@@ -20,7 +20,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/*** 默认SQL模式下真实MySQL保留字列的仓储CRUD回归，专属表结束清理。 @author wcdk ***/
+/**
+ * 默认SQL模式下真实MySQL保留字列的仓储CRUD回归，专属表结束清理。
+ * @author wcdk
+ */
 @EnabledIfSystemProperty(named = "wcdk.r2dbc.mysql.integration", matches = "true")
 class MySqlIdentifierIntegrationTests {
     @Test

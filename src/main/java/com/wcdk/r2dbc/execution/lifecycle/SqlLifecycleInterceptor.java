@@ -5,10 +5,10 @@ package com.wcdk.r2dbc.execution.lifecycle;
  * <p>
  * 提供四个生命周期钩子，允许在SQL执行的不同阶段进行自定义操作：
  * <ul>
- *     <li>beforeCompile - SQL编译前</li>
- *     <li>afterCompile - SQL编译后</li>
- *     <li>beforeExecute - SQL执行前</li>
- *     <li>afterExecute - SQL执行后</li>
+ * <li>beforeCompile - SQL编译前</li>
+ * <li>afterCompile - SQL编译后</li>
+ * <li>beforeExecute - SQL执行前</li>
+ * <li>afterExecute - SQL执行后</li>
  * </ul>
  * <p>
  * 实现此接口并注册为Spring Bean即可自动生效。
@@ -16,7 +16,7 @@ package com.wcdk.r2dbc.execution.lifecycle;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public interface SqlLifecycleInterceptor {
 
     /**

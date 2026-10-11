@@ -3,16 +3,16 @@
 WCDK R2DBC 是一个基于 Spring Boot、Spring Data R2DBC 和 Project Reactor 的响应式数据库访问框架，面向 WebFlux 微服务和响应式业务场景。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Java 21](https://img.shields.io/badge/Java-21+-green.svg)](https://www.oracle.com/java/)
-[![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5+-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Java 21](https://img.shields.io/badge/Java-21-green.svg)](https://www.oracle.com/java/)
+[![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5.x-brightgreen.svg)](https://spring.io/projects/spring-boot)
 
 ## 项目简介
 
-WCDK R2DBC 是一个面向 **Spring Boot 3.5+、Spring Data R2DBC 和 Project Reactor** 的响应式数据库访问框架，适用于 Spring WebFlux 微服务和响应式业务系统。它提供 Repository 动态代理、响应式 CRUD、派生查询、QueryWrapper、事务、多数据源、逻辑删除、XML SQL 以及达梦、PostgreSQL、MySQL 和 Oracle 数据库方言支持。
+WCDK R2DBC 是一个面向 **Spring Boot 3.5.x、Spring Data R2DBC 和 Project Reactor** 的响应式数据库访问框架，适用于 Spring WebFlux 微服务和响应式业务系统。它提供 Repository 动态代理、响应式 CRUD、派生查询、QueryWrapper、事务、多数据源、逻辑删除、XML SQL 以及达梦、PostgreSQL、MySQL 和 Oracle 数据库方言支持。
 
 ## Project Overview
 
-WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Spring Data R2DBC, and Project Reactor**. It is designed for Spring WebFlux microservices and reactive applications, providing dynamic Repository proxies, reactive CRUD, derived queries, QueryWrapper, transactions, multi-datasource routing, logical deletion, XML SQL, and dialect support for Dameng, PostgreSQL, MySQL, and Oracle.
+WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spring Data R2DBC, and Project Reactor**. It is designed for Spring WebFlux microservices and reactive applications, providing dynamic Repository proxies, reactive CRUD, derived queries, QueryWrapper, transactions, multi-datasource routing, logical deletion, XML SQL, and dialect support for Dameng, PostgreSQL, MySQL, and Oracle.
 
 ## 为什么选择 WCDK R2DBC？
 
@@ -46,7 +46,10 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 - [多数据源](#多数据源)
 - [事务](#事务)
 - [XML SQL](#xml-sql)
+- [XML 映射契约](#xml-仓储与实体映射契约)
 - [SQL 生命周期与观测](#sql-生命周期与观测)
+- [扩展 Bean](#自动配置扩展-bean)
+- [仓储生命周期与雪花 ID](#仓储生命周期方法与雪花-id)
 - [数据库支持](#数据库支持)
 - [响应式使用约束](#响应式使用约束)
 - [项目结构](#项目结构)
@@ -56,7 +59,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 - **响应式 API**：仓储查询统一返回 `Mono` / `Flux`，适配 Spring WebFlux。
 - **Repository 动态代理**：启动时扫描接口并生成仓储代理，业务代码只需定义接口。
 - **标准 CRUD**：提供新增、按 ID 查询、更新、删除、列表、单条、统计和存在性查询。
-- **派生方法**：支持 `findBy`、`countBy`、`existsBy`、`deleteBy`、`update...By...` 等方法名约定。
+- **派生方法**：支持 `findBy`、`countBy`、`existsBy`、`deleteBy`、`updateBy<更新字段>By<条件字段>` 等方法名约定。
 - **查询构造器**：支持实体属性名或映射列名，覆盖等值、范围、模糊、集合、空值、嵌套 `AND` / `OR`、排序、分页。
 - **逻辑删除**：查询、统计、更新和派生删除默认过滤已删除数据。
 - **多数据源路由**：支持通过 `@R2dbcDataSource` 和 Reactor Context 切换数据源。
@@ -69,8 +72,10 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 
 ## 环境要求
 
-- Java 21+
-- Spring Boot 3.5+
+本轮验收基于 Spring Boot 3.5.16 / JDK 21；其他主版本和数据库版本需在目标环境另行验证。
+
+- Java 21（本项目 Maven 构建限定 JDK 21）
+- Spring Boot 3.5.x
 - Maven 3.9+
 - 对应数据库的 R2DBC 驱动
 
@@ -94,7 +99,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5+, Sprin
 </dependency>
 ```
 
-项目已经依赖 `spring-boot-starter-data-r2dbc` 时无需重复声明；达梦、MySQL、Oracle 驱动版本可参考项目 `pom.xml` 的 profile 配置。
+WCDK 已依赖 `spring-boot-starter-data-r2dbc`，应用无需重复声明该 starter。数据库驱动需要由应用显式引入；本项目 profile 中的驱动为 optional 依赖，不会自动传递给使用方。达梦、MySQL、Oracle 驱动版本可参考项目 `pom.xml` 的 profile 配置。
 
 ### 2. 配置数据库
 
@@ -108,15 +113,11 @@ spring:
 wcdk:
   r2dbc:
     enabled: true
-    sql-log-enabled: true
+    sql-log-enabled: false
 ```
 
-- /demo 不会被达梦 R2DBC URL 识别为 schema。
-- 推荐使用 r2dbc:dm://127.0.0.1:5236。
-- 或者添加 ?schema=demo
-- 优先使用 demo 用户登录。
-- 其他用户登录时，每条物理连接需执行 SET SCHEMA demo。
-- 提供 CURRENT_USER、CURRENT_SCHEMA 验证 SQL。
+以上为 PostgreSQL 配置。达梦使用 `r2dbc:dm://127.0.0.1:5236` 形式；不要将 PostgreSQL 的数据库路径照搬为达梦 schema。目标 schema 应结合登录用户与会话设置确认，框架不会自动为每条连接执行 `SET SCHEMA`。URL 额外参数是否受支持，以实际使用的达梦驱动版本为准。
+
 ### 3. 启用仓储扫描
 
 ```java
@@ -137,6 +138,8 @@ public class Application {
 ```
 
 ### 4. 定义实体和仓储
+
+分别保存为 `User.java` 和 `UserRepository.java`；以下代码省略重复的 package/import。
 
 ```java
 package com.example.repository;
@@ -200,16 +203,17 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 |---|---:|---|
 | `wcdk.r2dbc.enabled` | `false` | 是否启用 WCDK R2DBC |
 | `wcdk.r2dbc.database-type` | 空 | 单数据源 WCDK 回退工厂的驱动提示及 Schema 初始化的类型提示；通常从 URL/连接元数据检测 |
-| `wcdk.r2dbc.sql-log-enabled` | `true` | 是否输出 SQL 日志 |
+| `wcdk.r2dbc.sql-log-enabled` | `false` | 是否输出 SQL 日志 |
 | `wcdk.r2dbc.observability-enabled` | `false` | 是否启用 Micrometer 观测 |
 | `wcdk.r2dbc.snowflake-id` | `false` | 是否启用雪花 ID 生成 |
+| `wcdk.r2dbc.snowflake-worker-id` | 未指定 | 节点编号，0–1023；跨进程必须唯一 |
 | `wcdk.r2dbc.quote-identifier` | `true` | 是否引用数据库标识符；仓储按连接方言生成，MySQL使用反引号，PostgreSQL/Oracle/达梦使用双引号 |
 | `wcdk.r2dbc.mapper-locations` | `classpath*:repository/**/*.xml` | XML Mapper 扫描位置 |
 | `wcdk.r2dbc.logic-delete-field` | `delFlg` | 逻辑删除字段 |
 | `wcdk.r2dbc.logic-not-delete-value` | `0` | 未删除值 |
 | `wcdk.r2dbc.logic-delete-value` | `1` | 已删除值 |
 
-事务切面默认关闭。如需使用 `@Transactional` 的 WCDK 响应式事务切面，可显式开启：
+WCDK 事务切面默认关闭；Spring 标准事务 Advisor 的启用不受此开关控制。如需使用 WCDK 响应式事务切面，可显式开启（同时需要 `wcdk.r2dbc.enabled=true`）：
 
 ```yaml
 wcdk:
@@ -222,6 +226,31 @@ wcdk:
 
 单数据源通常由 Spring Boot 的 `R2dbcAutoConfiguration` 创建连接工厂；WCDK 在它之后装配，仅当没有任何连接工厂、配置了 `spring.r2dbc.url` 且没有多数据源配置时创建回退工厂。可在排除 Spring Boot R2DBC 自动配置或仅导入 WCDK 自动配置的环境使用该回退。Boot 或用户提供的连接工厂优先，WCDK 类型提示不会覆盖其驱动；多数据源按各自 URL 和配置选择驱动。
 
+### 初始化脚本选择与错误处理
+
+初始化器按路径完整目录段（`dm`/`dameng`、`mysql`、`oracle`、`postgresql`/`postgres`）及文件名前缀（如 `mysql-schema.sql`、`dm_schema.sql`）识别数据库专属脚本。找到目标数据库专属脚本时仅执行这些脚本，否则执行通用脚本；其他数据库目录中的普通 `schema.sql` 不会进入通用回退。`admin.sql`、`add_column.sql`、`user_id_map.sql` 均为通用脚本。资源查找失败会报告路径并阻止初始化。
+
+`ignore-errors=true` 只恢复错误码白名单中的数据库异常（包括 Spring 包装的底层 R2DBC 异常）：SQLSTATE `42P07`、`42710`、`42S01`、`42S02` 或厂商码 `955`、`942`。仅出现 “already exists”等消息不会被忽略；未知驱动错误、其他错误码继续失败。每次忽略记录数据库类型、脚本、SQLSTATE、错误码和原因。`ignore-errors=false` 时白名单错误也会失败。事务模式下，错误信号恢复不会改变数据库自身的事务中止及 DDL 隐式提交规则；需要重复执行含可能失败 DDL 的脚本时使用非事务初始化。
+
+### 仓储生命周期方法与雪花 ID
+
+仓储生命周期直接传递执行计划中的实际 `Method`，保留声明接口、参数类型和 `@Param` 注解；不按方法名搜索重载。继承方法沿用父接口声明，覆写方法使用子接口声明。实体泛型覆写支持具体参数类型，编译器生成的默认桥接方法转发到具体方法；默认接口方法内部调用会重新进入仓储代理。`findAll` 的参数数组为空，`selectOne` 的生命周期方法仍为 `selectOne`。分页 count 阶段保留原 `selectPage` 方法与完整分页参数。
+
+雪花节点解析优先级为：`wcdk.r2dbc.snowflake-worker-id` 显式配置 → 应用提供的 `WorkerIdResolver`（无自定义 Bean 时使用 `WCDK_R2DBC_WORKER_ID` 环境变量解析器）→ 主机/进程摘要回退。编号必须为 0–1023 的整数，解析失败、越界或解析器报告租约冲突均使默认生成器创建失败。回退会警告跨进程碰撞风险，生产多实例部署应明确分配唯一节点或使用注册中心租约。
+
+```yaml
+wcdk:
+  r2dbc:
+    snowflake-id: true
+    snowflake-worker-id: 12
+```
+
+可声明 `com.wcdk.r2dbc.id.WorkerIdResolver` Bean 接入注册中心。解析器负责取得并维持节点独占租约，发生冲突时抛出异常；租约失效必须停止对应节点的 ID 生成。显式配置会跳过解析器的 `resolveWorkerId()`，不要同时配置需要解析器取得租约的节点。自定义 `SnowflakeIdGenerator` Bean 会替换默认生成器。
+
+默认生成器使用 `AtomicLong`/CAS 更新时间与序列，同一应用类加载器内相同 workerId 的生成器共享状态，避免多次实例化产生重复 ID。跨进程和进程重启的唯一性需要节点分配、租约及可靠时钟共同保证，摘要回退不提供分布式冲突检测。ID 位布局保持不变：41 位时间、10 位节点、12 位序列。
+
+**回拨行为变更**：任何幅度的时钟回拨立即抛出 `IllegalStateException`，不再容忍 1 秒以内回拨。时钟恢复后可以重试；调用方应通过响应式延迟重试避免阻塞事件线程。每毫秒 4096 个序列耗尽时以短暂休眠等待下一毫秒，不持有互斥锁，也不忙等；等待会响应线程中断，并在回拨时失败。该同步方法仍可能等待，需严格避免事件线程等待的场景可将批量 ID 分配调度到工作线程。CAS 去除了全局互斥锁，但吞吐仍受时钟粒度、同一节点序列上限及竞争影响，不保证在所有环境中更快。验证与吞吐记录见 [第 7 节验证记录](docs/validation/2026-10-10-section-7.md)。
+
 ## Repository API
 
 推荐导入：
@@ -233,7 +262,7 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 
 | 方法 | 返回值 | 说明 |
 |---|---|---|
-| `insert(entity)` | `Mono<T>` | 插入并返回实体 |
+| `insert(entity)` | `Mono<T>` | 插入并返回带主键的实体；record 回填时可能返回新实例 |
 | `deleteById(id)` | `Mono<Long>` | 按 ID 删除，返回影响行数 |
 | `updateById(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段，兼容历史行为 |
 | `updateByIdIgnoringNulls(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段，null 表示保留原值 |
@@ -245,8 +274,9 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 | `selectCount(wrapper)` | `Mono<Long>` | 条件统计 |
 | `exists(wrapper)` | `Mono<Boolean>` | 判断数据是否存在 |
 | `selectPage(pageable, wrapper)` | `Mono<Page<T>>` | 分页查询 |
+| `selectPage(pageable)` | `Mono<Page<T>>` | 使用空 QueryWrapper 的分页默认入口 |
 
-更新和删除方法支持 `Mono<Long>`、`Mono<Integer>`、`Mono<Boolean>`、`Mono<Void>` 等兼容返回形式，具体以方法声明为准。
+基础 CRUD 更新/删除返回 `Mono<Long>`。派生及 XML 更新/删除可按契约声明 `Mono<Long>`、`Mono<Integer>`、`Mono<Boolean>`、`Mono<Void>`；XML 返回实体时必须有类型兼容的实体入参。
 
 ### 更新 null 语义与迁移
 
@@ -259,8 +289,8 @@ Mono<Long> patchRows = userRepository.updateByIdIgnoringNulls(patch);
 // 完整更新：先加载实体以保留其他字段，再将指定字段置空。
 Mono<Long> clearRows = userRepository.selectById(id)
         .flatMap(user -> {
-            user.setName(null);
-            return userRepository.updateByIdIncludingNulls(user);
+            User cleared = new User(user.id(), user.userName(), null, user.status());
+            return userRepository.updateByIdIncludingNulls(cleared);
         });
 ```
 
@@ -288,7 +318,7 @@ public class User {
 }
 ```
 
-例如，XML SQL 或自定义 SELECT 可以返回计算列：
+例如，以下 PostgreSQL/MySQL 的 XML SQL 或自定义 SELECT 可以返回计算列；Oracle 的 CONCAT 仅接受两个参数，需改为嵌套 CONCAT 或字符串连接运算：
 
 ```sql
 SELECT id, user_name, CONCAT(user_name, ' (active)') AS display_label
@@ -309,20 +339,36 @@ public interface UserRepository extends BaseRepository<User> {
     Mono<Long> countByStatus(Integer status);
     Mono<Boolean> existsByEmail(String email);
     Mono<Long> deleteByStatus(Integer status);
-    Mono<Integer> updateUserNameById(String userName, Long id);
+    Mono<Integer> updateByUserNameById(String userName, Long id);
 }
 ```
 
 支持的常见操作包括：
 
 - `findBy`、`countBy`、`existsBy`、`deleteBy`
-- `updateXxxById`、`updateXxxByField`
+- `updateByXxxById`、`updateByXxxByField`；SET 参数在前，条件参数在后
 - `And`、`Or`、`OrderBy`
-- `Equals`、`Not`、`Like`、`StartingWith`、`EndingWith`
+- 无后缀等值、`Not`、`Like`、`Between`
 - `GreaterThan`、`GreaterThanEqual`、`LessThan`、`LessThanEqual`
 - `In`、`NotIn`、`IsNull`、`IsNotNull`
 
+当前派生更新需使用 `updateByUserNameById` 这种双 `By` 形式；`updateUserNameById` 不会被当前解析器识别，若要保留该名称，请提供同名 XML 更新语句。`Equals`、`StartingWith`、`EndingWith` 不在当前算子集合中。
+
 方法名中的字段必须能映射到实体属性；方法参数数量和返回类型不符合约定时，应在应用启动阶段修正，而不是在请求链路中兜底。
+
+### 派生条件与统一命名规则
+
+派生条件在仓储编译时生成唯一模型，字段校验、参数绑定和 SQL 计划复用该模型。支持的算子及参数数量为：无后缀 `=`、`Not`、`Like`、`In`、`NotIn`、`GreaterThan`、`GreaterThanEqual`、`LessThan`、`LessThanEqual` 各 1 个参数；`Between` 为 2 个；`IsNull`、`IsNotNull` 不接收参数。未知字段、无效后缀和声明参数数量不符均在启动编译阶段报错，运行时也会检查参数数组长度。
+
+条件按实体字段名及映射列名的最长匹配解析，再识别 `And`/`Or`。因此 `BrandAndModel` 对应完整属性 `brandAndModel`（如果该属性存在），不会被拆成 `brand` 与 `model`。字段相同前缀存在歧义时，优先选择最长字段；例如存在 `nameOrBrand` 时，`findByNameOrBrand` 需要一个参数。`Brand`、`Coordinator`、`anderson`、`coOrdinator` 等字段也使用同一规则。映射列名的下划线可在方法名中省略；所有候选仍来自实体白名单。
+
+`OrderBy` 排序也在编译阶段解析，支持 `OrderByIdDescNameAsc` 或方向之间以 `And` 连接；生成的 SQL 与预编译排序计划使用同一字段列表。
+
+默认表名和列名统一使用 `com.wcdk.r2dbc.mapping.NamingStrategy`：在小写/数字转大写，以及连续大写缩写与后续单词之间加下划线。例如 `URLValue → url_value`、`userID → user_id`、`CPUTime → cpu_time`、`XMLHTTPParser → xmlhttp_parser`。显式 Spring Data `@Table`、字段 `@Column` 保留原名；构造器参数的本项目 `@Column` 仍优先指定读取列。标识符引用在命名之后由数据库方言处理。
+
+**命名迁移**：连续大写以前可能被逐字拆分；现有数据库若使用 `u_r_l_value` 等旧列名，请添加显式 `@Column("u_r_l_value")`，旧表名可用 `@Table` 保留。
+
+SQL 命令类型统一为 `com.wcdk.r2dbc.execution.SqlCommandType`，包含 `INSERT`、`UPDATE`、`DELETE`、`SELECT`、`MERGE`、`UNKNOWN`。直接使用旧 `query.xml.SqlCommandType`、`repository.plan.SqlCommandType`、`CustomMethodResolver.SqlCommandType` 或 `QueryCommandType` 的扩展代码需要修改 import；原 `NONE` 使用 `UNKNOWN`。XML 计划使用语句实际命令，派生执行生命周期使用生成 SQL 的实际命令（逻辑删除为 UPDATE）。
 
 ## QueryWrapper
 
@@ -431,7 +477,7 @@ spring:
         password: postgres
 ```
 
-在 Service 或方法上指定数据源：
+在 Service 或方法上指定数据源（`reportRepository` 为 `BaseRepository<UserReport>`）：
 
 ```java
 @R2dbcDataSource("report")
@@ -578,9 +624,9 @@ public Mono<User> create(User user) {
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE repository PUBLIC "-//WCDK/wcdk-r2dbc" "wcdk-r2dbc-repository.dtd">
+<!DOCTYPE repository SYSTEM "wcdk-r2dbc-repository.dtd">
 <repository namespace="com.example.repository.UserRepository">
-    <select id="findActiveByEmail" resultType="com.example.User">
+    <select id="findActiveByEmail" resultType="com.example.repository.User">
         SELECT id, user_name, email, status
         FROM sys_user
         WHERE email = #{email}
@@ -597,7 +643,7 @@ Mono<User> findActiveByEmail(String email);
 
 XML 语句支持动态 SQL、参数绑定、`resultType`、`resultMap`、`discriminator` 和 `<foreach>`。XML 文件中的 namespace、语句 ID、参数和返回类型必须与仓储接口一致。
 
-参数可以使用 `#{name}` 或 `:name` 两种写法；两者都会转换为绑定参数，SQL 字符串和注释中的同名文本不会被当成参数。`#{...}` 还支持条件表达式，可以根据当前方法参数或实体属性选择要写入的值：
+参数可用 `@Param("email")` 等注解显式命名，或编译时启用 `-parameters`。参数可以使用 `#{name}` 或 `:name` 两种写法；两者都会转换为绑定参数，SQL 字符串和注释中的同名文本不会被当成参数。`#{...}` 还支持条件表达式，可以根据当前方法参数或实体属性选择要写入的值：
 
 ```xml
 <update id="updateProfile">
@@ -610,7 +656,43 @@ XML 语句支持动态 SQL、参数绑定、`resultType`、`resultMap`、`discri
 </update>
 ```
 
+以上动态更新示例需要表中存在 update_time、remark、score 列，并由接口提供同名参数或实体属性；`now()` 适用于 PostgreSQL/MySQL，Oracle/达梦需使用该库支持的时间函数或直接在 XML 中写 `CURRENT_TIMESTAMP`。
+
 条件和普通属性表达式使用 Spring SpEL 读取当前参数；表达式选中的属性值、字符串和数字会作为绑定参数传给数据库。字符串字面量请用单引号包裹。像 `now()` 这样的数据库函数会作为 SQL 表达式直接写入 SQL，不会作为字符串参数绑定。实体作为方法参数时可以直接引用其属性，例如 `#{updateTime}`；也可以用 `#{updateTime != null ? updateTime : now()}` 在属性为空时采用数据库函数。
+
+### XML 仓储与实体映射契约
+
+XML 写操作返回值必须声明为 `Mono<Long>`、`Mono<Integer>`（影响行数）、`Mono<Boolean>`（行数大于零）、`Mono<Void>` 或 `Mono<Entity>`。返回实体时，方法签名必须有且只有一个类型匹配的实体入参，允许位于任意位置；框架在 SQL 完成后返回该对象，不会重新查询数据库或把首参当作实体。没有匹配实体、多个匹配实体、原始 `Mono`、通配符或嵌套泛型会在仓储编译时报告方法配置错误。
+
+`resultMap` 和普通查询复用同一映射计划，支持 record、无无参构造器的不可变对象和可变 POJO。优先选择 `@PersistenceCreator` 构造器；没有该注解时使用无参构造器，或唯一构造器。推荐开启 Java 编译器 `-parameters`，让构造器参数名与实体属性名一致。构造器参数可用 `com.wcdk.r2dbc.annotation.Column` 显式指定数据库列，优先级高于字段注解和参数名推导；字段上的列注解仍使用 `org.springframework.data.relational.core.mapping.Column`。未保留参数名时，每个构造器参数都须使用本项目的参数注解，此时显式 resultMap 的 property 使用注解值。
+
+```java
+public final class UserView {
+    private final String name;
+
+    public UserView(@com.wcdk.r2dbc.annotation.Column("display_name") String name) {
+        this.name = name;
+    }
+}
+```
+
+XML 中的 `property` 对应 Java 属性名（编译保留参数名时），`column` 对应查询结果列。嵌套对象通过 `association` 引用另一个 resultMap：
+
+```xml
+<resultMap id="addressMap" type="com.example.AddressView">
+    <result column="city" property="city"/>
+</resultMap>
+<resultMap id="userMap" type="com.example.UserViewWithAddress">
+    <result column="display_name" property="name"/>
+    <association property="address" resultMap="addressMap"/>
+</resultMap>
+```
+
+嵌套映射使用当前行构造对象，不执行额外查询或集合聚合。resultMap 不存在、引用循环、未知属性、discriminator 无匹配分支会报错；属性与分支错误包含 resultMap 标识、属性/列及目标类型。
+
+推荐仓储 XML 不声明 DOCTYPE。需要 DTD 校验时，仅允许 `SYSTEM "wcdk-r2dbc-repository.dtd"` 或 `SYSTEM "classpath:/dtd/wcdk-r2dbc-repository.dtd"`，二者均读取固定内置资源。文件、网络 DTD、PUBLIC 标识与内部实体声明被拒绝；解析器无法启用必需安全设置时启动失败并保留根因。
+
+原始 SQL 的参数 Map 必须与占位符完全匹配：无占位符时也不能传入额外参数。命名占位符使用字符串键；`?`、`$1`、`:1` 使用从 0 开始的整数索引键（后两种 SQL 标记从 1 开始）。缺失、多余、非法索引均在绑定前报错；字符串、标识符、注释中的占位符文本不参与校验。XML 动态 SQL 只绑定实际渲染出的 `#{...}` 或 `:name` 参数。
 
 ## SQL 生命周期与观测
 
@@ -623,7 +705,25 @@ SqlExecutionObserver sqlExecutionObserver(ObservationRegistry registry) {
 }
 ```
 
-可观测信息包括 SQL 执行阶段、终止状态、结果数量、耗时和异常。不要把密码、Token、完整身份证号或原始敏感参数写入日志和观测标签。
+自动观测需要同时配置 `wcdk.r2dbc.observability-enabled=true` 和 `ObservationRegistry` Bean；上面的自定义 `SqlExecutionObserver` Bean 会替换默认实现。可观测信息包括 SQL 执行阶段、终止状态、结果数量、耗时和异常。
+
+SQL 日志默认关闭。当前开启 `sql-log-enabled` 后，执行日志在 INFO 级别输出 SQL、脱敏参数及替换参数后的 `completeSql`；尚无独立完整 SQL debug 开关。当前脱敏主要按 password、token、secret 等参数名匹配并限制输出长度，不提供手机号/身份证号等按值识别及自定义敏感列配置，原 SQL 中硬编码的字面量也不会自动脱敏。请勿将该日志机制当作完整的敏感信息保护方案；整改状态见 [D1 追踪](docs/audit-traceability.md)。
+
+### 自动配置扩展 Bean
+
+| 替换类型 | 用途 |
+| --- | --- |
+| `ParameterBinder` | 参数校验、转换和绑定 |
+| `R2dbcRowMapper` | 行、构造器和 resultMap 映射 |
+| `R2dbcSqlLogger` | SQL 日志行为 |
+| `R2dbcDataSourceRouter` | 数据源路由 |
+| `SqlLifecycleExecutor` | 生命周期执行 |
+| `SqlExecutionObserver` | 执行观测 |
+| `SqlLifecycleInterceptorChain` | 拦截器链 |
+
+以上扩展点按类型（包含子类）检查 `@ConditionalOnMissingBean`。应用声明同类型或子类 Bean 时默认实现退让；没有自定义 Bean 时提供默认实现。多个候选时按 Spring 的 `@Primary` 选择，无唯一候选会启动失败；Bean 名称或 `@Order` 不替代 `@Primary`。`R2dbcValueConverter` 与同步/响应式拦截器通过有序 Bean 列表追加，使用 `@Order` 控制其顺序。
+
+仓储启动时，单数据源只构建所需执行器和方法计划；多数据源分别基于每个目标方言编译一次，再创建一个路由 dispatcher。primary 不会额外预编译一次。多仓储、多数据源的计数测试及启动微基准见 [第 6 节验证记录](docs/validation/2026-10-10-section-6.md)。
 
 ## 数据库支持
 
@@ -681,7 +781,7 @@ import reactor.core.publisher.Mono;
 @Repository
 interface UserRepository extends BaseRepository<User> {
     Flux<User> findByStatus(Integer status);
-    Mono<Long> updateStatusById(Integer status, Long id);
+    Mono<Long> updateByStatusById(Integer status, Long id);
     Mono<Long> deleteByStatus(Integer status);
 }
 ```
@@ -692,7 +792,7 @@ interface UserRepository extends BaseRepository<User> {
 QueryWrapper<User> wrapper = new QueryWrapper<User>()
         .eq("status", 1).orderByDesc("id");
 Flux<User> users = userRepository.selectList(wrapper);
-Mono<Long> updated = userRepository.updateStatusById(1, 1L);
+Mono<Long> updated = userRepository.updateByStatusById(1, 1L);
 Mono<Long> deleted = userRepository.deleteByStatus(0);
 ```
 
@@ -733,7 +833,9 @@ mvn -DskipTests package
 
 响应式单元测试推荐使用 `StepVerifier`，WebFlux 接口测试推荐使用 `WebTestClient`。
 
-`mvn verify` 必须有 Docker，实际运行 PostgreSQL/MySQL Testcontainers 矩阵。Oracle/达梦通过环境变量启用真实库用例；未配置时显示 skipped。CI 包含 Oracle-XE。测试范围、驱动配置和达梦发布前记录模板见 [数据库真实库验收](docs/database-matrix.md)。SQL 桩测试用于快速回归，不替代真实库验证。
+`mvn verify` 必须有 Docker，实际运行 PostgreSQL/MySQL Testcontainers 矩阵。Oracle/达梦通过环境变量启用真实库用例；未配置时显示 skipped。CI 包含 Oracle-XE。达梦 R2DBC 1.0.0 与 Oracle 驱动共存时存在 Provider.supports 异常风险；生产应按目标数据库选择驱动或提供显式连接工厂，`all` profile 的测试通过不代表自动装配共存可用。测试范围、驱动配置和达梦发布前记录模板见 [数据库真实库验收](docs/database-matrix.md)。SQL 桩测试用于快速回归，不替代真实库验证。
+
+整改进度见 [35 项缺陷追踪表](docs/audit-traceability.md)，四库及文档示例验证见 [收尾验收记录](docs/validation/2026-10-10-section-8.md)。
 
 ## 许可证
 
@@ -745,38 +847,3 @@ mvn -DskipTests package
 
 - 作者：WCDK
 - 邮箱：wcdk1024@gmail.com
-
-
-### XML 仓储与实体映射契约
-
-XML 写操作返回值必须声明为 `Mono<Long>`、`Mono<Integer>`（影响行数）、`Mono<Boolean>`（行数大于零）、`Mono<Void>` 或 `Mono<Entity>`。返回实体时，方法签名必须有且只有一个类型匹配的实体入参，允许位于任意位置；框架在 SQL 完成后返回该对象，不会重新查询数据库或把首参当作实体。没有匹配实体、多个匹配实体、原始 `Mono`、通配符或嵌套泛型会在仓储编译时报告方法配置错误。
-
-`resultMap` 和普通查询复用同一映射计划，支持 record、无无参构造器的不可变对象和可变 POJO。优先选择 `@PersistenceCreator` 构造器；没有该注解时使用无参构造器，或唯一构造器。推荐开启 Java 编译器 `-parameters`，让构造器参数名与实体属性名一致。构造器参数可用 `com.wcdk.r2dbc.annotation.Column` 显式指定数据库列，优先级高于字段注解和参数名推导；字段上的列注解仍使用 `org.springframework.data.relational.core.mapping.Column`。未保留参数名时，每个构造器参数都须使用本项目的参数注解，此时显式 resultMap 的 property 使用注解值。
-
-```java
-public final class UserView {
-    private final String name;
-
-    public UserView(@com.wcdk.r2dbc.annotation.Column("display_name") String name) {
-        this.name = name;
-    }
-}
-```
-
-XML 中的 `property` 对应 Java 属性名（编译保留参数名时），`column` 对应查询结果列。嵌套对象通过 `association` 引用另一个 resultMap：
-
-```xml
-<resultMap id="addressMap" type="com.example.AddressView">
-    <result column="city" property="city"/>
-</resultMap>
-<resultMap id="userMap" type="com.example.UserViewWithAddress">
-    <result column="display_name" property="name"/>
-    <association property="address" resultMap="addressMap"/>
-</resultMap>
-```
-
-嵌套映射使用当前行构造对象，不执行额外查询或集合聚合。resultMap 不存在、引用循环、未知属性、discriminator 无匹配分支会报错；属性与分支错误包含 resultMap 标识、属性/列及目标类型。
-
-推荐仓储 XML 不声明 DOCTYPE。需要 DTD 校验时，仅允许 `SYSTEM "wcdk-r2dbc-repository.dtd"` 或 `SYSTEM "classpath:/dtd/wcdk-r2dbc-repository.dtd"`，二者均读取固定内置资源。文件、网络 DTD、PUBLIC 标识与内部实体声明被拒绝；解析器无法启用必需安全设置时启动失败并保留根因。
-
-原始 SQL 的参数 Map 必须与占位符完全匹配：无占位符时也不能传入额外参数。命名占位符使用字符串键；`?`、`$1`、`:1` 使用从 0 开始的整数索引键（后两种 SQL 标记从 1 开始）。缺失、多余、非法索引均在绑定前报错；字符串、标识符、注释中的占位符文本不参与校验。XML 动态 SQL 只绑定实际渲染出的 `#{...}` 参数。

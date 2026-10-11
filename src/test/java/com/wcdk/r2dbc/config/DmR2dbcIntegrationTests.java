@@ -12,11 +12,11 @@ import reactor.test.StepVerifier;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration smoke tests for a real Dameng R2DBC database.
+ * 真实达梦 R2DBC 数据库的集成冒烟测试。
  * <p>
- * Disabled by default so local unit tests and CI do not require a running database.
- * Enable with {@code -Dwcdk.r2dbc.dm.integration=true} and provide connection
- * settings via system properties or environment variables.
+ * 默认禁用，避免本地单元测试和持续集成依赖已运行的数据库。
+ * 使用 {@code -Dwcdk.r2dbc.dm.integration=true} 启用，
+ * 并通过系统属性或环境变量提供连接配置。
  */
 @Tag("integration")
 @EnabledIfSystemProperty(named = "wcdk.r2dbc.dm.integration", matches = "true")

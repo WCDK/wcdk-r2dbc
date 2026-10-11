@@ -4,14 +4,14 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/***
- * 验证统一命名参数 lexer 状态。
+/**
+ * 验证统一命名参数 词法分析状态。
  * @author wcdk
- **/
+ */
 class ParameterParserTests {
 
-    /***
-     * 验证字符串、注释、PostgreSQL dollar quote 和 Oracle q quote 均不会产生参数。
+    /**
+     * 验证字符串、注释、PostgreSQL 美元符号引号 和 Oracle 替代引号 均不会产生参数。
      * @author wcdk
      */
     @Test

@@ -2,7 +2,7 @@
  * 数据库Schema初始化器
  * 根据数据库类型自动执行对应的SQL脚本
  *
- * @auther WCDK
+ * @author WCDK
  * @version 1.0
  */
 package com.wcdk.r2dbc.config;
@@ -31,7 +31,7 @@ import java.util.Map;
  * 数据库Schema初始化器
  * 根据数据库类型自动执行对应的SQL脚本
  *
- * @auther WCDK
+ * @author WCDK
  * @version 1.0
  */
 public class DatabaseSchemaInitializer implements CommandLineRunner {
@@ -118,7 +118,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
             return;
         }
 
-        executeSqlResources(sqlResources, initConfig.isIgnoreErrors(), initConfig.isExecuteInTransaction())
+        executeSqlResources(sqlResources, initConfig.isIgnoreErrors(), initConfig.isExecuteInTransaction(), databaseType)
                 .doOnSuccess(v -> log.info("数据库Schema初始化完成"))
                 .doOnError(e -> log.error("数据库Schema初始化失败", e))
                 .block();
@@ -166,38 +166,37 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
      * @return SQL资源列表
      */
     private List<Resource> findSqlResources(String databaseType, String sqlLocation) {
-        List<Resource> resources = new ArrayList<>();
-
+        List<Resource> specific = new ArrayList<>();
+        List<Resource> generic = new ArrayList<>();
         try {
-            // 首先尝试查找特定数据库类型的SQL文件
-            String specificPattern = sqlLocation.replace("**", databaseType + "/**");
-            Resource[] specificResources = resourcePatternResolver.getResources(specificPattern);
-            for (Resource resource : specificResources) {
-                if (resource.getFilename() != null && resource.getFilename().endsWith(".sql")) {
-                    resources.add(resource);
-                }
+            for (Resource resource : resourcePatternResolver.getResources(sqlLocation)) {
+                String filename = resource.getFilename();
+                if (filename == null || !filename.toLowerCase(java.util.Locale.ROOT).endsWith(".sql")) continue;
+                String scriptType = scriptDatabaseType(resource);
+                if (databaseType.equals(scriptType)) specific.add(resource);
+                else if (scriptType == null) generic.add(resource);
             }
-
-            // 如果没有找到特定类型的SQL文件，尝试查找通用SQL文件
-            if (resources.isEmpty()) {
-                Resource[] allResources = resourcePatternResolver.getResources(sqlLocation);
-                for (Resource resource : allResources) {
-                    String filename = resource.getFilename();
-                    if (filename != null && filename.endsWith(".sql")) {
-                        // 检查是否是通用SQL文件（不包含数据库类型前缀）
-                        boolean isDatabaseSpecific = DATABASE_TYPE_KEYWORDS.keySet().stream()
-                                .anyMatch(key -> filename.toLowerCase().contains(key));
-                        if (!isDatabaseSpecific) {
-                            resources.add(resource);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.error("查找SQL资源文件失败", e);
+        } catch (java.io.IOException error) {
+            throw new IllegalStateException("查找SQL资源文件失败：" + sqlLocation, error);
         }
+        return specific.isEmpty() ? generic : specific;
+    }
 
-        return resources;
+    static String scriptDatabaseType(Resource resource) {
+        String path;
+        try { path = resource.getURL().getPath(); }
+        catch (java.io.IOException error) { path = resource.getDescription(); }
+        String[] segments = path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT).split("/");
+        for (String segment : segments) {
+            String type = DATABASE_TYPE_KEYWORDS.get(segment);
+            if (type != null) return type;
+        }
+        String filename = resource.getFilename();
+        if (filename != null) for (var entry : DATABASE_TYPE_KEYWORDS.entrySet()) {
+            String lower = filename.toLowerCase(java.util.Locale.ROOT);
+            if (lower.startsWith(entry.getKey() + "-") || lower.startsWith(entry.getKey() + "_")) return entry.getValue();
+        }
+        return null;
     }
 
     /**
@@ -208,23 +207,24 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
      * @param executeInTransaction 是否在事务中执行
      * @return 执行结果
      */
-    private Mono<Void> executeSqlResources(List<Resource> resources, boolean ignoreErrors, boolean executeInTransaction) {
-        Flux<String> statements = Flux.fromIterable(resources)
+    private Mono<Void> executeSqlResources(List<Resource> resources, boolean ignoreErrors, boolean executeInTransaction, String databaseType) {
+        Flux<ScriptStatement> statements = Flux.fromIterable(resources)
                 .concatMap(resource -> Mono.fromCallable(() -> {
                             log.info("执行SQL资源: {}", resource.getDescription());
-                            return readSqlContent(resource);
+                            return readSqlContent(resource).stream()
+                                    .map(sql -> new ScriptStatement(resource.getDescription(), sql)).toList();
                         })
                         .subscribeOn(Schedulers.boundedElastic()))
                 .flatMapIterable(value -> value);
         if (!executeInTransaction) {
-            return statements.concatMap(statement -> executeSingleStatement(statement, ignoreErrors))
+            return statements.concatMap(statement -> executeSingleStatement(statement, ignoreErrors, databaseType))
                     .then();
         }
         return Mono.usingWhen(
                 Mono.from(connectionFactory.create()),
                 connection -> Mono.from(connection.beginTransaction())
                         .thenMany(statements.concatMap(statement ->
-                                executeOnConnection(connection, statement, ignoreErrors)))
+                                executeOnConnection(connection, statement, ignoreErrors, databaseType)))
                         .then(Mono.defer(() -> Mono.from(connection.commitTransaction()))),
                 connection -> Mono.from(connection.close()),
                 (connection, error) -> Mono.from(connection.rollbackTransaction())
@@ -236,22 +236,6 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
                 connection -> Mono.from(connection.rollbackTransaction())
                         .onErrorResume(ignored -> Mono.empty())
                         .then(Mono.from(connection.close())));
-    }
-
-    /**
-     * 执行单个SQL资源文件
-     *
-     * @param resource     SQL资源
-     * @param ignoreErrors 是否忽略错误
-     * @return 执行结果
-     */
-    private Mono<Void> executeSingleResource(Resource resource, boolean ignoreErrors) {
-        return Mono.fromCallable(() -> {
-                    log.info("执行SQL文件: {}", resource.getFilename());
-                    return readSqlContent(resource);
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(statements -> executeSqlStatements(statements, ignoreErrors));
     }
 
     /**
@@ -272,63 +256,35 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
         }
     }
 
-    /**
-     * 执行SQL语句列表
-     *
-     * @param statements   SQL语句列表
-     * @param ignoreErrors 是否忽略错误
-     * @return 执行结果
-     */
-    private Mono<Void> executeSqlStatements(List<String> statements, boolean ignoreErrors) {
-        return Flux.fromIterable(statements)
-                .concatMap(statement -> executeSingleStatement(statement, ignoreErrors))
-                .then();
+    private record ScriptStatement(String resource, String sql) {}
+
+    private Mono<Void> executeSingleStatement(ScriptStatement statement, boolean ignoreErrors, String databaseType) {
+        return Mono.defer(() -> databaseClient.sql(statement.sql()).then())
+                .onErrorResume(error -> recoverInitializationError(error, ignoreErrors, databaseType, statement.resource()));
     }
 
-    /**
-     * 执行单个SQL语句
-     *
-     * @param sql          SQL语句
-     * @param ignoreErrors 是否忽略错误
-     * @return 执行结果
-     */
-    private Mono<Void> executeSingleStatement(String sql, boolean ignoreErrors) {
-        return Mono.fromCallable(() -> {
-                    log.debug("执行SQL: {}", sql.substring(0, Math.min(sql.length(), 100)));
-                    return sql;
-                })
-                .flatMap(sqlStr -> databaseClient.sql(sqlStr)
-                        .then()
-                        .doOnSuccess(v -> log.debug("SQL执行成功"))
-                        .doOnError(e -> {
-                            String errorMsg = e.getMessage();
-                            if (ignoreErrors && errorMsg != null) {
-                                // 忽略常见的"已存在"错误
-                                if (errorMsg.contains("already exists") ||
-                                        errorMsg.contains("Duplicate table") ||
-                                        errorMsg.contains("ORA-00942") ||
-                                        errorMsg.contains("does not exist") ||
-                                        errorMsg.contains("Duplicate entry")) {
-                                    log.debug("SQL执行忽略（对象已存在）: {}", errorMsg);
-                                    return;
-                                }
-                            }
-                            log.warn("SQL执行警告: {}", errorMsg);
-                        })
-                        .onErrorResume(e -> {
-                            if (ignoreErrors && isIgnorable(e)) {
-                                return Mono.empty();
-                            }
-                            return Mono.error(e);
-                        })
-                );
+    private Mono<Void> executeOnConnection(Connection connection, ScriptStatement statement, boolean ignoreErrors, String databaseType) {
+        return Flux.defer(() -> Flux.from(connection.createStatement(statement.sql()).execute()))
+                .flatMap(Result -> Result.getRowsUpdated()).then()
+                .onErrorResume(error -> recoverInitializationError(error, ignoreErrors, databaseType, statement.resource()));
     }
 
-    private Mono<Void> executeOnConnection(Connection connection, String sql, boolean ignoreErrors) {
-        return Flux.from(connection.createStatement(sql).execute())
-                .flatMap(result -> result.getRowsUpdated())
-                .then()
-                .onErrorResume(error -> ignoreErrors && isIgnorable(error) ? Mono.empty() : Mono.error(error));
+    private Mono<Void> recoverInitializationError(Throwable error, boolean ignoreErrors, String databaseType, String resource) {
+        R2dbcException cause = databaseError(error);
+        if (ignoreErrors && isIgnorable(cause)) {
+            log.warn("忽略Schema初始化错误：database={}, script={}, SQLSTATE={}, code={}, reason={}",
+                    databaseType, resource, cause.getSqlState(), cause.getErrorCode(), cause.getMessage());
+            return Mono.empty();
+        }
+        return Mono.error(error);
+    }
+
+    private R2dbcException databaseError(Throwable error) {
+        java.util.Set<Throwable> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (Throwable current = error; current != null && visited.add(current); current = current.getCause()) {
+            if (current instanceof R2dbcException exception) return exception;
+        }
+        return null;
     }
 
     static List<String> splitSqlScript(String script) {
@@ -457,14 +413,11 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
         current.setLength(0);
     }
 
-    private boolean isIgnorable(Throwable error) {
-        if (!(error instanceof R2dbcException r2dbcError)) {
-            return false;
-        }
-        String state = r2dbcError.getSqlState();
-        int code = r2dbcError.getErrorCode();
-        return java.util.Set.of("42P07", "42710", "42S01", "42S02").contains(state)
-                || code == 955 || code == 942;
+    private boolean isIgnorable(R2dbcException error) {
+        if (error == null) return false;
+        String state = error.getSqlState();
+        return (state != null && java.util.Set.of("42P07", "42710", "42S01", "42S02").contains(state))
+                || error.getErrorCode() == 955 || error.getErrorCode() == 942;
     }
 
     private String normalizeMode(String mode) {

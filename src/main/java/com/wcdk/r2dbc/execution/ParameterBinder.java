@@ -14,7 +14,7 @@ import java.util.Set;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class ParameterBinder {
 
     private final ParameterValueConverter parameterValueConverter;
@@ -23,7 +23,7 @@ public class ParameterBinder {
         this(new DefaultParameterValueConverter());
     }
 
-    /***
+    /**
      * 使用指定参数转换器创建绑定器。
      * @author wcdk
      * @param parameterValueConverter 参数转换器
@@ -32,7 +32,10 @@ public class ParameterBinder {
         this.parameterValueConverter = java.util.Objects.requireNonNull(parameterValueConverter);
     }
 
-    /*** 按连接工厂创建转换器，路由工厂在执行时选择目标转换器。 @author wcdk ***/
+    /**
+     * 按连接工厂创建转换器，路由工厂在执行时选择目标转换器。
+     * @author wcdk
+     */
     public static ParameterBinder forConnectionFactory(io.r2dbc.spi.ConnectionFactory factory) {
         if (factory instanceof com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing) {
             return new RoutingParameterBinder(routing);
@@ -48,7 +51,10 @@ public class ParameterBinder {
         return new ParameterBinder(converter);
     }
 
-    /*** 接收执行时上下文，显式提供的普通绑定器继续使用自定义转换器。 @author wcdk ***/
+    /**
+     * 接收执行时上下文，显式提供的普通绑定器继续使用自定义转换器。
+     * @author wcdk
+     */
     public DatabaseClient.GenericExecuteSpec bind(DatabaseClient client, String sql, Map<?, ?> parameters,
                                                   reactor.util.context.ContextView context) {
         return bind(client, sql, parameters);

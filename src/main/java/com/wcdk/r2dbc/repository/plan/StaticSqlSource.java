@@ -2,10 +2,10 @@ package com.wcdk.r2dbc.repository.plan;
 
 import java.util.Map;
 
-/***
+/**
  * 静态 SQL 来源。
  * @author wcdk
- **/
+ */
 public record StaticSqlSource(String sql) implements SqlSource {
 
     @Override

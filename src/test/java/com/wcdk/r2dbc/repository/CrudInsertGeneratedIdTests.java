@@ -32,7 +32,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/*** 从仓储到驱动语句的插入主键回填回归测试。 @author wcdk ***/
+/**
+ * 从仓储到驱动语句的插入主键回填回归测试。
+ * @author wcdk
+ */
 class CrudInsertGeneratedIdTests {
     @Test
     void returnsRecordWithSnowflakeIdAndPreservesEveryOtherComponent() throws Exception {
@@ -254,7 +257,10 @@ class CrudInsertGeneratedIdTests {
         assertThat(user.userId).isEqualTo(42L);
     }
 
-    /*** 使用真实 DatabaseClient 和仓储适配器，仅替换数据库驱动边界。 @author wcdk ***/
+    /**
+     * 使用真实 DatabaseClient 和仓储适配器，仅替换数据库驱动边界。
+     * @author wcdk
+     */
     private static class Fixture {
         final Connection connection = mock(Connection.class);
         final Statement statement = mock(Statement.class, RETURNS_SELF);
@@ -301,38 +307,59 @@ class CrudInsertGeneratedIdTests {
         }
     }
 
-    /*** 自定义映射主键实体。 @author wcdk ***/
+    /**
+     * 自定义映射主键实体。
+     * @author wcdk
+     */
     static class User {
         @Id @Column("user_key") Long userId;
         String name = "测试";
     }
 
-    /*** 基本类型主键实体。 @author wcdk ***/
+    /**
+     * 基本类型主键实体。
+     * @author wcdk
+     */
     static class PrimitiveUser {
         @Id int id;
         String name = "测试";
     }
 
-    /*** 字符串主键实体。 @author wcdk ***/
+    /**
+     * 字符串主键实体。
+     * @author wcdk
+     */
     static class StringUser {
         @Id String id;
         String name = "测试";
     }
 
-    /*** 无主键实体。 @author wcdk ***/
+    /**
+     * 无主键实体。
+     * @author wcdk
+     */
     static class NoIdUser {
         String name = "测试";
     }
 
-    /*** 主键非首个组件且带有非持久化组件的不可变实体。 @author wcdk ***/
+    /**
+     * 主键非首个组件且带有非持久化组件的不可变实体。
+     * @author wcdk
+     */
     private record RecordUser(String name, @Id @Column("user_key") Long userId, @Transient Object marker) {
     }
 
-    /*** 字符串主键不可变实体。 @author wcdk ***/
+    /**
+     * 字符串主键不可变实体。
+     * @author wcdk
+     */
     private record StringRecordUser(@Id String id, String name) {
     }
 
-    /*** 基本类型主键不可变实体。 @author wcdk ***/
+    /**
+     * 基本类型主键不可变实体。
+     * @author wcdk
+     */
     private record PrimitiveRecordUser(@Id long id, String name) {
     }
 }

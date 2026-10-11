@@ -31,7 +31,7 @@ import java.util.Set;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, ResourceLoaderAware, BeanFactoryAware {
 
     private Environment environment;

@@ -21,8 +21,7 @@ import java.util.regex.Pattern;
  *
  * @author WCDK
  * @version 1.0
- *
- **/
+ */
 public class R2dbcSqlLogger {
 
     private static final Logger log = LoggerFactory.getLogger(R2dbcSqlLogger.class);

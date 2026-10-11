@@ -4,7 +4,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Unified SQL named-parameter lexer.
+ * 统一的 SQL 命名参数词法分析器。
  *
  * @author wcdk
  */

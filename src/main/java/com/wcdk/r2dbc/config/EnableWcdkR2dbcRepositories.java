@@ -9,12 +9,12 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Enables wcdk R2DBC repository proxy scanning.
+ * 启用 WCDK R2DBC 仓储代理扫描。
  *
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented

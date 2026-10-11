@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.repository;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 import com.wcdk.r2dbc.repository.plan.DerivedQueryPlanModel;
 
@@ -45,8 +46,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/***
- * Derived Query 执行器。
+/**
+ * 派生查询 执行器。
  * @author wcdk
  */
 final class DerivedRepositoryExecutor implements RepositoryMethodExecutor {
@@ -64,13 +65,13 @@ final class DerivedRepositoryExecutor implements RepositoryMethodExecutor {
         this.customMethodResolver = metadata == null ? null : new CustomMethodResolver(metadata, properties.getLogicDeleteValue(), properties.getLogicNotDeleteValue());
     }
 
-    /***
-     * 读取启动阶段已解析的 Derived Query 返回类型。
+    /**
+     * 读取启动阶段已解析的 派生查询 返回类型。
      *
-     * @param plan Derived Query 编译模型
+     * @param plan 派生查询 编译模型
      * @return 返回元素类型
      * @author wcdk
-     **/
+     */
     private Class<?> reactiveValueType(DerivedQueryPlanModel plan) {
         return plan.returnType().elementType() == null
                 ? plan.returnType().returnType()
@@ -119,16 +120,14 @@ Object executeCustomMethod(RepositoryMethodPlan plan, Object[] arguments) {
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
         context.setSql(parsedMethod.sql());
         context.setParameters(parsedMethod.parameters());
-        context.setCommandType(parsedMethod.commandType() == CustomMethodResolver.SqlCommandType.SELECT
-                ? com.wcdk.r2dbc.query.xml.SqlCommandType.SELECT
-                : com.wcdk.r2dbc.query.xml.SqlCommandType.UPDATE);
+        context.setCommandType(parsedMethod.commandType());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context, Mono::empty);
 
         boolean returnsFlux = derivedPlan.returnType().returnType() == Flux.class;
         Class<?> valueType = reactiveValueType(derivedPlan);
 
-        if (parsedMethod.commandType() == CustomMethodResolver.SqlCommandType.SELECT) {
+        if (parsedMethod.commandType() == SqlCommandType.SELECT) {
             if (valueType == Long.class || valueType == long.class) {
                 return executeCustomCountQuery(lifecycle, context, chain);
             } else if (valueType == Boolean.class || valueType == boolean.class) {

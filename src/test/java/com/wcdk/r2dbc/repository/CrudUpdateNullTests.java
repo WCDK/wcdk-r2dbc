@@ -32,7 +32,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/*** 通过真实仓储代理、XML 编译及 DatabaseClient 验证 null 更新，只替换驱动边界。 @author wcdk ***/
+/**
+ * 通过真实仓储代理、XML 编译及 DatabaseClient 验证 null 更新，只替换驱动边界。
+ * @author wcdk
+ */
 class CrudUpdateNullTests {
 
     @ParameterizedTest
@@ -230,7 +233,7 @@ class CrudUpdateNullTests {
         void bound(int index, Object value, Class<?> javaType) {
             var capture = ArgumentCaptor.forClass(Object.class);
             verify(statement).bind(eq(index), capture.capture());
-            // DatabaseClient wraps both ordinary values and typed NULLs in R2DBC Parameters.
+            // DatabaseClient 会将普通参数和带类型的空值统一包装为 R2DBC 参数。
             assertThat(capture.getValue()).isInstanceOf(Parameter.class);
             Parameter parameter = (Parameter) capture.getValue();
             assertThat(parameter.getValue()).isEqualTo(value);

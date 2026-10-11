@@ -10,7 +10,7 @@ import java.util.Optional;
  * 用于 Object 和基础 CRUD 方法稳定分发的启动编译器。
  *
  * @author WCDK
- **/
+ */
 public final class CrudStatementCompiler {
     private final Class<?> repositoryInterface;
     private final RepositoryMetadata metadata;
@@ -25,7 +25,7 @@ public final class CrudStatementCompiler {
         if (RepositoryMethodPlanCompiler.isObjectMethod(method.getName())) {
             return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.OBJECT, null, id));
         }
-        if (!RepositoryMethodPlanCompiler.isCrudMethod(method)) {
+        if (!RepositoryMethodPlanCompiler.isCrudMethod(method, repositoryInterface)) {
             return Optional.empty();
         }
         if (metadata == null) {

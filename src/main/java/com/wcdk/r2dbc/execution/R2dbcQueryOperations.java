@@ -29,7 +29,7 @@ import java.util.function.BiFunction;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class R2dbcQueryOperations {
 
     private final DatabaseClient databaseClient;
@@ -158,7 +158,7 @@ public class R2dbcQueryOperations {
         return query(sql, parameters, mapper).singleOrEmpty();
     }
 
-    /** Executes an already intercepted repository query without invoking the lifecycle chain again. */
+    /** 执行已经经过拦截器处理的仓储查询，避免重复调用生命周期链。 */
     public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
                                               BiFunction<Row, RowMetadata, T> mapper) {
         return Flux.deferContextual(contextView -> {

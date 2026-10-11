@@ -10,10 +10,10 @@ import reactor.core.publisher.Mono;
 import java.util.Map;
 import java.util.function.BiFunction;
 
-/***
+/**
  * 仓储执行阶段访问接口。
  * @author wcdk
- **/
+ */
 public interface RepositoryOperations {
     DatabaseClient databaseClient();
 
@@ -29,10 +29,13 @@ public interface RepositoryOperations {
 
     Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters);
 
-    /*** 插入并获取指定列的数据库生成主键。 @author wcdk ***/
+    /**
+     * 插入并获取指定列的数据库生成主键。
+     * @author wcdk
+     */
     Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn);
 
-    /** Carries the identifier rendered from entity metadata, including its quoting policy. */
+    /** 传递按实体元数据生成的标识符，保留其引用规则。 */
     default Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters,
                                                          String idColumn, String renderedIdColumn) {
         return insertReturningIdWithoutLifecycle(sql, parameters, idColumn);

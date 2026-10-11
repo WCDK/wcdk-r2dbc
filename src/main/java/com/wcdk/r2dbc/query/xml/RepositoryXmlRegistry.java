@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.query.xml;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
 import org.springframework.core.io.ClassPathResource;
@@ -31,15 +32,13 @@ import java.util.regex.Pattern;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class RepositoryXmlRegistry {
 
     /**
-     * SQL mapper files commonly contain comparison operators such as {@code <>}
-     * and {@code <=}.  XML requires the less-than character in text nodes to be
-     * escaped, but requiring every SQL author to wrap plain SQL in CDATA is
-     * unnecessarily strict.  Only operator-shaped less-than characters are
-     * normalized; XML markup and dynamic SQL elements remain untouched.
+     * SQL 映射文件常包含 {@code <>} 和 {@code <=} 等比较运算符。
+     * XML 要求对文本节点中的小于号转义，但不必要求所有 SQL 都使用 CDATA。
+     * 这里只规范化运算符中的小于号，保留 XML 标记和动态 SQL 元素。
      */
     private static final Pattern SQL_LESS_THAN_OPERATOR = Pattern.compile(
             "<(?=\\s*(?:=|>|#|[0-9]))|<(?=\\s+[^/!?])");
@@ -164,9 +163,9 @@ public class RepositoryXmlRegistry {
     }
 
     private String normalizeSqlOperators(String xmlContent) {
-        // CDATA is already XML-safe. Escaping comparison operators inside it
-        // changes the SQL text to a literal "&lt;" and later makes the named
-        // parameter parser see a fake parameter named "lt".
+        // CDATA 已经满足 XML 转义要求；再次转义其中的比较运算符，
+        // 会把 SQL 文本改为字面量 "&lt;"，导致命名参数解析器
+        // 错误地识别出名为 "lt" 的参数。
         StringBuilder normalized = new StringBuilder(xmlContent.length());
         int cursor = 0;
         while (cursor < xmlContent.length()) {
@@ -191,10 +190,10 @@ public class RepositoryXmlRegistry {
         return SQL_LESS_THAN_OPERATOR.matcher(xmlText).replaceAll("&lt;");
     }
 
-    /***
+    /**
      * 只解析项目内置 DTD，拒绝文件系统、网络和其他外部实体。
      * @author wcdk
-     **/
+     */
     private InputSource resolveLocalDtd(String publicId, String systemId) throws SAXException {
         if (publicId != null || !allowedDtd(systemId)) {
             throw new SAXException("仅允许加载项目内置 R2DBC DTD，禁止访问外部实体：" + systemId);

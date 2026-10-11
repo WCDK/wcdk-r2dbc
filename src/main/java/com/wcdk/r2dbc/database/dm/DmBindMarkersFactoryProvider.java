@@ -10,7 +10,7 @@ import org.springframework.r2dbc.core.binding.BindMarkersFactoryResolver;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class DmBindMarkersFactoryProvider implements BindMarkersFactoryResolver.BindMarkerFactoryProvider {
 
     @Override

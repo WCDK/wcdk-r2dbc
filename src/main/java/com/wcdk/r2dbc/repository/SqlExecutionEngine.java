@@ -14,10 +14,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
 
-/***
+/**
  * Repository 唯一 SQL 执行入口。
  * @author wcdk
- **/
+ */
 final class SqlExecutionEngine {
     private final RepositoryOperations operations;
 
@@ -29,25 +29,25 @@ final class SqlExecutionEngine {
         return operations.lifecycleExecutor();
     }
 
-    /***
+    /**
      * 执行统一 SQL 查询请求。
      *
      * @param request SQL 执行请求
      * @param <T> 结果类型
      * @return 查询结果流
      * @author wcdk
-     **/
+     */
     <T> Flux<T> query(SqlExecutionRequest<T> request) {
         return operations.queryWithoutLifecycle(request.sql(), request.namedParameters(), request.mapper());
     }
 
-    /***
+    /**
      * 执行统一 SQL 更新请求。
      *
      * @param request SQL 执行请求
      * @return 更新行数
      * @author wcdk
-     **/
+     */
     Mono<Long> update(SqlExecutionRequest<?> request) {
         return operations.updateWithoutLifecycle(request.sql(), request.namedParameters());
     }
@@ -70,7 +70,10 @@ final class SqlExecutionEngine {
         return update(SqlExecutionRequest.update(sql, parameters));
     }
 
-    /*** 通过统一仓储入口执行插入并读取生成主键。 @author wcdk ***/
+    /**
+     * 通过统一仓储入口执行插入并读取生成主键。
+     * @author wcdk
+     */
     Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
         return operations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);
     }

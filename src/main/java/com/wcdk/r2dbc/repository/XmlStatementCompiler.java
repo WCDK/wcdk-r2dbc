@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.repository;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 
 import com.wcdk.r2dbc.query.xml.RepositoryXmlRegistry;
@@ -10,7 +11,7 @@ import java.util.Optional;
  * 用于不可变 XML 语句分发计划的启动编译器。
  *
  * @author WCDK
- **/
+ */
 public final class XmlStatementCompiler {
     private final Class<?> repositoryInterface;
     private final RepositoryXmlRegistry registry;
@@ -23,7 +24,7 @@ public final class XmlStatementCompiler {
     public Optional<RepositoryMethodPlan> compile(Method method) {
         return registry.find(repositoryInterface, method.getName())
                 .map(statement -> {
-                    if (statement.commandType() != com.wcdk.r2dbc.query.xml.SqlCommandType.SELECT) {
+                    if (statement.commandType() != com.wcdk.r2dbc.execution.SqlCommandType.SELECT) {
                         XmlUpdateResultPlan.compile(method, repositoryInterface);
                     }
                     return new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.XML, statement, statement.statementId());

@@ -9,7 +9,7 @@ import org.springframework.r2dbc.core.binding.BindMarkersFactory;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class DmSpringDialect extends OracleDialect {
 
     public static final DmSpringDialect INSTANCE = new DmSpringDialect();

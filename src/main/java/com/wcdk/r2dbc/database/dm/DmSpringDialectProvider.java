@@ -12,7 +12,7 @@ import java.util.Optional;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class DmSpringDialectProvider implements DialectResolver.R2dbcDialectProvider {
 
     @Override

@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.dialect;
 
-/***
+/**
  * 数据库类型。
  * @author wcdk
  */

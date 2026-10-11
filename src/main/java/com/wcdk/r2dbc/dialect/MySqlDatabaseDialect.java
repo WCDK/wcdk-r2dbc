@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.dialect;
 
-/***
+/**
  * MySQL 数据库方言。
  * @author wcdk
  */

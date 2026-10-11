@@ -9,10 +9,10 @@ import org.springframework.core.type.AnnotatedTypeMetadata;
 import java.util.Map;
 
 /**
- * @auther WCDK
+ * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class WcdkR2dbcDataSourcesCondition implements Condition {
 
     @Override

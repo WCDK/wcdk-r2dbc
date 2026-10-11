@@ -3,21 +3,21 @@ package com.wcdk.r2dbc.repository;
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
 import reactor.util.context.ContextView;
 
-/***
+/**
  * Repository 查询规格执行器。
  *
  * @author wcdk
- **/
+ */
 final class QuerySpecExecutor implements RepositoryMethodExecutor {
 
     private final CrudRepositoryExecutor crudExecutor;
 
-    /***
+    /**
      * 创建查询规格执行器。
      *
      * @param crudExecutor CRUD 执行器
      * @author wcdk
-     **/
+     */
     QuerySpecExecutor(CrudRepositoryExecutor crudExecutor) {
         this.crudExecutor = crudExecutor;
     }

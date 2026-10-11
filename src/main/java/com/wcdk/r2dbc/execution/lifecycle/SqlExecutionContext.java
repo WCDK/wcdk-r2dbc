@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.execution.lifecycle;
 
-import com.wcdk.r2dbc.query.xml.SqlCommandType;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.UUID;
@@ -11,7 +11,7 @@ import java.util.UUID;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class SqlExecutionContext {
 
     private final Method method;
@@ -55,7 +55,7 @@ public class SqlExecutionContext {
         this.repositoryInterface = repositoryInterface;
         this.arguments = arguments;
         this.status = SqlExecutionStatus.CONTINUE;
-        this.commandType = inferCommandType(method.getName());
+        this.commandType = SqlCommandType.fromMethodName(method.getName());
     }
 
     public Method getMethod() {
@@ -183,17 +183,7 @@ public class SqlExecutionContext {
         this.terminationType = terminationType;
     }
 
-    private SqlCommandType inferCommandType(String methodName) {
-        String normalized = methodName.toLowerCase(java.util.Locale.ROOT);
-        if (normalized.startsWith("insert")) return SqlCommandType.INSERT;
-        if (normalized.startsWith("update")) return SqlCommandType.UPDATE;
-        if (normalized.startsWith("delete")) return SqlCommandType.DELETE;
-        if (normalized.startsWith("query") || normalized.startsWith("select")
-                || normalized.startsWith("find") || normalized.startsWith("exists")) {
-            return SqlCommandType.SELECT;
-        }
-        return SqlCommandType.UNKNOWN;
-    }
+
 
     /**
      * 获取执行状态。

@@ -13,8 +13,8 @@ import java.util.List;
  * <p>
  * 负责管理和执行所有注册的拦截器，支持同步和异步两种模式：
  * <ul>
- *     <li>{@link SqlLifecycleInterceptor} - 同步拦截器</li>
- *     <li>{@link ReactiveSqlLifecycleInterceptor} - 异步拦截器</li>
+ * <li>{@link SqlLifecycleInterceptor} - 同步拦截器</li>
+ * <li>{@link ReactiveSqlLifecycleInterceptor} - 异步拦截器</li>
  * </ul>
  * <p>
  * 执行顺序：异步拦截器在同步拦截器之前执行。
@@ -22,7 +22,7 @@ import java.util.List;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class SqlLifecycleInterceptorChain {
 
     private static final Logger log = LoggerFactory.getLogger(SqlLifecycleInterceptorChain.class);

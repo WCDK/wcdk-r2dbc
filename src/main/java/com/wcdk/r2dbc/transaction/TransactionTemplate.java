@@ -65,8 +65,8 @@ public class TransactionTemplate {
                         result = result.concatWith(Flux.defer(() -> Flux.from(action.apply(connection))));
                     }
                     /*
-                     * Stream results with bounded memory. Completion is delayed until commit succeeds;
-                     * values may be observed before commit, matching standard reactive transaction semantics.
+                     * 以有界内存流式传递结果，事务提交成功后才发送完成信号。
+                     * 订阅者可能在提交前观察到结果值，与标准响应式事务语义一致。
                      */
                     return result.concatWith(transaction.commit().thenMany(Flux.empty()));
                 },

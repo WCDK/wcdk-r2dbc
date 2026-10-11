@@ -1,4 +1,5 @@
 package com.wcdk.r2dbc.repository;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata.FieldColumn;
@@ -22,18 +23,18 @@ import java.util.stream.Collectors;
  * 自定义仓储方法解析器，支持通过方法名约定自动生成SQL。
  *
  * 支持的方法名格式：
- * - findBy[Field] / findBy[Field1]And[Field2]
- * - countBy[Field] / countBy[Field1]And[Field2]
- * - existsBy[Field] / existsBy[Field1]And[Field2]
- * - deleteBy[Field] (逻辑删除)
- * - update[Field]ById
- * - update[Field1]And[Field2]By[Condition]
- * - orderBy[Field]Asc / orderBy[Field]Desc
+ * - 查询：findBy[Field] / findBy[Field1]And[Field2]
+ * - 计数：countBy[Field] / countBy[Field1]And[Field2]
+ * - 判断是否存在：existsBy[Field] / existsBy[Field1]And[Field2]
+ * - 删除：deleteBy[Field] (逻辑删除)
+ * - 按主键更新：update[Field]ById
+ * - 按条件更新：update[Field1]And[Field2]By[Condition]
+ * - 排序：orderBy[Field]Asc / orderBy[Field]Desc
  *
  * @author WCDK
  *
  * @version 2.0
- **/
+ */
 public class CustomMethodResolver {
 
     private static final Pattern METHOD_PATTERN = Pattern.compile(
@@ -73,49 +74,67 @@ public class CustomMethodResolver {
         if (!matcher.matches() || matcher.group(2) != null) {
             throw new IllegalArgumentException("不支持的派生仓库方法：" + method.toGenericString());
         }
+        validateMethodNameLength(method.getName());
+        String operation = matcher.group(1);
         String fieldPart = matcher.group(4);
+        if ("OrderBy".equals(matcher.group(3))) fieldPart = "OrderBy" + (fieldPart == null ? "" : fieldPart);
         String conditionPart = fieldPart;
-        if ("update".equals(matcher.group(1))) {
+        List<String> setFields = List.of();
+        if ("update".equals(operation)) {
             int byIndex = fieldPart == null ? -1 : fieldPart.indexOf("By");
-            conditionPart = byIndex < 0 || fieldPart.endsWith("ById") ? null : fieldPart.substring(byIndex + 2);
+            if (byIndex <= 0) throw new IllegalArgumentException("update方法必须指定更新字段和条件：" + method.getName());
+            setFields = parseFieldNames(fieldPart.substring(0, byIndex));
+            conditionPart = fieldPart.substring(byIndex + 2);
+            if ("Id".equals(conditionPart)) conditionPart = metadata.requireIdColumn().field().getName();
         }
-        return new DerivedQueryDefinition(matcher.group(1), fieldPart, compileConditions(conditionPart));
+        if ("delete".equals(operation) && (conditionPart == null || conditionPart.isEmpty()))
+            throw new IllegalArgumentException("delete方法必须指定条件：" + method.getName());
+        List<DerivedQueryDefinition.ConditionDefinition> conditions = compileConditions(conditionPart);
+        List<DerivedQueryDefinition.OrderDefinition> orders = compileOrders(fieldPart);
+        int count = setFields.size() + conditions.stream().mapToInt(DerivedQueryDefinition.ConditionDefinition::argumentCount).sum();
+        if (count != method.getParameterCount()) throw new IllegalArgumentException("方法 " + method.getName()
+                + " 参数数量不匹配：需要 " + count + "，声明 " + method.getParameterCount());
+        validateReturnType(method, operation);
+        return new DerivedQueryDefinition(operation, fieldPart, conditions, setFields, orders);
     }
 
-    /***
-     * 使用启动阶段生成的 Derived Query 模型绑定运行时参数。
+    /**
+     * 使用启动阶段生成的 派生查询 模型绑定运行时参数。
      *
-     * @param plan Derived Query 编译模型
+     * @param plan 派生查询 编译模型
      * @param arguments 方法参数
      * @return 参数绑定后的 SQL 执行定义
      * @author wcdk
-     **/
+     */
     public ParsedMethod resolveCompiled(com.wcdk.r2dbc.repository.plan.DerivedQueryPlanModel plan,
                                         Object[] arguments) {
         return resolve(plan.definition(), plan.method(), arguments);
     }
     public ParsedMethod resolve(DerivedQueryDefinition plan, Method method, Object[] arguments) {
+        int expected = plan.setFields().size() + plan.conditions().stream()
+                .mapToInt(DerivedQueryDefinition.ConditionDefinition::argumentCount).sum();
+        if (arguments == null || expected != arguments.length)
+            throw new IllegalArgumentException("方法 " + method.getName() + " 参数数量不匹配：需要 " + expected);
         return switch (plan.operation()) {
-            case "find" -> resolveFind(method, plan.fieldPart(), arguments, plan.conditions());
+            case "find" -> resolveFind(method, plan.fieldPart(), arguments, plan.conditions(), plan.orders());
             case "count" -> resolveCount(method, plan.fieldPart(), arguments, plan.conditions());
             case "exists" -> resolveExists(method, plan.fieldPart(), arguments, plan.conditions());
             case "delete" -> resolveDelete(method, plan.fieldPart(), arguments, plan.conditions());
-            case "update" -> resolveUpdate(method, plan.fieldPart(), arguments, plan.conditions());
+            case "update" -> resolveUpdate(method, arguments, plan);
             default -> throw new UnsupportedOperationException("不支持的派生操作：" + plan.operation());
         };
     }
-    // ==================== find ====================
+    // ==================== 查询 ====================
 
-    private ParsedMethod resolveFind(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
+    private ParsedMethod resolveFind(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions, List<DerivedQueryDefinition.OrderDefinition> orders) {
         if (fieldPart == null || fieldPart.isEmpty()) {
             String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
                     + logicalNotDeleteSql();
             return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
         }
 
-        String conditionPart = conditionPart(fieldPart);
         List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
-        String orderBySql = extractOrderBy(fieldPart);
+        String orderBySql = renderOrders(orders);
         String whereSql = buildWhereSql(conditions, true);
 
         String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
@@ -125,7 +144,7 @@ public class CustomMethodResolver {
         return new ParsedMethod(sql, parameters, SqlCommandType.SELECT);
     }
 
-    // ==================== count ====================
+    // ==================== 计数 ====================
 
     private ParsedMethod resolveCount(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
@@ -142,7 +161,7 @@ public class CustomMethodResolver {
         return new ParsedMethod(sql, parameters, SqlCommandType.SELECT);
     }
 
-    // ==================== exists ====================
+    // ==================== 判断是否存在 ====================
 
     private ParsedMethod resolveExists(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
@@ -154,7 +173,7 @@ public class CustomMethodResolver {
         return new ParsedMethod(sql, parameters, SqlCommandType.SELECT);
     }
 
-    // ==================== delete ====================
+    // ==================== 删除 ====================
 
     private ParsedMethod resolveDelete(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
         if (fieldPart == null || fieldPart.isEmpty()) {
@@ -176,247 +195,87 @@ public class CustomMethodResolver {
         parameters.put("logicDeleteValue", typed(logicDeleteColumn, logicDeleteValue));
         return new ParsedMethod(sql, parameters, SqlCommandType.UPDATE);
     }
-    // ==================== update ====================
+    // ==================== 更新 ====================
 
-    private ParsedMethod resolveUpdate(Method method, String fieldPart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
-        if (fieldPart == null || fieldPart.isEmpty()) {
-            throw new UnsupportedOperationException("update方法必须指定更新字段");
-        }
-
-        if (fieldPart.endsWith("ById")) {
-            String fieldName = fieldPart.substring(0, fieldPart.length() - 3);
-            return resolveUpdateById(method, fieldName, arguments);
-        }
-
-        int byIndex = fieldPart.indexOf("By");
-        if (byIndex > 0) {
-            String setPart = fieldPart.substring(0, byIndex);
-            String wherePart = fieldPart.substring(byIndex + 2);
-            return resolveUpdateByFields(method, setPart, wherePart, arguments, compiledConditions);
-        }
-
-        throw new UnsupportedOperationException("不支持的update方法格式：update" + fieldPart);
-    }
-
-    private ParsedMethod resolveUpdateById(Method method, String fieldName, Object[] arguments) {
-        FieldColumn idColumn = metadata.requireIdColumn();
-        FieldColumn fieldColumn = findColumn(fieldName);
-        if (fieldColumn == null) {
-            throw new IllegalArgumentException("实体字段不存在：" + fieldName);
-        }
-
-        Parameter[] parameters = method.getParameters();
-        if (parameters.length < 2) {
-            throw new UnsupportedOperationException("update方法需要两个参数：newValue和id");
-        }
-
-        String sql = "UPDATE " + metadata.tableName()
-                + " SET " + fieldColumn.name() + " = :newValue"
-                + " WHERE " + idColumn.name() + " = :id";
-
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("newValue", typed(fieldColumn, arguments[0]));
-        params.put("id", typed(idColumn, arguments[1]));
-
-        if (metadata.logicDeleteColumn() != null) {
-            params.put("logicNotDeleteValue", typed(metadata.logicDeleteColumn(), logicNotDeleteValue));
-            sql += " AND " + metadata.logicDeleteColumn().name() + " = :logicNotDeleteValue";
-        }
-
-        return new ParsedMethod(sql, params, SqlCommandType.UPDATE);
-    }
-
-    private ParsedMethod resolveUpdateByFields(Method method, String setPart, String wherePart, Object[] arguments, List<DerivedQueryDefinition.ConditionDefinition> compiledConditions) {
-        List<String> setFields = parseFieldNames(setPart);
-
-        if (setFields.isEmpty()) {
-            throw new UnsupportedOperationException("update方法必须指定更新字段");
-        }
-
-        StringBuilder sql = new StringBuilder();
-        sql.append("UPDATE ").append(metadata.tableName()).append(" SET ");
-
+    private ParsedMethod resolveUpdate(Method method, Object[] arguments, DerivedQueryDefinition plan) {
         Map<String, Object> parameters = new LinkedHashMap<>();
-        List<String> setClauses = new ArrayList<>();
-
-        for (int i = 0; i < setFields.size(); i++) {
-            FieldColumn fieldColumn = findColumn(setFields.get(i));
-            if (fieldColumn == null) {
-                throw new IllegalArgumentException("实体字段不存在：" + setFields.get(i));
-            }
-            String paramName = "set" + i;
-            setClauses.add(fieldColumn.name() + " = :" + paramName);
-            parameters.put(paramName, typed(fieldColumn, arguments[i]));
+        List<String> clauses = new ArrayList<>();
+        for (int i = 0; i < plan.setFields().size(); i++) {
+            FieldColumn column = metadata.columnByName(plan.setFields().get(i));
+            clauses.add(column.name() + " = :set" + i);
+            parameters.put("set" + i, typed(column, arguments[i]));
         }
-
-        sql.append(String.join(", ", setClauses));
-
-        int argOffset = setFields.size();
-        List<Condition> conditions = bindConditions(compiledConditions, arguments, argOffset, method.getName());
-        String whereSql = buildWhereSql(conditions, true);
-        sql.append(whereSql);
-
-        Map<String, Object> whereParams = buildParameters(conditions);
-        parameters.putAll(whereParams);
-
-        return new ParsedMethod(sql.toString(), parameters, SqlCommandType.UPDATE);
+        List<Condition> conditions = bindConditions(plan.conditions(), arguments, plan.setFields().size(), method.getName());
+        parameters.putAll(buildParameters(conditions));
+        return new ParsedMethod("UPDATE " + metadata.tableName() + " SET " + String.join(", ", clauses)
+                + buildWhereSql(conditions, true), parameters, SqlCommandType.UPDATE);
     }
 
     private List<DerivedQueryDefinition.ConditionDefinition> compileConditions(String fieldPart) {
-        if (fieldPart == null || fieldPart.isEmpty()) {
-            return List.of();
-        }
-        String conditionPart = fieldPart.contains("OrderBy")
-                ? fieldPart.substring(0, fieldPart.indexOf("OrderBy")) : fieldPart;
+        if (fieldPart == null || fieldPart.isEmpty()) return List.of();
+        String text = conditionPart(fieldPart);
         List<DerivedQueryDefinition.ConditionDefinition> result = new ArrayList<>();
-        for (String token : conditionPart.split("(?=And|Or)(?<!^)") ) {
-            String logical = "And";
-            if (token.startsWith("And")) token = token.substring(3);
-            else if (token.startsWith("Or")) { token = token.substring(2); logical = "Or"; }
-            String operator = "=";
-            String field = token;
-            if (token.endsWith("IsNotNull")) { operator = "IS NOT NULL"; field = token.substring(0, token.length() - 9); }
-            else if (token.endsWith("IsNull")) { operator = "IS NULL"; field = token.substring(0, token.length() - 6); }
-            else if (token.endsWith("GreaterThanEqual")) { operator = ">="; field = token.substring(0, token.length() - 16); }
-            else if (token.endsWith("LessThanEqual")) { operator = "<="; field = token.substring(0, token.length() - 13); }
-            else if (token.endsWith("GreaterThan")) { operator = ">"; field = token.substring(0, token.length() - 11); }
-            else if (token.endsWith("LessThan")) { operator = "<"; field = token.substring(0, token.length() - 8); }
-            else if (token.endsWith("NotIn")) { operator = "NOT IN"; field = token.substring(0, token.length() - 5); }
-            else if (token.endsWith("Like")) { operator = "LIKE"; field = token.substring(0, token.length() - 4); }
-            else if (token.endsWith("In")) { operator = "IN"; field = token.substring(0, token.length() - 2); }
-            else if (token.endsWith("Between")) { operator = "BETWEEN"; field = token.substring(0, token.length() - 7); }
-            else if (token.endsWith("Not")) { operator = "<>"; field = token.substring(0, token.length() - 3); }
-            if (findColumn(field) == null) throw new IllegalArgumentException("实体字段不存在：" + field);
-            int argumentCount = ("IS NULL".equals(operator) || "IS NOT NULL".equals(operator)) ? 0
-                    : ("BETWEEN".equals(operator) ? 2 : 1);
-            result.add(new DerivedQueryDefinition.ConditionDefinition(field, operator, logical, argumentCount));
+        int offset = 0;
+        String logical = "And";
+        while (offset < text.length()) {
+            boolean matched = false;
+            for (FieldToken candidate : longestTokens()) {
+                FieldColumn column = candidate.column();
+                String token = candidate.token();
+                if (!text.regionMatches(true, offset, token, 0, token.length())) continue;
+                int start = offset + token.length();
+                for (DerivedOperator operator : DerivedOperator.values()) {
+                    if (!text.startsWith(operator.suffix(), start)) continue;
+                    int end = start + operator.suffix().length();
+                    if (end != text.length() && !text.startsWith("And", end) && !text.startsWith("Or", end)) continue;
+                    result.add(new DerivedQueryDefinition.ConditionDefinition(column.field().getName(), operator.sql(), logical, operator.argumentCount()));
+                    offset = end;
+                    matched = true;
+                    break;
+                }
+                if (matched) break;
+            }
+            if (!matched) throw new IllegalArgumentException("实体字段不存在或算子无效：" + text.substring(offset));
+            if (offset < text.length()) {
+                logical = text.startsWith("And", offset) ? "And" : "Or";
+                offset += logical.length();
+                if (offset == text.length()) throw new IllegalArgumentException("方法名中存在空条件字段：" + fieldPart);
+            }
         }
-        return result;
+        return List.copyOf(result);
+    }
+
+    private record FieldToken(FieldColumn column, String token) {}
+
+    private List<FieldToken> longestTokens() {
+        return metadata.columns().stream().flatMap(column ->
+                java.util.stream.Stream.of(column.field().getName(), column.rawName(), column.rawName().replace("_", "")).distinct()
+                        .map(token -> new FieldToken(column, token)))
+                .sorted(java.util.Comparator.comparingInt((FieldToken token) -> token.token().length()).reversed())
+                .toList();
     }
 
     private List<Condition> bindConditions(List<DerivedQueryDefinition.ConditionDefinition> definitions,
                                            Object[] arguments, int argOffset, String methodName) {
+        int expected = argOffset + definitions.stream().mapToInt(DerivedQueryDefinition.ConditionDefinition::argumentCount).sum();
+        if (arguments == null || expected != arguments.length)
+            throw new IllegalArgumentException("方法 " + methodName + " 参数数量不匹配：需要 " + expected);
         List<Condition> conditions = new ArrayList<>();
         int index = argOffset;
         for (DerivedQueryDefinition.ConditionDefinition definition : definitions) {
             Object value = definition.argumentCount() == 0 ? null : arguments[index++];
             Object second = definition.argumentCount() == 2 ? arguments[index++] : null;
-            FieldColumn column = findColumn(definition.fieldName());
+            FieldColumn column = metadata.columnByName(definition.fieldName());
             conditions.add(new Condition(column.name(), definition.operator(), value, second, definition.logicalOperator()));
         }
         if (index != arguments.length) throw new IllegalArgumentException("方法 " + methodName + " 参数数量不匹配");
         return conditions;
     }
-    // ==================== 条件解析 ====================
-
-    private List<Condition> parseConditions(String fieldPart, Parameter[] methodParams,
-                                             Object[] arguments, int argOffset, String methodName) {
-        List<Condition> conditions = new ArrayList<>();
-        String[] parts = fieldPart.split("(?=And|Or)(?<!^)");
-
-        int argIndex = argOffset;
-
-        for (String part : parts) {
-            String logicalOperator = "And";
-
-            if (part.startsWith("And")) {
-                part = part.substring(3);
-                logicalOperator = "And";
-            } else if (part.startsWith("Or")) {
-                part = part.substring(2);
-                logicalOperator = "Or";
-            }
-
-            String operator = "=";
-            String fieldName = part;
-
-            if (part.endsWith("IsNotNull")) {
-                operator = "IS NOT NULL";
-                fieldName = part.substring(0, part.length() - 9);
-            } else if (part.endsWith("IsNull")) {
-                operator = "IS NULL";
-                fieldName = part.substring(0, part.length() - 6);
-            } else if (part.endsWith("GreaterThanEqual")) {
-                operator = ">=";
-                fieldName = part.substring(0, part.length() - 16);
-            } else if (part.endsWith("LessThanEqual")) {
-                operator = "<=";
-                fieldName = part.substring(0, part.length() - 13);
-            } else if (part.endsWith("GreaterThan")) {
-                operator = ">";
-                fieldName = part.substring(0, part.length() - 11);
-            } else if (part.endsWith("LessThan")) {
-                operator = "<";
-                fieldName = part.substring(0, part.length() - 8);
-            } else if (part.endsWith("NotIn")) {
-                operator = "NOT IN";
-                fieldName = part.substring(0, part.length() - 5);
-            } else if (part.endsWith("Like")) {
-                operator = "LIKE";
-                fieldName = part.substring(0, part.length() - 4);
-            } else if (part.endsWith("In")) {
-                operator = "IN";
-                fieldName = part.substring(0, part.length() - 2);
-            } else if (part.endsWith("Between")) {
-                operator = "BETWEEN";
-                fieldName = part.substring(0, part.length() - 7);
-            } else if (part.endsWith("Not")) {
-                operator = "<>";
-                fieldName = part.substring(0, part.length() - 3);
-            } else if (part.endsWith("Asc") || part.endsWith("Desc")) {
-                continue;
-            }
-
-            FieldColumn fieldColumn = findColumn(fieldName);
-            if (fieldColumn == null) {
-                throw new IllegalArgumentException("实体字段不存在：" + fieldName + "（方法：" + methodName + "）");
-            }
-
-            Object value = null;
-            Object secondValue = null;
-
-            if ("IS NULL".equals(operator) || "IS NOT NULL".equals(operator)) {
-                // 不消费参数
-            } else if ("BETWEEN".equals(operator)) {
-                if (argIndex + 1 >= arguments.length) {
-                    throw new IllegalArgumentException(
-                            "方法 " + methodName + " 参数数量不匹配：BETWEEN 需要2个参数，但只剩 "
-                                    + (arguments.length - argIndex) + " 个");
-                }
-                value = arguments[argIndex++];
-                secondValue = arguments[argIndex++];
-            } else {
-                if (argIndex >= arguments.length) {
-                    throw new IllegalArgumentException(
-                            "方法 " + methodName + " 参数数量不匹配：需要更多参数，但已用完");
-                }
-                value = arguments[argIndex++];
-            }
-
-            conditions.add(new Condition(fieldColumn.name(), operator, value, secondValue, logicalOperator));
-        }
-
-        if (argIndex < arguments.length) {
-            throw new IllegalArgumentException(
-                    "方法 " + methodName + " 参数数量不匹配：消耗了 " + (argIndex - argOffset)
-                            + " 个参数，但传入了 " + (arguments.length - argOffset) + " 个");
-        }
-
-        return conditions;
-    }
-
-    private List<String> parseFieldNames(String fieldPart) {
-        List<String> fields = new ArrayList<>();
-        String[] parts = fieldPart.split("(?=And)(?<!^)");
-
-        for (String part : parts) {
-            if (part.startsWith("And")) {
-                part = part.substring(3);
-            }
-            fields.add(part);
-        }
-
-        return fields;
+    private List<String> parseFieldNames(String text) {
+        List<DerivedQueryDefinition.ConditionDefinition> fields = compileConditions(text);
+        if (fields.isEmpty() || fields.stream().anyMatch(field -> !"=".equals(field.operator()) || !"And".equals(field.logicalOperator())))
+            throw new IllegalArgumentException("更新字段只能用 And 连接：" + text);
+        return fields.stream().map(DerivedQueryDefinition.ConditionDefinition::fieldName).toList();
     }
 
     // ==================== SQL 构建 ====================
@@ -557,53 +416,43 @@ public class CustomMethodResolver {
                 : LogicDeleteValueConverter.convert(value, column.field().getType());
     }
 
-    // ==================== OrderBy ====================
+    // ==================== 排序 ====================
 
-    private String extractOrderBy(String fieldPart) {
-        if (fieldPart == null) {
-            return "";
-        }
-
-        int orderByIndex = fieldPart.indexOf("OrderBy");
-        if (orderByIndex < 0) {
-            return "";
-        }
-
-        String orderByPart = fieldPart.substring(orderByIndex + 7);
-        if (orderByPart.isEmpty()) {
-            return "";
-        }
-
-        List<String> orderClauses = new ArrayList<>();
-        String[] parts = orderByPart.split("(?<=Asc)(?=[A-Z])|(?<=Desc)(?=[A-Z])");
-
-        for (String part : parts) {
-            if (part.isEmpty()) continue;
-
-            boolean asc = true;
-            String fieldName = part;
-
-            if (part.endsWith("Asc")) {
-                fieldName = part.substring(0, part.length() - 3);
-                asc = true;
-            } else if (part.endsWith("Desc")) {
-                fieldName = part.substring(0, part.length() - 4);
-                asc = false;
+    private List<DerivedQueryDefinition.OrderDefinition> compileOrders(String fieldPart) {
+        if (fieldPart == null || !fieldPart.contains("OrderBy")) return List.of();
+        String text = fieldPart.substring(fieldPart.indexOf("OrderBy") + 7);
+        if (text.isEmpty()) throw new IllegalArgumentException("排序字段不能为空");
+        List<DerivedQueryDefinition.OrderDefinition> result = new ArrayList<>();
+        int offset = 0;
+        while (offset < text.length()) {
+            boolean matched = false;
+            for (FieldToken candidate : longestTokens()) {
+                FieldColumn column = candidate.column();
+                String token = candidate.token();
+                if (!text.regionMatches(true, offset, token, 0, token.length())) continue;
+                int end = offset + token.length();
+                boolean ascending = true;
+                if (text.startsWith("Asc", end)) end += 3;
+                else if (text.startsWith("Desc", end)) { end += 4; ascending = false; }
+                else if (end != text.length()) continue;
+                result.add(new DerivedQueryDefinition.OrderDefinition(column.field().getName(), ascending));
+                offset = end;
+                if (text.startsWith("And", offset)) {
+                    offset += 3;
+                    if (offset == text.length()) throw new IllegalArgumentException("排序字段不能为空");
+                }
+                matched = true;
+                break;
             }
-
-            FieldColumn fieldColumn = findColumn(fieldName);
-            if (fieldColumn != null) {
-                orderClauses.add(fieldColumn.name() + (asc ? " ASC" : " DESC"));
-            } else {
-                throw new IllegalArgumentException("排序字段不存在：" + fieldName);
-            }
+            if (!matched) throw new IllegalArgumentException("排序字段不存在：" + text.substring(offset));
         }
+        return List.copyOf(result);
+    }
 
-        if (orderClauses.isEmpty()) {
-            return "";
-        }
-
-        return " ORDER BY " + String.join(", ", orderClauses);
+    private String renderOrders(List<DerivedQueryDefinition.OrderDefinition> orders) {
+        return orders.isEmpty() ? "" : " ORDER BY " + orders.stream()
+                .map(order -> metadata.columnByName(order.fieldName()).name() + (order.ascending() ? " ASC" : " DESC"))
+                .collect(Collectors.joining(", "));
     }
 
     private String conditionPart(String fieldPart) {
@@ -612,18 +461,6 @@ public class CustomMethodResolver {
     }
 
     // ==================== 工具方法 ====================
-
-    private FieldColumn findColumn(String fieldName) {
-        try {
-            return metadata.columnByName(fieldName);
-        } catch (IllegalArgumentException ignored) {
-            try {
-                return metadata.columnByName(camelToUnderline(fieldName));
-            } catch (IllegalArgumentException missingColumn) {
-                return null;
-            }
-        }
-    }
 
     private String selectColumns() {
         return metadata.columns().stream()
@@ -638,18 +475,6 @@ public class CustomMethodResolver {
         return " WHERE " + metadata.logicDeleteColumn().name() + " = :logicNotDeleteValue";
     }
 
-    private String camelToUnderline(String value) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (Character.isUpperCase(ch) && i > 0) {
-                builder.append('_');
-            }
-            builder.append(Character.toLowerCase(ch));
-        }
-        return builder.toString();
-    }
-
     // ==================== 启动期校验 ====================
 
     /**
@@ -658,92 +483,13 @@ public class CustomMethodResolver {
      * @param method 方法
      */
     public void validateMethod(Method method) {
-        String methodName = method.getName();
-        Matcher matcher = METHOD_PATTERN.matcher(methodName);
-
-        if (!matcher.matches()) {
-            return;
-        }
-
-        String operation = matcher.group(1);
-        String fieldPart = matcher.group(4);
-
-        validateMethodNameLength(methodName);
-        validateFieldPart(fieldPart == null ? null : conditionPart(fieldPart), methodName);
-        if ("find".equals(operation)) {
-            extractOrderBy(fieldPart);
-        }
-        validateReturnType(method, operation);
+        if (supports(method)) compile(method);
     }
 
     private void validateMethodNameLength(String methodName) {
         if (methodName.length() > 128) {
             throw new IllegalArgumentException("方法名过长（超过128字符）：" + methodName);
         }
-    }
-
-    private void validateFieldPart(String fieldPart, String methodName) {
-        if (fieldPart == null || fieldPart.isEmpty()) {
-            return;
-        }
-
-        if (fieldPart.length() > 256) {
-            throw new IllegalArgumentException("方法名字段部分过长（超过256字符）：" + methodName);
-        }
-
-        String[] parts = fieldPart.split("(?=And|Or)(?<!^)");
-        for (String part : parts) {
-            if (part.startsWith("And")) {
-                part = part.substring(3);
-            } else if (part.startsWith("Or")) {
-                part = part.substring(2);
-            }
-
-            if (part.startsWith("OrderBy")) {
-                break;
-            }
-
-            String fieldName = extractFieldNameForValidation(part);
-            if (fieldName.isEmpty()) {
-                throw new IllegalArgumentException("方法名中存在空条件字段：" + methodName);
-            }
-
-            FieldColumn fieldColumn = findColumn(fieldName);
-            if (fieldColumn == null && !part.endsWith("Asc") && !part.endsWith("Desc")) {
-                throw new IllegalArgumentException("方法名引用了不存在的实体字段：" + fieldName + "（方法：" + methodName + "）");
-            }
-        }
-    }
-
-    private String extractFieldNameForValidation(String part) {
-        if (part.endsWith("IsNotNull")) {
-            return part.substring(0, part.length() - 9);
-        } else if (part.endsWith("IsNull")) {
-            return part.substring(0, part.length() - 6);
-        } else if (part.endsWith("GreaterThanEqual")) {
-            return part.substring(0, part.length() - 16);
-        } else if (part.endsWith("LessThanEqual")) {
-            return part.substring(0, part.length() - 13);
-        } else if (part.endsWith("GreaterThan")) {
-            return part.substring(0, part.length() - 11);
-        } else if (part.endsWith("LessThan")) {
-            return part.substring(0, part.length() - 8);
-        } else if (part.endsWith("NotIn")) {
-            return part.substring(0, part.length() - 5);
-        } else if (part.endsWith("Like")) {
-            return part.substring(0, part.length() - 4);
-        } else if (part.endsWith("In")) {
-            return part.substring(0, part.length() - 2);
-        } else if (part.endsWith("Between")) {
-            return part.substring(0, part.length() - 7);
-        } else if (part.endsWith("Not")) {
-            return part.substring(0, part.length() - 3);
-        } else if (part.endsWith("Asc")) {
-            return part.substring(0, part.length() - 3);
-        } else if (part.endsWith("Desc")) {
-            return part.substring(0, part.length() - 4);
-        }
-        return part;
     }
 
     private void validateReturnType(Method method, String operation) {
@@ -813,13 +559,6 @@ public class CustomMethodResolver {
     }
 
     // ==================== 类型定义 ====================
-
-    /**
-     * SQL 命令类型。
-     */
-    public enum SqlCommandType {
-        SELECT, INSERT, UPDATE, DELETE
-    }
 
     /**
      * 解析结果。

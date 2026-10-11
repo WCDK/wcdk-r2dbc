@@ -16,7 +16,7 @@ import java.time.format.DateTimeFormatter;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 @Component
 public class SqlAuditInterceptor implements SqlLifecycleInterceptor {
 

@@ -11,7 +11,7 @@ import reactor.core.publisher.Mono;
 import java.util.Map;
 import java.util.function.BiFunction;
 
-/***
+/**
  * R2DBC Repository 内部操作适配器。
  * @author wcdk
  */
@@ -57,7 +57,10 @@ public final class R2dbcRepositoryOperations implements RepositoryOperations {
         return delegate.updateWithoutLifecycle(sql, parameters);
     }
 
-    /*** 委托插入操作获取数据库生成的主键。 @author wcdk ***/
+    /**
+     * 委托插入操作获取数据库生成的主键。
+     * @author wcdk
+     */
     @Override
     public Mono<Object> insertReturningIdWithoutLifecycle(String sql, Map<?, ?> parameters, String idColumn) {
         return delegate.insertReturningIdWithoutLifecycle(sql, parameters, idColumn);

@@ -11,16 +11,16 @@ import org.springframework.transaction.ReactiveTransactionManager;
 import org.springframework.transaction.reactive.TransactionSynchronizationManager;
 import reactor.core.publisher.Mono;
 
-/***
+/**
  * WCDK 响应式事务管理器，负责把 Spring 事务与动态数据源锁定机制连接起来。
  * @author wcdk
- **/
+ */
 public final class WcdkReactiveTransactionManager implements ReactiveTransactionManager {
 
     private final ReactiveTransactionManager delegate;
     private final String primaryDataSource;
 
-    /***
+    /**
      * 创建基于指定 R2DBC 连接工厂的事务管理器。
      * @author wcdk
      * @param connectionFactory R2DBC 连接工厂
@@ -29,7 +29,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
         this(new R2dbcTransactionManager(connectionFactory), primaryDataSource(connectionFactory));
     }
 
-    /***
+    /**
      * 创建包装已有事务管理器的数据源锁定事务管理器。
      * @author wcdk
      * @param delegate 被包装的事务管理器
@@ -38,7 +38,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
         this(delegate, "<primary>");
     }
 
-    /***
+    /**
      * 创建带主数据源名称的数据源锁定事务管理器。
      * @author wcdk
      * @param delegate 被包装的事务管理器
@@ -49,7 +49,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
         this.primaryDataSource = primaryDataSource;
     }
 
-    /***
+    /**
      * 开启或加入 Spring 响应式事务，并登记 canonical 数据源。
      * @author wcdk
      * @param definition 事务定义
@@ -66,7 +66,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
         });
     }
 
-    /***
+    /**
      * 提交事务。
      * @author wcdk
      * @param transaction 事务状态
@@ -77,7 +77,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
         return delegate.commit(transaction);
     }
 
-    /***
+    /**
      * 回滚事务。
      * @author wcdk
      * @param transaction 事务状态
@@ -88,7 +88,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
         return delegate.rollback(transaction);
     }
 
-    /***
+    /**
      * 根据连接工厂解析主数据源名称。
      * @author wcdk
      */
@@ -97,7 +97,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
                 ? routing.getPrimary() : "<primary>";
     }
 
-    /***
+    /**
      * 校验已存在事务的数据源与当前请求一致。
      * @author wcdk
      * @param requested 当前请求数据源
@@ -116,7 +116,7 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
                 .onErrorResume(NoTransactionException.class, ignored -> Mono.empty());
     }
 
-    /***
+    /**
      * 在当前 Spring 事务上下文登记 canonical 数据源。
      * @author wcdk
      * @param dataSource canonical 数据源

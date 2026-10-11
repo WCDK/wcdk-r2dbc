@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.execution;
 
-import com.wcdk.r2dbc.repository.plan.SqlCommandType;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 import io.r2dbc.spi.Row;
 import io.r2dbc.spi.RowMetadata;
 
@@ -9,10 +9,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
 
-/***
+/**
  * 统一 SQL 执行请求。
  * @author wcdk
- **/
+ */
 public record SqlExecutionRequest<T>(
         String sql,
         SqlCommandType commandType,
@@ -30,7 +30,7 @@ public record SqlExecutionRequest<T>(
         namedParameters = Map.copyOf(namedParameters == null ? Map.of() : namedParameters);
     }
 
-    /***
+    /**
      * 创建带自定义行映射的查询请求。
      *
      * @param sql SQL
@@ -40,7 +40,7 @@ public record SqlExecutionRequest<T>(
      * @param <T> 结果类型
      * @return 查询请求
      * @author wcdk
-     **/
+     */
     public static <T> SqlExecutionRequest<T> query(String sql, Map<?, ?> parameters,
                                                     Class<T> resultType,
                                                     BiFunction<Row, RowMetadata, T> mapper) {
@@ -48,14 +48,14 @@ public record SqlExecutionRequest<T>(
                 ExecutionOptions.DEFAULT, copy(parameters), mapper);
     }
 
-    /***
+    /**
      * 创建更新请求。
      *
      * @param sql SQL
      * @param parameters 命名参数
      * @return 更新请求
      * @author wcdk
-     **/
+     */
     public static SqlExecutionRequest<Long> update(String sql, Map<?, ?> parameters) {
         return new SqlExecutionRequest<>(sql, SqlCommandType.UPDATE, List.of(), Long.class,
                 ExecutionOptions.DEFAULT, copy(parameters), null);

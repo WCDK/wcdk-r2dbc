@@ -18,7 +18,7 @@ import java.util.Map;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class RepositoryProxyFactory {
 
     private final RepositoryOperations repositoryOperations;
@@ -55,39 +55,40 @@ public class RepositoryProxyFactory {
 
     public Object create(Class<?> repositoryInterface) {
         Class<?> entityClass = resolveEntityClass(repositoryInterface);
-        RepositoryMetadata metadata = entityClass != null ? new RepositoryMetadata(entityClass, properties,
-                DatabaseDialects.get(repositoryOperations.databaseClient().getConnectionFactory())) : null;
-
-        Map<java.lang.reflect.Method, RepositoryMethodPlan> methodPlans =
-                new RepositoryMethodPlanCompiler(repositoryInterface, metadata, repositoryXmlRegistry, properties)
-                        .compile();
-
+        var connectionFactory = repositoryOperations.databaseClient().getConnectionFactory();
+        Map<java.lang.reflect.Method, RepositoryMethodPlan> methodPlans;
+        RepositoryInvocationDispatcher dispatcher;
+        if (connectionFactory instanceof com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing) {
+            Map<String, Map<java.lang.reflect.Method, RepositoryMethodPlan>> routedPlans = new java.util.LinkedHashMap<>();
+            for (var entry : routing.getConnectionFactories().entrySet()) {
+                routedPlans.put(entry.getKey(), compileBoundPlans(repositoryInterface, entityClass, entry.getValue()));
+            }
+            methodPlans = routedPlans.get(routing.getPrimary());
+            dispatcher = new RepositoryInvocationDispatcher(routing, routedPlans);
+        } else {
+            var dialect = DatabaseDialects.get(connectionFactory);
+            RepositoryMetadata metadata = entityClass == null ? null : new RepositoryMetadata(entityClass, properties, dialect);
+            dispatcher = RepositoryInvocationDispatcherFactory.create(repositoryOperations, properties, metadata,
+                    repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator, dialect);
+            methodPlans = dispatcher.bindPlans(compilePlans(repositoryInterface, metadata));
+        }
         ProxyFactory proxyFactory = new ProxyFactory();
         proxyFactory.setInterfaces(repositoryInterface);
-        RepositoryInvocationDispatcher dispatcher = RepositoryInvocationDispatcherFactory.create(
-                repositoryOperations, properties, metadata, repositoryInterface,
-                repositoryXmlRegistry, snowflakeIdGenerator);
-        methodPlans = dispatcher.bindPlans(methodPlans);
-        if (repositoryOperations.databaseClient().getConnectionFactory()
-                instanceof com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing) {
-            // 表列引用及派生查询 SQL 都按目标数据库编译，避免仅分页切换方言。
-            Map<String, Map<java.lang.reflect.Method, RepositoryMethodPlan>> routedPlans = new java.util.LinkedHashMap<>();
-            routedPlans.put(routing.getPrimary(), methodPlans);
-            for (var entry : routing.getConnectionFactories().entrySet()) {
-                if (entry.getKey().equals(routing.getPrimary())) continue;
-                var dialect = DatabaseDialects.get(entry.getValue());
-                RepositoryMetadata targetMetadata = entityClass == null ? null
-                        : new RepositoryMetadata(entityClass, properties, dialect);
-                var targetDispatcher = RepositoryInvocationDispatcherFactory.create(repositoryOperations, properties,
-                        targetMetadata, repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator, dialect);
-                var targetPlans = new RepositoryMethodPlanCompiler(repositoryInterface, targetMetadata,
-                        repositoryXmlRegistry, properties).compile();
-                routedPlans.put(entry.getKey(), targetDispatcher.bindPlans(targetPlans));
-            }
-            dispatcher = new RepositoryInvocationDispatcher(routing, routedPlans);
-        }
         proxyFactory.addAdvice(new RepositoryProxyMethodInterceptor(methodPlans, dispatcher));
         return proxyFactory.getProxy(repositoryInterface.getClassLoader());
+    }
+
+    private Map<java.lang.reflect.Method, RepositoryMethodPlan> compileBoundPlans(Class<?> repositoryInterface, Class<?> entityClass,
+                                                                               io.r2dbc.spi.ConnectionFactory connectionFactory) {
+        var dialect = DatabaseDialects.get(connectionFactory);
+        RepositoryMetadata metadata = entityClass == null ? null : new RepositoryMetadata(entityClass, properties, dialect);
+        var dispatcher = RepositoryInvocationDispatcherFactory.create(repositoryOperations, properties, metadata,
+                repositoryInterface, repositoryXmlRegistry, snowflakeIdGenerator, dialect);
+        return dispatcher.bindPlans(compilePlans(repositoryInterface, metadata));
+    }
+
+    Map<java.lang.reflect.Method, RepositoryMethodPlan> compilePlans(Class<?> repositoryInterface, RepositoryMetadata metadata) {
+        return new RepositoryMethodPlanCompiler(repositoryInterface, metadata, repositoryXmlRegistry, properties).compile();
     }
 
     private Class<?> resolveEntityClass(Class<?> repositoryInterface) {

@@ -3,7 +3,7 @@ package com.wcdk.r2dbc.query;
 import java.util.List;
 import java.util.Objects;
 
-/***
+/**
  * SQL谓词抽象语法树。
  * @author wcdk
  */

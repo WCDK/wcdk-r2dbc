@@ -10,7 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/***
+/**
  * Query AST SQL 渲染器。
  * @author wcdk
  */
@@ -31,7 +31,10 @@ public final class SqlExpressionRenderer {
         return new RenderedPredicate(sql.isBlank() ? "" : " WHERE " + sql, bindings);
     }
 
-    /*** 基于实体字段白名单判断 AST 是否显式引用指定列。 @author wcdk ***/
+    /**
+     * 基于实体字段白名单判断 AST 是否显式引用指定列。
+     * @author wcdk
+     */
     public boolean referencesColumn(SqlExpression expression, FieldColumn target) {
         if (expression == null) {
             return false;

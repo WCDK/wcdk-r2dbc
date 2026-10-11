@@ -1,6 +1,6 @@
 package com.wcdk.r2dbc.dialect;
 
-/***
+/**
  * Oracle 数据库方言。
  * @author wcdk
  */
@@ -37,7 +37,10 @@ public class OracleDatabaseDialect extends AbstractDatabaseDialect {
         return false;
     }
 
-    /*** 驱动通过 RETURNING INTO 返回指定列，不支持 PostgreSQL 式 RETURNING 子句。 @author wcdk ***/
+    /**
+     * 驱动通过 RETURNING INTO 返回指定列，不支持 PostgreSQL 式 RETURNING 子句。
+     * @author wcdk
+     */
     @Override
     public GeneratedKeyStrategy generatedKeyStrategy() {
         return GeneratedKeyStrategy.RETURNING;

@@ -53,7 +53,7 @@ spring:
           max-idle-time: 30m
           max-life-time: 30m
     
-    # 全局连接池配置（可被数据源单独配置覆盖）
+    # 全局连接池配置（数据源声明 pool 时整体替换，不逐字段合并）
     pool:
       enabled: true
       max-size: 20
@@ -69,7 +69,10 @@ wcdk:
     # 可选：WCDK 单库回退/Schema 初始化类型提示，空值自动检测；替代旧 database.type
     # database-type: dm
     enabled: true
-    # SQL日志
-    sql-log-enabled: true
+    # SQL日志默认关闭，排查时显式开启
+    sql-log-enabled: false
     # 雪花ID生成
     snowflake-id: true
+
+    # 生产多实例必须分配不同节点编号，范围 0 到 1023
+    snowflake-worker-id: ${WCDK_R2DBC_WORKER_ID:0}

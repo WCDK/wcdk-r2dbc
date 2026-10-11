@@ -34,14 +34,14 @@ import java.util.concurrent.atomic.LongAdder;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class R2dbcRowMapper {
 
     private final LongAdder mappingRequests = new LongAdder();
     private final LongAdder planMisses = new LongAdder();
     private final Map<Class<?>, Boolean> planOwners = java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
-    /** ClassValue keeps plans scoped to this mapper without pinning reloadable entity ClassLoaders. */
+    /** ClassValue 将映射计划限定在当前映射器内，避免阻止实体类加载器被回收。 */
     private final ClassValue<MappingPlan> mappingPlans = new ClassValue<>() {
         @Override
         protected MappingPlan computeValue(Class<?> type) {
@@ -84,7 +84,7 @@ public class R2dbcRowMapper {
         }
     }
 
-    /** Maps explicitly named resultMap values through the same cached constructor/field plan. */
+    /** 使用同一缓存中的构造器或字段映射计划，映射 resultMap 显式指定的属性值。 */
     public <T> T mapProperties(Map<String, Object> values, Class<T> type, String context) {
         try {
             mappingRequests.increment();
@@ -178,7 +178,7 @@ public class R2dbcRowMapper {
             String name = parameter.isNamePresent() ? parameter.getName() : column.value();
             Field field = findField(entityClass, name);
             String columnName = column != null ? column.value()
-                    : field == null ? camelToUnderline(name) : columnName(field);
+                    : field == null ? com.wcdk.r2dbc.mapping.NamingStrategy.toSnakeCase(name) : columnName(field);
             targets.add(new ValueTarget(name, columnName, parameter.getType()));
         }
         return new ConstructorMappingPlan(constructor, List.copyOf(targets), transientFields(entityClass));
@@ -437,23 +437,7 @@ public class R2dbcRowMapper {
     }
 
     private String columnName(Field field) {
-        Column column = field.getAnnotation(Column.class);
-        if (column != null && !column.value().isBlank()) {
-            return column.value();
-        }
-        return camelToUnderline(field.getName());
-    }
-
-    private String camelToUnderline(String value) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (Character.isUpperCase(ch) && i > 0) {
-                builder.append('_');
-            }
-            builder.append(Character.toLowerCase(ch));
-        }
-        return builder.toString();
+        return com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field);
     }
 
     private interface MappingPlan {

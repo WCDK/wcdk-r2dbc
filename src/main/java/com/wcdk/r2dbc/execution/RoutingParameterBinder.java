@@ -10,7 +10,10 @@ import reactor.util.context.ContextView;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/*** 为异构路由选择参数转换器及占位符，同时保留路由工厂的事务连接身份。 @author wcdk ***/
+/**
+ * 为异构路由选择参数转换器及占位符，同时保留路由工厂的事务连接身份。
+ * @author wcdk
+ */
 final class RoutingParameterBinder extends ParameterBinder {
     private final DynamicRoutingConnectionFactory routing;
     private final Map<ConnectionFactory, ParameterBinder> binders = new ConcurrentHashMap<>();
@@ -20,13 +23,19 @@ final class RoutingParameterBinder extends ParameterBinder {
         this.routing = routing;
     }
 
-    /*** 无执行上下文的旧接口沿用主数据源，保持默认路由语义。 @author wcdk ***/
+    /**
+     * 无执行上下文的旧接口沿用主数据源，保持默认路由语义。
+     * @author wcdk
+     */
     @Override
     public DatabaseClient.GenericExecuteSpec bind(DatabaseClient client, String sql, Map<?, ?> parameters) {
         return bind(client, sql, parameters, reactor.util.context.Context.empty());
     }
 
-    /*** 在订阅上下文中选择目标数据库的参数类型及绑定标记。 @author wcdk ***/
+    /**
+     * 在订阅上下文中选择目标数据库的参数类型及绑定标记。
+     * @author wcdk
+     */
     @Override
     public DatabaseClient.GenericExecuteSpec bind(DatabaseClient client, String sql, Map<?, ?> parameters,
                                                   ContextView context) {

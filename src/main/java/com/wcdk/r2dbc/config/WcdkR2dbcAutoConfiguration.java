@@ -4,6 +4,8 @@ import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.execution.RepositoryOperations;
 import com.wcdk.r2dbc.repository.RepositoryProxyFactory;
 import com.wcdk.r2dbc.id.SnowflakeIdGenerator;
+import com.wcdk.r2dbc.id.WorkerIdResolver;
+import com.wcdk.r2dbc.id.EnvironmentWorkerIdResolver;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;
 import com.wcdk.r2dbc.execution.ParameterValueConverter;
@@ -79,8 +81,7 @@ import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRA
  *
  * @author WCDK
  * @version 1.0
- *
- **/
+ */
 @AutoConfiguration
 @AutoConfigureAfter({
         R2dbcAutoConfiguration.class,
@@ -94,7 +95,7 @@ public class WcdkR2dbcAutoConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(WcdkR2dbcAutoConfiguration.class);
 
-    /** Resolves the deprecated alias once, even when Spring Boot provides the connection factory. */
+    /** 统一解析已弃用的属性别名，Spring Boot 提供连接工厂时也执行该解析。 */
     @Bean
     public DatabaseTypeHint databaseTypeHint(WcdkR2dbcProperties properties, Environment environment) {
         String legacy = environment.getProperty("database.type");
@@ -229,7 +230,7 @@ public class WcdkR2dbcAutoConfiguration {
 
     @Bean
     @ConditionalOnClass(name = "org.aspectj.lang.annotation.Aspect")
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = R2dbcDataSourceAspect.class)
     @Role(ROLE_INFRASTRUCTURE)
     public R2dbcDataSourceAspect r2dbcDataSourceAspect() {
         return new R2dbcDataSourceAspect();
@@ -255,39 +256,39 @@ public class WcdkR2dbcAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = ParameterBinder.class)
     public ParameterBinder parameterBinder(ConnectionFactory connectionFactory) {
         return ParameterBinder.forConnectionFactory(connectionFactory);
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = R2dbcRowMapper.class)
     public R2dbcRowMapper r2dbcRowMapper(ObjectProvider<R2dbcValueConverter> converters) {
         return new R2dbcRowMapper(converters.orderedStream().toList());
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = R2dbcSqlLogger.class)
     public R2dbcSqlLogger r2dbcSqlLogger(WcdkR2dbcProperties properties,
                                          WcdkSpringR2dbcProperties springProperties) {
         return new R2dbcSqlLogger(properties, springProperties);
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = R2dbcDataSourceRouter.class)
     public R2dbcDataSourceRouter r2dbcDataSourceRouter() {
         return new R2dbcDataSourceRouter();
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = SqlLifecycleExecutor.class)
     public SqlLifecycleExecutor sqlLifecycleExecutor(SqlLifecycleInterceptorChain chain,
                                                        SqlExecutionObserver observer) {
         return new SqlLifecycleExecutor(chain, observer);
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(value = SqlExecutionObserver.class)
     public SqlExecutionObserver sqlExecutionObserver(WcdkR2dbcProperties properties,
                                                        ObjectProvider<ObservationRegistry> registry) {
         ObservationRegistry available = registry.getIfAvailable();
@@ -340,8 +341,19 @@ public class WcdkR2dbcAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(SnowflakeIdGenerator.class)
-    public SnowflakeIdGenerator snowflakeIdGenerator() {
-        return new SnowflakeIdGenerator();
+    public SnowflakeIdGenerator snowflakeIdGenerator(WcdkR2dbcProperties properties, WorkerIdResolver resolver) {
+        Long configured = properties.getSnowflakeWorkerId();
+        return new SnowflakeIdGenerator(configured != null ? configured : resolver.resolveWorkerId());
+    }
+
+    /**
+     * 应用可提供注册中心节点解析器替换默认环境变量解析器。
+     * @author wcdk
+     */
+    @Bean
+    @ConditionalOnMissingBean(WorkerIdResolver.class)
+    public WorkerIdResolver workerIdResolver(org.springframework.core.env.Environment environment) {
+        return new EnvironmentWorkerIdResolver(environment::getProperty);
     }
 
     @Bean

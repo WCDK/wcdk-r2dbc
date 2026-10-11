@@ -5,7 +5,7 @@ import java.lang.reflect.ParameterizedType;
 import org.springframework.core.ResolvableType;
 import reactor.core.publisher.Mono;
 
-/** Validates XML write results before any SQL execution and identifies the entity argument. */
+/** 执行 SQL 前校验 XML 写操作的返回值，并确定实体入参位置。 */
 record XmlUpdateResultPlan(Class<?> valueType, int entityArgumentIndex) {
     static XmlUpdateResultPlan compile(Method method, Class<?> repositoryInterface) {
         if (method.getReturnType() != Mono.class || !(method.getGenericReturnType() instanceof ParameterizedType)) {

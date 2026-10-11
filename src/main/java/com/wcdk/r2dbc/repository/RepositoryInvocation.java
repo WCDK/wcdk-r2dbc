@@ -7,7 +7,7 @@ import java.lang.reflect.Method;
  * 单次订阅范围内的调用状态。
  *
  * @author WCDK
- **/
+ */
 public record RepositoryInvocation(RepositoryMethodPlan plan, Object proxy, Object[] arguments) {
     public RepositoryInvocation {
         java.util.Objects.requireNonNull(plan, "plan");

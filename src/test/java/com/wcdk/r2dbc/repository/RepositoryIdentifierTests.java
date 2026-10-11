@@ -10,7 +10,10 @@ import org.springframework.data.relational.core.mapping.Table;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/*** 数据库保留字、映射列及引用转义回归。 @author wcdk ***/
+/**
+ * 数据库保留字、映射列及引用转义回归。
+ * @author wcdk
+ */
 class RepositoryIdentifierTests {
     @Test
     void mysqlQuotesReservedTableAndMappedColumnWithBackticks() {

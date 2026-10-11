@@ -8,7 +8,7 @@ import io.r2dbc.spi.ConnectionFactory;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 final class DmR2dbcSupport {
 
     private DmR2dbcSupport() {

@@ -18,13 +18,13 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
-/***
+/**
  * 验证 TransactionalOperator 的响应式事务生命周期。
  * @author wcdk
- **/
+ */
 class TransactionalOperatorTests {
 
-    /***
+    /**
      * 验证成功事务按 begin、SQL、commit 顺序执行。
      * @author wcdk
      */
@@ -46,7 +46,7 @@ class TransactionalOperatorTests {
         assertThat(events).containsExactly("begin", "SQL", "commit");
     }
 
-    /***
+    /**
      * 验证 SQL 失败时按 begin、SQL、rollback 顺序执行。
      * @author wcdk
      */
@@ -69,7 +69,7 @@ class TransactionalOperatorTests {
         assertThat(events).containsExactly("begin", "SQL", "rollback");
     }
 
-    /***
+    /**
      * 创建记录事务生命周期的 Spring 响应式事务操作器。
      * @author wcdk
      */

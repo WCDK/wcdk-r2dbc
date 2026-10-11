@@ -3,8 +3,8 @@ package com.wcdk.r2dbc.annotation;
 import java.lang.annotation.*;
 
 /**
- * Explicit database column for a mapping constructor parameter.
- * Field annotations continue to use Spring Data's Column annotation.
+ * 显式指定映射构造器参数对应的数据库列。
+ * 字段上的列注解仍使用 Spring Data 的 Column 注解。
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.PARAMETER)

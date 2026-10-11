@@ -13,7 +13,7 @@ import java.util.Objects;
  * Micrometer 观测适配器，明确不会为原始 SQL 或参数添加标签。
  *
  * @author WCDK
- **/
+ */
 public final class MicrometerSqlExecutionObserver implements SqlExecutionObserver {
 
     private final ObservationRegistry registry;

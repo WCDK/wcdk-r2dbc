@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
-/***
+/**
  * 动态 SQL 源。
  * @author wcdk
  */
@@ -86,7 +86,7 @@ public final class DynamicSqlSource {
         return new MixedSqlNode(nodes);
     }
 
-    /***
+    /**
      * 解析  choose 分支节点。
      * @author wcdk
      */

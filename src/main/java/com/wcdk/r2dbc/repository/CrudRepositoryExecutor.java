@@ -44,7 +44,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/***
+/**
  * CRUD Repository 执行器。
  * @author wcdk
  */
@@ -86,13 +86,14 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     }
 
     Object executeQueryPlan(RepositoryMethodPlan plan, Object[] arguments, ContextView context) {
-        return switch (plan.method().getName()) {
-            case "findAll" -> selectList(new QueryWrapper<>(), context);
-            case "selectList" -> selectList(querySqlBuilder.queryWrapper(arguments), context);
-            case "selectPage" -> selectPage(querySqlBuilder.pageable(arguments), querySqlBuilder.queryWrapper(arguments, 1), context);
-            case "selectOne" -> selectOne(querySqlBuilder.queryWrapper(arguments), context);
-            case "selectCount" -> selectCount(querySqlBuilder.queryWrapper(arguments), context);
-            case "exists" -> exists(querySqlBuilder.queryWrapper(arguments), context);
+        Method method = plan.method();
+        return switch (method.getName()) {
+            case "findAll" -> selectList(new QueryWrapper<>(), context, method, arguments);
+            case "selectList" -> selectList(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
+            case "selectPage" -> selectPage(querySqlBuilder.pageable(arguments), querySqlBuilder.queryWrapper(arguments, 1), context, method, arguments);
+            case "selectOne" -> selectOne(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
+            case "selectCount" -> selectCount(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
+            case "exists" -> exists(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
             default -> throw new UnsupportedOperationException("不支持的查询方法: " + plan.method().getName());
         };
     }
@@ -105,23 +106,23 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     Object executeCrudPlan(RepositoryMethodPlan plan, Object[] arguments, ContextView context) {
         Method method = plan.method();
         String methodName = method.getName();
-        if (metadata == null && RepositoryMethodPlanCompiler.isCrudMethod(method)) {
+        if (metadata == null && RepositoryMethodPlanCompiler.isCrudMethod(method, repositoryInterface)) {
             throw new UnsupportedOperationException("Repository接口未继承 BaseRepository，不支持基础 CRUD 方法: " + methodName);
         }
         return switch (methodName) {
-            case "insert" -> insert(arguments[0]);
-            case "deleteById" -> deleteById(arguments[0]);
+            case "insert" -> insert(arguments[0], method, arguments);
+            case "deleteById" -> deleteById(arguments[0], method, arguments);
             case "updateById", "updateByIdIgnoringNulls" ->
                     Mono.defer(() -> updateById(arguments[0], method, false));
             case "updateByIdIncludingNulls" ->
                     Mono.defer(() -> updateById(arguments[0], method, true));
-            case "selectById" -> selectById(arguments[0]);
-            case "findAll" -> selectList(new QueryWrapper<>(), context);
-            case "selectList" -> selectList(querySqlBuilder.queryWrapper(arguments), context);
-            case "selectPage" ->  selectPage(querySqlBuilder.pageable(arguments), querySqlBuilder.queryWrapper(arguments, 1), context);
-            case "selectOne" -> selectOne(querySqlBuilder.queryWrapper(arguments), context);
-            case "selectCount" -> selectCount(querySqlBuilder.queryWrapper(arguments), context);
-            case "exists" -> exists(querySqlBuilder.queryWrapper(arguments), context);
+            case "selectById" -> selectById(arguments[0], method, arguments);
+            case "findAll" -> selectList(new QueryWrapper<>(), context, method, arguments);
+            case "selectList" -> selectList(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
+            case "selectPage" -> selectPage(querySqlBuilder.pageable(arguments), querySqlBuilder.queryWrapper(arguments, 1), context, method, arguments);
+            case "selectOne" -> selectOne(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
+            case "selectCount" -> selectCount(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
+            case "exists" -> exists(querySqlBuilder.queryWrapper(arguments), context, method, arguments);
             default -> throw new UnsupportedOperationException("不支持的 CRUD 方法: " + methodName);
         };
     }
@@ -132,17 +133,23 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         return number;
     }
 
-    /*** 插入实体，在返回前回填数据库生成的主键。 @author wcdk ***/
-    private Mono<?> insert(Object entity) {
+    /**
+     * 插入实体，在返回前回填数据库生成的主键。
+     * @author wcdk
+     */
+    private Mono<?> insert(Object entity, Method method, Object[] arguments) {
         // 每次订阅独立保存有效实体，record 的替换实例不会在订阅间共享。
-        return Mono.defer(() -> insertEntity(entity));
+        return Mono.defer(() -> insertEntity(entity, method, arguments));
     }
 
-    /*** 编译并插入当前实体，支持不可变 record 的主键赋值。 @author wcdk ***/
-    private Mono<?> insertEntity(Object entity) {
+    /**
+     * 编译并插入当前实体，支持不可变 record 的主键赋值。
+     * @author wcdk
+     */
+    private Mono<?> insertEntity(Object entity, Method method, Object[] arguments) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("insert"), repositoryInterface, new Object[]{entity});
+                method, repositoryInterface, arguments.clone());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
@@ -196,7 +203,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                 });
     }
 
-    /*** 普通实体原地设置主键，record 通过规范构造器复制所有组件并替换主键。 @author wcdk ***/
+    /**
+     * 普通实体原地设置主键，record 通过规范构造器复制所有组件并替换主键。
+     * @author wcdk
+     */
     private Object assignId(Object entity, Object id) {
         Field idField = metadata.idColumn().field();
         Object convertedId = sqlExecutionEngine.convertValue(id, idField.getType());
@@ -224,7 +234,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         }
     }
 
-    /*** 空主键及基本数值类型的默认零值由数据库生成，已有主键予以保留。 @author wcdk ***/
+    /**
+     * 空主键及基本数值类型的默认零值由数据库生成，已有主键予以保留。
+     * @author wcdk
+     */
     private boolean needsGeneratedId(Object entity) {
         if (!metadata.hasIdColumn()) {
             return false;
@@ -235,12 +248,12 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                 && value instanceof Number number && number.longValue() == 0);
     }
 
-    private Mono<Long> deleteById(Object id) {
+    private Mono<Long> deleteById(Object id, Method method, Object[] arguments) {
         FieldColumn idColumn = metadata.requireIdColumn();
         Object deleteId = normalizeDeleteId(id, idColumn);
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("deleteById"), repositoryInterface, new Object[]{deleteId});
+                method, repositoryInterface, arguments.clone());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
@@ -326,11 +339,11 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                 () -> sqlExecutionEngine.updateWithoutLifecycle(context.getSql(), context.getParameters()));
     }
 
-    private Mono<?> selectById(Object id) {
+    private Mono<?> selectById(Object id, Method method, Object[] arguments) {
         FieldColumn idColumn = metadata.requireIdColumn();
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("selectById"), repositoryInterface, new Object[]{id});
+                method, repositoryInterface, arguments.clone());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
@@ -352,10 +365,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                         (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())));
     }
 
-    private Flux<?> selectList(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
+    private Flux<?> selectList(QueryWrapper<?> queryWrapper, ContextView dialectContext, Method method, Object[] arguments) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("selectList"), repositoryInterface, new Object[]{queryWrapper});
+                method, repositoryInterface, arguments.clone());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
@@ -372,15 +385,15 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                         (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())));
     }
 
-    private Mono<?> selectOne(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
+    private Mono<?> selectOne(QueryWrapper<?> queryWrapper, ContextView dialectContext, Method method, Object[] arguments) {
         QueryWrapper<?> wrapper = queryWrapper == null ? new QueryWrapper<>() : queryWrapper.copy();
         if (wrapper.limit() == null) {
             wrapper.limit(1);
         }
-        return selectList(wrapper, dialectContext).next();
+        return selectList(wrapper, dialectContext, method, arguments).next();
     }
 
-    private Mono<?> selectPage(Pageable pageable, QueryWrapper<?> queryWrapper, ContextView dialectContext) {
+    private Mono<?> selectPage(Pageable pageable, QueryWrapper<?> queryWrapper, ContextView dialectContext, Method method, Object[] arguments) {
         if (pageable == null) {
             throw new IllegalArgumentException("分页参数不能为空");
         }
@@ -392,15 +405,15 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                 .cast(Object.class)
                 .collectList();
         // 先完成 count，再订阅 records，避免事务内同一连接并发执行 statement。
-        return selectCount(queryWrapper, dialectContext)
+        return selectCount(queryWrapper, dialectContext, method, arguments)
                 .flatMap(total -> records
                         .map(items -> new PageImpl<>(items, pageable, total)));
     }
 
-    private Mono<Long> selectCount(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
+    private Mono<Long> selectCount(QueryWrapper<?> queryWrapper, ContextView dialectContext, Method method, Object[] arguments) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("selectCount"), repositoryInterface, new Object[]{queryWrapper});
+                method, repositoryInterface, arguments.clone());
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
@@ -416,10 +429,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                         .defaultIfEmpty(0L));
     }
 
-    private Mono<Boolean> exists(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
+    private Mono<Boolean> exists(QueryWrapper<?> queryWrapper, ContextView dialectContext, Method method, Object[] arguments) {
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
-                findMethod("exists"), repositoryInterface, new Object[]{queryWrapper});
+                method, repositoryInterface, arguments.clone());
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
                     RepositoryQuerySqlBuilder.SqlWhere where = querySqlBuilder.buildWhere(queryWrapper);
@@ -436,20 +449,6 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
 
     private SqlLifecycleExecutor lifecycleExecutor() {
         return sqlExecutionEngine.lifecycleExecutor();
-    }
-
-    private Method findMethod(String methodName) {
-        try {
-            for (Method method : repositoryInterface.getMethods()) {
-                if (method.getName().equals(methodName)) {
-                    return method;
-                }
-            }
-            // fallback to Object methods
-            return Object.class.getMethod(methodName);
-        } catch (NoSuchMethodException e) {
-            throw new IllegalStateException("方法未找到: " + methodName, e);
-        }
     }
 
     private Object fieldValue(FieldColumn column, Object entity) {

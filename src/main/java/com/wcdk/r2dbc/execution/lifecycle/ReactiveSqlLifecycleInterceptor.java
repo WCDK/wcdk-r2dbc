@@ -7,17 +7,17 @@ import reactor.core.publisher.Mono;
  * <p>
  * 提供四个生命周期钩子，支持异步操作：
  * <ul>
- *     <li>beforeCompile - SQL编译前</li>
- *     <li>afterCompile - SQL编译后</li>
- *     <li>beforeExecute - SQL执行前</li>
- *     <li>afterExecute - SQL执行后</li>
+ * <li>beforeCompile - SQL编译前</li>
+ * <li>afterCompile - SQL编译后</li>
+ * <li>beforeExecute - SQL执行前</li>
+ * <li>afterExecute - SQL执行后</li>
  * </ul>
  * <p>
  * 与 {@link SqlLifecycleInterceptor} 的区别：
  * <ul>
- *     <li>所有方法返回 {@link Mono}，支持异步操作</li>
- *     <li>适用于需要执行远程调用、数据库查询等异步操作的场景</li>
- *     <li>不会阻塞响应式流</li>
+ * <li>所有方法返回 {@link Mono}，支持异步操作</li>
+ * <li>适用于需要执行远程调用、数据库查询等异步操作的场景</li>
+ * <li>不会阻塞响应式流</li>
  * </ul>
  * <p>
  * 实现此接口并注册为Spring Bean即可自动生效。
@@ -26,7 +26,7 @@ import reactor.core.publisher.Mono;
  *
  * @version 1.0
  * @see SqlLifecycleInterceptor 同步版本
- **/
+ */
 public interface ReactiveSqlLifecycleInterceptor {
 
     /**

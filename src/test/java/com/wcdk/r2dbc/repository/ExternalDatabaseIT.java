@@ -4,7 +4,10 @@ import io.r2dbc.spi.ConnectionFactoryOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
-/*** Optional external environments are visible as skipped tests when not configured. @author wcdk ***/
+/**
+ * 未配置可选的外部数据库环境时，明确将对应测试标记为跳过。
+ * @author wcdk
+ */
 class ExternalDatabaseIT {
     @Test
     @EnabledIfEnvironmentVariable(named = "WCDK_R2DBC_DM_URL", matches = ".+")

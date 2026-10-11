@@ -8,7 +8,7 @@ import reactor.core.publisher.Flux;
  * 用于结构化 SQL 执行观测的可选低开销钩子。
  *
  * @author WCDK
- **/
+ */
 public interface SqlExecutionObserver {
 
     SqlExecutionObserver NOOP = new SqlExecutionObserver() { };

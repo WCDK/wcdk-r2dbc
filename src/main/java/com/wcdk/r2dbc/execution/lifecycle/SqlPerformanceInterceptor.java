@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 @Component
 public class SqlPerformanceInterceptor implements SqlLifecycleInterceptor {
 

@@ -8,10 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * @auther WCDK
+ * @author WCDK
  *
  * @version 1.0
- **/
+ */
 @Data
 @ConfigurationProperties(prefix = "spring.r2dbc")
 public class WcdkSpringR2dbcProperties {
@@ -90,8 +90,8 @@ public class WcdkSpringR2dbcProperties {
         private Map<String, String> properties = new LinkedHashMap<>();
 
         /**
-         * Complete pool override for this data source. When non-null it replaces the global
-         * spring.r2dbc.pool object; fields are not merged.
+         * 此数据源的完整连接池配置。非空时替换全局 spring.r2dbc.pool 配置，
+         * 不逐字段合并。
          */
         private Pool pool;
 

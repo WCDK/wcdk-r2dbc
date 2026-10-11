@@ -5,10 +5,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
-/***
+/**
  * 基础查询条件构造器。
  * @author wcdk
- **/
+ */
 public class QueryWrapper<T> {
 
     private final List<OrderBy> orderByList = new ArrayList<>();
@@ -16,10 +16,10 @@ public class QueryWrapper<T> {
     private Long limit;
     private Long offset;
 
-    /***
+    /**
      * 创建空查询条件构造器。
      * @author wcdk
-     **/
+     */
     public QueryWrapper() {
     }
 
@@ -30,130 +30,178 @@ public class QueryWrapper<T> {
         offset = source.offset;
     }
 
-    /***
+    /**
      * 复制当前查询条件构造器。
      * @author wcdk
      * @return 查询条件副本
-     **/
+     */
     public QueryWrapper<T> copy() {
         return new QueryWrapper<>(this);
     }
 
-    /*** 添加等于条件。 @author wcdk **/
+    /**
+     * 添加等于条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> eq(String column, Object value) {
         return condition(column, "=", value);
     }
 
-    /*** 添加不等于条件。 @author wcdk **/
+    /**
+     * 添加不等于条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> ne(String column, Object value) {
         return condition(column, "<>", value);
     }
 
-    /*** 添加大于条件。 @author wcdk **/
+    /**
+     * 添加大于条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> gt(String column, Object value) {
         return condition(column, ">", value);
     }
 
-    /*** 添加大于等于条件。 @author wcdk **/
+    /**
+     * 添加大于等于条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> ge(String column, Object value) {
         return condition(column, ">=", value);
     }
 
-    /*** 添加小于条件。 @author wcdk **/
+    /**
+     * 添加小于条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> lt(String column, Object value) {
         return condition(column, "<", value);
     }
 
-    /*** 添加小于等于条件。 @author wcdk **/
+    /**
+     * 添加小于等于条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> le(String column, Object value) {
         return condition(column, "<=", value);
     }
 
-    /*** 添加模糊匹配条件。 @author wcdk **/
+    /**
+     * 添加模糊匹配条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> like(String column, Object value) {
         return condition(column, "LIKE", value);
     }
 
-    /*** 添加集合包含条件。 @author wcdk **/
+    /**
+     * 添加集合包含条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> in(String column, Iterable<?> values) {
         return condition(column, "IN", values);
     }
 
-    /*** 添加数组包含条件。 @author wcdk **/
+    /**
+     * 添加数组包含条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> inArray(String column, Object values) {
         return condition(column, "IN", values);
     }
 
-    /*** 添加集合不包含条件。 @author wcdk **/
+    /**
+     * 添加集合不包含条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> notIn(String column, Iterable<?> values) {
         return condition(column, "NOT IN", values);
     }
 
-    /*** 添加数组不包含条件。 @author wcdk **/
+    /**
+     * 添加数组不包含条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> notInArray(String column, Object values) {
         return condition(column, "NOT IN", values);
     }
 
-    /*** 添加为空条件。 @author wcdk **/
+    /**
+     * 添加为空条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> isNull(String column) {
         return condition(column, "IS NULL", null);
     }
 
-    /*** 添加不为空条件。 @author wcdk **/
+    /**
+     * 添加不为空条件。
+     * @author wcdk
+     */
     public QueryWrapper<T> isNotNull(String column) {
         return condition(column, "IS NOT NULL", null);
     }
 
-    /***
+    /**
      * 添加嵌套 AND 条件。
      * @author wcdk
      * @param nested 嵌套条件构造逻辑
      * @return 当前查询条件构造器
-     **/
+     */
     public QueryWrapper<T> and(Consumer<QueryWrapper<T>> nested) {
         return logical(SqlExpression.Operator.AND, nested);
     }
 
-    /***
+    /**
      * 添加嵌套 OR 条件。
      * @author wcdk
      * @param nested 嵌套条件构造逻辑
      * @return 当前查询条件构造器
-     **/
+     */
     public QueryWrapper<T> or(Consumer<QueryWrapper<T>> nested) {
         return logical(SqlExpression.Operator.OR, nested);
     }
 
-    /***
+    /**
      * 获取当前条件表达式 AST。
      * @author wcdk
      * @return SQL 条件表达式
-     **/
+     */
     public SqlExpression expression() {
         return expression;
     }
 
-    /*** 按字段升序排序。 @author wcdk **/
+    /**
+     * 按字段升序排序。
+     * @author wcdk
+     */
     public QueryWrapper<T> orderByAsc(String column) {
         return orderBy(column, true);
     }
 
-    /*** 按字段降序排序。 @author wcdk **/
+    /**
+     * 按字段降序排序。
+     * @author wcdk
+     */
     public QueryWrapper<T> orderByDesc(String column) {
         return orderBy(column, false);
     }
 
-    /*** 设置查询条数。 @author wcdk **/
+    /**
+     * 设置查询条数。
+     * @author wcdk
+     */
     public QueryWrapper<T> limit(int value) {
         return limit((long) value);
     }
 
-    /***
+    /**
      * 设置查询条数。
      * @author wcdk
      * @param value 查询条数，必须大于 0
      * @return 当前查询条件构造器
-     **/
+     */
     public QueryWrapper<T> limit(long value) {
         if (value <= 0 || value > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("查询条数必须在 1 到 Integer.MAX_VALUE 之间");
@@ -162,7 +210,10 @@ public class QueryWrapper<T> {
         return this;
     }
 
-    /*** 设置查询偏移量。 @author wcdk **/
+    /**
+     * 设置查询偏移量。
+     * @author wcdk
+     */
     public QueryWrapper<T> offset(Integer value) {
         if (value == null) {
             throw new IllegalArgumentException("查询偏移量不能为空");
@@ -170,12 +221,12 @@ public class QueryWrapper<T> {
         return offset(value.longValue());
     }
 
-    /***
+    /**
      * 设置查询偏移量。
      * @author wcdk
      * @param value 查询偏移量，不能小于 0
      * @return 当前查询条件构造器
-     **/
+     */
     public QueryWrapper<T> offset(long value) {
         if (value < 0) {
             throw new IllegalArgumentException("查询偏移量不能小于0");
@@ -184,18 +235,21 @@ public class QueryWrapper<T> {
         return this;
     }
 
-    /*** 使用从 1 开始的页码设置分页参数。 @author wcdk **/
+    /**
+     * 使用从 1 开始的页码设置分页参数。
+     * @author wcdk
+     */
     public QueryWrapper<T> page(int pageNo, int pageSize) {
         return page((long) pageNo, (long) pageSize);
     }
 
-    /***
+    /**
      * 使用从 1 开始的页码设置分页参数。
      * @author wcdk
      * @param pageNo 页码，必须大于 0
      * @param pageSize 页面大小，必须大于 0
      * @return 当前查询条件构造器
-     **/
+     */
     public QueryWrapper<T> page(long pageNo, long pageSize) {
         if (pageNo <= 0) {
             throw new IllegalArgumentException("页码必须大于0");
@@ -208,17 +262,26 @@ public class QueryWrapper<T> {
         }
     }
 
-/*** 获取只读排序条件列表。 @author wcdk **/
+/**
+ * 获取只读排序条件列表。
+ * @author wcdk
+ */
     public List<OrderBy> orderByList() {
         return Collections.unmodifiableList(orderByList);
     }
 
-    /*** 获取查询条数。 @author wcdk **/
+    /**
+     * 获取查询条数。
+     * @author wcdk
+     */
     public Long limit() {
         return limit;
     }
 
-    /*** 获取查询偏移量。 @author wcdk **/
+    /**
+     * 获取查询偏移量。
+     * @author wcdk
+     */
     public Long offset() {
         return offset;
     }
@@ -292,11 +355,17 @@ public class QueryWrapper<T> {
         return Collections.unmodifiableList(snapshot);
     }
 
-    /*** 查询条件记录。 @author wcdk **/
+    /**
+     * 查询条件记录。
+     * @author wcdk
+     */
     public record Condition(String column, String operator, Object value) {
     }
 
-    /*** 排序条件记录。 @author wcdk **/
+    /**
+     * 排序条件记录。
+     * @author wcdk
+     */
     public record OrderBy(String column, boolean asc) {
     }
 }

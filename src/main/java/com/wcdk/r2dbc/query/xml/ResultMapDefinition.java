@@ -9,7 +9,7 @@ import java.util.Map;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public record ResultMapDefinition(String id, String type, Map<String, String> idMappings,
                                   String discriminatorColumn, Map<String, String> discriminatorMappings, Map<String, String> associationMappings) {
     public ResultMapDefinition(String id, String type, Map<String, String> idMappings, String column, Map<String, String> cases) {

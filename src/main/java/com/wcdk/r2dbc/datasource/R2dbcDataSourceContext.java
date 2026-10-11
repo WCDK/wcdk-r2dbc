@@ -10,7 +10,7 @@ import org.springframework.transaction.reactive.TransactionSynchronizationManage
  * R2DBC 数据源上下文工具。
  *
  * @author WCDK
- **/
+ */
 public final class R2dbcDataSourceContext {
 
     static final Class<R2dbcDataSourceContext> CONTEXT_KEY = R2dbcDataSourceContext.class;
@@ -60,7 +60,7 @@ public final class R2dbcDataSourceContext {
         return contextView.getOrDefault(CONTEXT_KEY, null);
     }
 
-    /***
+    /**
      * 返回 Spring 响应式事务中用于锁定数据源的资源键。
      * @author wcdk
      */
@@ -68,7 +68,7 @@ public final class R2dbcDataSourceContext {
         return TRANSACTION_RESOURCE_KEY;
     }
 
-    /***
+    /**
      * 返回当前上下文的数据源；未指定时使用主数据源占位键。
      * @author wcdk
      */
@@ -126,7 +126,7 @@ public final class R2dbcDataSourceContext {
             throw transactionDataSourceSwitchException(pinned, requested);
         }
     }
-    /***
+    /**
      * 校验标准 Spring 响应式事务登记的数据源，防止事务中跨数据源执行 SQL。
      * @author wcdk
      */
@@ -142,7 +142,7 @@ public final class R2dbcDataSourceContext {
                 .onErrorResume(NoTransactionException.class, ignored -> publisher);
     }
 
-    /***
+    /**
      * 校验 Flux 类型响应式事务的数据源。
      * @author wcdk
      */
@@ -157,7 +157,7 @@ public final class R2dbcDataSourceContext {
                 })
                 .onErrorResume(NoTransactionException.class, ignored -> publisher);
     }
-    /***
+    /**
      * 创建统一的数据源切换异常。
      * @author wcdk
      */

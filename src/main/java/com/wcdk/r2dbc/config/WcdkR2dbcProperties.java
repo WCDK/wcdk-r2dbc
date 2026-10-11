@@ -6,22 +6,22 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * WCDK R2DBC 配置属性
  *
- * @auther WCDK
+ * @author WCDK
  *
  * @version 1.0
- **/
+ */
 @Data
 @ConfigurationProperties(prefix = "wcdk.r2dbc")
 public class WcdkR2dbcProperties {
 
     private boolean enabled;
 
-    /** Optional driver hint for the WCDK single-source fallback and schema initializer. */
+    /** 可选的数据库驱动类型提示，供单数据源回退和数据库结构初始化使用。 */
     private String databaseType;
 
     private boolean sqlLogEnabled = false;
 
-    /** Enables optional Micrometer observations when an ObservationRegistry bean is available. */
+    /** 存在 ObservationRegistry Bean 时，启用可选的 Micrometer 观测。 */
     private boolean observabilityEnabled;
 
     /**
@@ -30,6 +30,9 @@ public class WcdkR2dbcProperties {
     private Transaction transaction = new Transaction();
 
     private boolean snowflakeId;
+
+    /** 雪花节点编号，范围 0 到 1023；多进程部署必须分配不同编号。 */
+    private Long snowflakeWorkerId;
 
     private boolean quoteIdentifier = true;
 
@@ -63,7 +66,7 @@ public class WcdkR2dbcProperties {
     /**
      * 数据库初始化配置类
      *
-     * @auther WCDK
+     * @author WCDK
      * @version 1.0
      */
     @Data

@@ -28,7 +28,7 @@ import java.util.function.Supplier;
  * @author WCDK
  *
  * @version 1.0
- **/
+ */
 public class SqlLifecycleExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(SqlLifecycleExecutor.class);
@@ -108,7 +108,7 @@ public class SqlLifecycleExecutor {
         return chain.afterExecuteReactive(context);
     }
 
-    /** Runs all pre-execution phases, stopping as soon as an interceptor terminates execution. */
+    /** 执行所有执行前阶段，任一拦截器终止执行后立即停止后续阶段。 */
     public Mono<Boolean> prepare(SqlLifecycleInterceptorChain chain,
                                  SqlExecutionContext context,
                                  Supplier<? extends Mono<?>> compileAction) {
@@ -124,7 +124,7 @@ public class SqlLifecycleExecutor {
                         : observe(SqlExecutionPhase.VALIDATE, context, chain.beforeExecuteReactive(context)));
     }
 
-    /** Executes a single-result statement and awaits afterExecute in the same chain. */
+    /** 执行单结果语句，并在同一响应式链中等待执行后回调完成。 */
     public <T> Mono<T> executeMono(SqlLifecycleInterceptorChain chain,
                                    SqlExecutionContext context,
                                    Mono<Boolean> preparation,
@@ -134,7 +134,7 @@ public class SqlLifecycleExecutor {
                 : executeAndFinalizeMono(chain, context, statement)));
     }
 
-    /** Executes a multi-result statement and awaits afterExecute in the same chain. */
+    /** 执行多结果语句，并在同一响应式链中等待执行后回调完成。 */
     public <T> Flux<T> executeFlux(SqlLifecycleInterceptorChain chain,
                                    SqlExecutionContext context,
                                    Mono<Boolean> preparation,
