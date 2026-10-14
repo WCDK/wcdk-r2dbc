@@ -24,10 +24,10 @@ public class WcdkR2dbcProperties {
 
     private boolean sqlLogEnabled = false;
 
-    /** 完整 SQL 日志独立开关；同时开启 sql-log-enabled 才输出。 */
+    /** 兼容旧配置；开启 sql-log-enabled 后始终输出完整 SQL，此项不再控制输出。 */
     private boolean sqlLogCompleteEnabled;
 
-    /** 日志敏感参数/列名，关键词脱敏与值模式始终生效。 */
+    /** 兼容旧配置；日志不再脱敏，此项不再参与日志处理。 */
     private java.util.Set<String> sensitiveColumns = new java.util.LinkedHashSet<>(java.util.List.of(
             "phone", "mobile", "tel", "cardNo", "idCard", "password", "token", "secret", "credential"));
 

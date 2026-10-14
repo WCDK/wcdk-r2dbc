@@ -156,7 +156,7 @@ public class WcdkR2dbcAutoConfiguration {
             properties.getPool().validate("primary");
         }
 
-        log.info("创建单数据源连接工厂，URL: {}, 数据库类型: {}", r2dbcUrl, databaseType);
+        log.info("创建单数据源连接工厂，数据库类型: {}", databaseType);
         
         ConnectionFactoryOptions options = ConnectionFactoryOptions.parse(r2dbcUrl);
         ConnectionFactoryOptions.Builder builder = ConnectionFactoryOptions.builder().from(options);

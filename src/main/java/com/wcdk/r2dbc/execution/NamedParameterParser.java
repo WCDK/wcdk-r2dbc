@@ -194,7 +194,7 @@ public final class NamedParameterParser {
     }
 
     /** ?| / ?& 总是运算符；裸 ? 仅在左右均为 SQL 操作数时视为 JSONB 运算符。 */
-    private static boolean isJsonOperator(String sql, int index) {
+    public static boolean isJsonOperator(String sql, int index) {
         if (index + 1 < sql.length() && (sql.charAt(index + 1) == '|' || sql.charAt(index + 1) == '&')) return true;
         int left = index - 1;
         while (left >= 0 && Character.isWhitespace(sql.charAt(left))) left--;

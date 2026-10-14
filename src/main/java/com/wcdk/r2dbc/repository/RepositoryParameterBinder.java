@@ -1,6 +1,7 @@
 package com.wcdk.r2dbc.repository;
 
 import com.wcdk.r2dbc.execution.SqlParameter;
+import com.wcdk.r2dbc.execution.SqlLexicalScanner;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.core.DefaultParameterNameDiscoverer;
@@ -49,25 +50,61 @@ final class RepositoryParameterBinder {
     private static final Pattern PARAMETER_PATTERN = Pattern.compile("#\\{\\s*([a-zA-Z0-9_.$]+)\\s*}");
     private static final ParameterNameDiscoverer PARAMETER_NAME_DISCOVERER = new DefaultParameterNameDiscoverer();
 
+    /**
+     * 仅绑定 SQL 代码中的占位符，为属性路径分配不冲突的别名。
+     * @author wcdk
+     */
     RepositoryParameterBinder.BoundSql bindSql(String sql, Method method, Object[] arguments, Map<String, Object> sourceParameters) {
         Map<String, Object> boundParameters = new LinkedHashMap<>();
         List<String> parameterNames = new ArrayList<>();
+        Map<String, String> bindingNames = new LinkedHashMap<>();
+        Map<String, String> bindingOwners = new LinkedHashMap<>();
         Matcher matcher = PARAMETER_PATTERN.matcher(sql);
-        StringBuilder builder = new StringBuilder();
-        while (matcher.find()) {
-            String name = matcher.group(1);
-            parameterNames.add(name);
-            matcher.appendReplacement(builder, Matcher.quoteReplacement(":" + bindName(name)));
+        // 先收集代码中的占位符，避免字符串与注释参与绑定。
+        for (int i = 0; i < sql.length();) {
+            int end = SqlLexicalScanner.protectedEnd(sql, i);
+            if (end > i) { i = end; continue; }
+            matcher.region(i, sql.length());
+            if (matcher.lookingAt()) {
+                parameterNames.add(matcher.group(1));
+                i = matcher.end();
+            } else i++;
         }
-        matcher.appendTail(builder);
+        // 保留普通参数名；嵌套路径发生碰撞时使用独立别名。
+        for (String name : parameterNames) {
+            if (!name.contains(".")) {
+                bindingNames.put(name, name);
+                bindingOwners.put(name, name);
+            }
+        }
+        for (String name : parameterNames) {
+            if (bindingNames.containsKey(name)) continue;
+            String candidate = bindName(name);
+            String base = candidate;
+            int suffix = 0;
+            while (bindingOwners.containsKey(candidate)) candidate = base + "_" + ++suffix;
+            bindingNames.put(name, candidate);
+            bindingOwners.put(candidate, name);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < sql.length();) {
+            int end = SqlLexicalScanner.protectedEnd(sql, i);
+            if (end > i) { builder.append(sql, i, end); i = end; continue; }
+            matcher.region(i, sql.length());
+            if (matcher.lookingAt()) {
+                builder.append(':').append(bindingNames.get(matcher.group(1)));
+                i = matcher.end();
+            } else builder.append(sql.charAt(i++));
+        }
         if ((arguments == null ? 0 : arguments.length) == 1 && parameterNames.size() == 1
+                && !parameterNames.get(0).contains(".")
                 && !sourceParameters.containsKey(parameterNames.get(0)) && isSimpleValue(arguments[0])) {
-            boundParameters.put(bindName(parameterNames.get(0)), typedNull(arguments[0], method.getParameterTypes()[0]));
+            boundParameters.put(bindingNames.get(parameterNames.get(0)), typedNull(arguments[0], method.getParameterTypes()[0]));
             return new BoundSql(builder.toString(), boundParameters);
         }
         for (String name : parameterNames) {
             Object value = parameterValue(sourceParameters, name);
-            boundParameters.put(bindName(name), typedNull(value, parameterJavaType(method, name)));
+            boundParameters.put(bindingNames.get(name), typedNull(value, parameterJavaType(method, name)));
         }
         return new BoundSql(builder.toString(), boundParameters);
     }
@@ -108,12 +145,12 @@ final class RepositoryParameterBinder {
             }
             Class<?> type = method.getParameterTypes()[i];
             if (name.contains(".")) {
-                return field(type, name.substring(name.indexOf('.') + 1)).getType();
+                return propertyType(type, name.substring(name.indexOf('.') + 1));
             }
             return type;
         }
         if (method.getParameterCount() == 1 && name.contains(".")) {
-            return field(method.getParameterTypes()[0], name.substring(name.indexOf('.') + 1)).getType();
+            return propertyType(method.getParameterTypes()[0], name);
         }
         if (method.getParameterCount() == 1) {
             Field beanField = findField(method.getParameterTypes()[0], name);
@@ -156,7 +193,7 @@ final class RepositoryParameterBinder {
         int dotIndex = name.indexOf('.');
         if (dotIndex > 0) {
             Object root = parameters.get(name.substring(0, dotIndex));
-            if (root != null) {
+            if (parameters.containsKey(name.substring(0, dotIndex))) {
                 return propertyValue(root, name.substring(dotIndex + 1));
             }
         }
@@ -165,6 +202,12 @@ final class RepositoryParameterBinder {
 
     private String bindName(String name) {
         return name.replace('.', '_');
+    }
+
+    /** 沿声明类型逐层解析属性，包括中间对象为 null 的路径。 */
+    private Class<?> propertyType(Class<?> type, String path) {
+        for (String property : path.split("\\.")) type = field(type, property).getType();
+        return type;
     }
 
     private void putBeanProperties(Map<String, Object> parameters, Object argument) {

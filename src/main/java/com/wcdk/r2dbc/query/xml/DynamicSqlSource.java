@@ -309,45 +309,15 @@ public final class DynamicSqlSource {
 
         String renderText(String text) {
             StringBuilder rendered = new StringBuilder();
-            SqlLexicalState state = SqlLexicalState.NORMAL;
             for (int i = 0; i < text.length(); i++) {
+                int protectedEnd = com.wcdk.r2dbc.execution.SqlLexicalScanner.protectedEnd(text, i);
+                if (protectedEnd > i) {
+                    rendered.append(text, i, protectedEnd);
+                    i = protectedEnd - 1;
+                    continue;
+                }
                 char ch = text.charAt(i);
                 char next = i + 1 < text.length() ? text.charAt(i + 1) : 0;
-                if (state != SqlLexicalState.NORMAL) {
-                    rendered.append(ch);
-                    if (state == SqlLexicalState.LINE_COMMENT && (ch == '\n' || ch == '\r')) {
-                        state = SqlLexicalState.NORMAL;
-                    } else if (state == SqlLexicalState.BLOCK_COMMENT && ch == '*' && next == '/') {
-                        rendered.append(next);
-                        i++;
-                        state = SqlLexicalState.NORMAL;
-                    } else if ((state == SqlLexicalState.SINGLE_QUOTE && ch == '\'')
-                            || (state == SqlLexicalState.DOUBLE_QUOTE && ch == '"')
-                            || (state == SqlLexicalState.BACKTICK && ch == '`')) {
-                        if (next == ch) {
-                            rendered.append(next);
-                            i++;
-                        } else {
-                            state = SqlLexicalState.NORMAL;
-                        }
-                    }
-                    continue;
-                }
-                if (ch == '\'') { state = SqlLexicalState.SINGLE_QUOTE; rendered.append(ch); continue; }
-                if (ch == '"') { state = SqlLexicalState.DOUBLE_QUOTE; rendered.append(ch); continue; }
-                if (ch == '`') { state = SqlLexicalState.BACKTICK; rendered.append(ch); continue; }
-                if (ch == '-' && next == '-') {
-                    state = SqlLexicalState.LINE_COMMENT;
-                    rendered.append(ch).append(next);
-                    i++;
-                    continue;
-                }
-                if (ch == '/' && next == '*') {
-                    state = SqlLexicalState.BLOCK_COMMENT;
-                    rendered.append(ch).append(next);
-                    i++;
-                    continue;
-                }
                 if (ch == '#' && next == '{') {
                     int end = placeholderEnd(text, i + 2);
                     if (end < 0) {
@@ -462,5 +432,4 @@ public final class DynamicSqlSource {
         }
     }
 
-    private enum SqlLexicalState { NORMAL, SINGLE_QUOTE, DOUBLE_QUOTE, BACKTICK, LINE_COMMENT, BLOCK_COMMENT }
 }

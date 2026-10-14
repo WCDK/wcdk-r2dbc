@@ -206,9 +206,9 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 | `wcdk.r2dbc.base-packages` | 未指定 | 显式仓储扫描包；设置后不追加默认包 |
 | `wcdk.r2dbc.transaction.aspect-enabled` | `false` | 是否启用 WCDK 自定义响应式事务切面 |
 | `wcdk.r2dbc.database-type` | 空 | 单数据源 WCDK 回退工厂的驱动提示及 Schema 初始化的类型提示；通常从 URL/连接元数据检测 |
-| `wcdk.r2dbc.sql-log-enabled` | `false` | 是否输出参数化 SQL、脱敏参数及审计终态 |
-| `wcdk.r2dbc.sql-log-complete-enabled` | `false` | 完整 SQL 独立开关，须同时开启普通日志 |
-| `wcdk.r2dbc.sensitive-columns` | phone/mobile/tel/cardNo/idCard/password/token/secret/credential | 敏感参数/列名；忽略大小写、下划线和短横线 |
+| `wcdk.r2dbc.sql-log-enabled` | `false` | 是否输出原始参数、可执行完整 SQL 及审计终态 |
+| `wcdk.r2dbc.sql-log-complete-enabled` | `false` | 兼容旧配置；开启 SQL 日志后始终打印完整 SQL，此项不再控制输出 |
+| `wcdk.r2dbc.sensitive-columns` | 保留旧默认值 | 兼容旧配置；不再对日志参数脱敏，此项不再生效 |
 | `wcdk.r2dbc.observability-enabled` | `false` | 是否启用 Micrometer 观测 |
 | `wcdk.r2dbc.snowflake-id` | `false` | 是否启用雪花 ID 生成 |
 | `wcdk.r2dbc.snowflake-worker-id` | 未指定；须提供节点来源 | 节点编号，0–1023；跨进程必须唯一 |
@@ -808,11 +808,11 @@ SqlExecutionObserver sqlExecutionObserver(ObservationRegistry registry) {
 
 自动观测需要同时配置 `wcdk.r2dbc.observability-enabled=true` 和 `ObservationRegistry` Bean；上面的自定义 `SqlExecutionObserver` Bean 会替换默认实现。可观测信息包括 SQL 执行阶段、终止状态、结果数量、耗时和异常。
 
-SQL 日志与完整 SQL 日志默认均关闭。仅开启 `sql-log-enabled=true` 时，INFO 输出参数化 SQL、脱敏参数和结果；只有再开启 `sql-log-complete-enabled=true` 才输出 `completeSql`。输出使用实际生命周期的 executionId，原始无生命周期入口生成独立标识。完整 SQL 是日志诊断表示，脱敏、长度与集合数量限制可能使其无法直接执行，勿用于业务重放。
+SQL 日志默认关闭。开启 `sql-log-enabled=true` 后，INFO 输出参数化 SQL、原始参数、结果和可复制执行的 `completeSql`，无需再开启 `sql-log-complete-enabled`。日志不进行参数名、敏感列或值模式脱敏，不截断参数字符串或集合。输出使用实际生命周期的 executionId，原始无生命周期入口生成独立标识。完整 SQL 支持命名参数和位置参数（`?`、`$1`、`:1`），保留字符串和注释中的占位符文本；字符串单引号按 SQL 规则转义，带类型空值输出 NULL，枚举使用 name()。
 
-脱敏同时匹配凭据关键词、`sensitive-columns` 和手机号/15 位或 18 位身份证格式；带类型参数、嵌套 Map、集合和数字值同样处理。自定义列名会替换默认集合，应保留需要的默认列；关键词和值模式始终生效。文本中的凭据赋值和已知敏感绑定值也会脱敏，错误消息先脱敏后截断。长数字可能被当作隐私格式，日志内容不改变数据库绑定值。此规则不识别所有行业隐私格式，业务自定义格式需添加敏感列名。
+审计日志使用同一个 SQL 日志开关，保留原始原因及错误消息，并打印填入原始参数的 SQL。`sensitive-columns` 和旧的 `sanitize*` 方法仅保留接口兼容，不再执行脱敏。完整 SQL 保留换行与字符串内空白，避免改变字面量或行注释语义；数据库特有类型的字面量规则仍以目标方言为准。
 
-`SqlAuditInterceptor` 不再带 `@Component`。普通日志开启时自动配置注册一个审计 Bean；用户同类型 Bean 可替换默认实现。审计语句、原因和错误消息走同一开关及脱敏管线，只记录终态、耗时和标识。手动构造无参审计器默认关闭输出，需要通过带 `R2dbcSqlLogger` 的构造器注入配置。before 阶段异常立即失败；FINALLY 同步/响应式回调逐个隔离异常并继续后续回调，成功结果保持成功，业务异常保留并追加 suppressed 异常。拒绝、缓存命中、审计跳过和降级均触发一次 FINALLY；`degrade(reason, fallback)` 可提供备用结果，没有结果时明确报出原因。
+`SqlAuditInterceptor` 不再带 `@Component`。普通日志开启时自动配置注册一个审计 Bean；用户同类型 Bean 可替换默认实现。审计语句、原因和错误消息走同一开关，保留原值，只记录终态、耗时和标识。手动构造无参审计器默认关闭输出，需要通过带 `R2dbcSqlLogger` 的构造器注入配置。before 阶段异常立即失败；FINALLY 同步/响应式回调逐个隔离异常并继续后续回调，成功结果保持成功，业务异常保留并追加 suppressed 异常。拒绝、缓存命中、审计跳过和降级均触发一次 FINALLY；`degrade(reason, fallback)` 可提供备用结果，没有结果时明确报出原因。
 
 ### 自动配置扩展 Bean
 
@@ -875,7 +875,7 @@ mvn -Pall test
 | 派生方法名 | `findAllByStatus`、`findOneByStatus`、`updateNameById` 推迟到调用报错 | 启动快速失败；使用 `findByStatus` / `updateByNameById`，需保留旧名则提供同名 XML |
 | 雪花节点 | 未配置环境变量时自动摘要回退 | 缺配置启动失败；配置 `snowflake-worker-id=12` 或 `WCDK_R2DBC_WORKER_ID=12`（每个进程独占），自定义租约解析器亦可；仅开发显式开启 `WCDK_R2DBC_WORKER_ID_FALLBACK=digest` |
 | 仓储简名冲突 | `a.OrderRepository` 与 `b.OrderRepository` 静默只注册一个 | 启动失败并列两个 FQN；重命名接口或显式收窄 `basePackages` / `basePackageClasses` |
-| 日志与审计 | `sql-log-enabled=true` 自动输出完整 SQL；扫描 SqlAuditInterceptor 会无条件输出 | 普通日志只输出脱敏结构；完整 SQL 须再显式开启 `sql-log-complete-enabled=true`；审计移至条件装配，手动审计 Bean 注入同一 logger |
+| 日志与审计 | 扫描 SqlAuditInterceptor 会无条件输出 | 日志与审计受 `sql-log-enabled` 控制；开启后保留原始参数并输出完整 SQL，不进行脱敏；手动审计 Bean 注入同一 logger |
 
 
 显式设置 `@EnableWcdkR2dbcRepositories(basePackages=...)`、`basePackageClasses` 或 `wcdk.r2dbc.base-packages` 后，只扫描给定范围及子包。未指定时沿用导入类包与 Spring Boot 自动配置包。两个不同包的同简名仓储以前会静默跳过一个，现在启动失败并列出两个全限定名；请重命名接口或收窄扫描范围。

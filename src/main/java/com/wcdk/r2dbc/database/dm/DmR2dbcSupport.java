@@ -22,9 +22,6 @@ final class DmR2dbcSupport {
         if (name == null) {
             return false;
         }
-        String normalizedName = name.trim().toLowerCase();
-        return "dm".equals(normalizedName)
-                || "dm database".equals(normalizedName)
-                || normalizedName.contains("dameng");
+        return com.wcdk.r2dbc.dialect.DatabaseType.from(name) == com.wcdk.r2dbc.dialect.DatabaseType.DM;
     }
 }
