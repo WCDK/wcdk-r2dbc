@@ -49,7 +49,7 @@ public final class DynamicSqlSource {
         RenderContext context = RenderContext.root(parameters);
         StringBuilder sql = new StringBuilder();
         root.apply(context, sql);
-        return new RenderedSql(sql.toString().strip(), context.additionalParameters());
+        return new RenderedSql(sql.toString().strip(), context.additionalParameters(), Set.copyOf(context.usedParameters()));
     }
 
     private static SqlNode parseChildren(Element parent) {
@@ -136,7 +136,7 @@ public final class DynamicSqlSource {
         return StringUtils.hasText(value) ? value : defaultValue;
     }
 
-    public record RenderedSql(String sql, Map<String, Object> additionalParameters) {
+    public record RenderedSql(String sql, Map<String, Object> additionalParameters, Set<String> usedParameters) {
     }
 
     private interface SqlNode {
@@ -218,7 +218,9 @@ public final class DynamicSqlSource {
                                   String open, String separator, String close, SqlNode contents) implements SqlNode {
         @Override
         public void apply(RenderContext context, StringBuilder sql) {
-            List<Iteration> iterations = iterations(context.value(collectionExpression));
+            Object source = context.value(collectionExpression);
+            if (source == null) throw new IllegalArgumentException("foreach 集合参数为 null：" + collectionExpression);
+            List<Iteration> iterations = iterations(source);
             if (iterations.isEmpty()) {
                 return;
             }
@@ -260,11 +262,11 @@ public final class DynamicSqlSource {
     }
 
     private record RenderContext(Map<String, Object> bindings, Set<String> localNames,
-                                 Map<String, Object> additionalParameters, AtomicInteger sequence) {
+                                 Map<String, Object> additionalParameters, AtomicInteger sequence, Set<String> usedParameters) {
 
         static RenderContext root(Map<String, Object> parameters) {
             Map<String, Object> bindings = parameters == null ? Map.of() : new LinkedHashMap<>(parameters);
-            return new RenderContext(bindings, Set.of(), new LinkedHashMap<>(), new AtomicInteger());
+            return new RenderContext(bindings, Set.of(), new LinkedHashMap<>(), new AtomicInteger(), new LinkedHashSet<>());
         }
 
         RenderContext child(String itemName, Object itemValue, String indexName, Object indexValue) {
@@ -274,12 +276,19 @@ public final class DynamicSqlSource {
             Set<String> childLocalNames = new LinkedHashSet<>(localNames);
             childLocalNames.add(itemName);
             childLocalNames.add(indexName);
-            return new RenderContext(childBindings, childLocalNames, additionalParameters, sequence);
+            return new RenderContext(childBindings, childLocalNames, additionalParameters, sequence, usedParameters);
         }
 
         StandardEvaluationContext evaluationContext() {
             StandardEvaluationContext context = new StandardEvaluationContext(bindings);
-            context.addPropertyAccessor(new MapAccessor());
+            context.addPropertyAccessor(new MapAccessor() {
+                @Override
+                public org.springframework.expression.TypedValue read(org.springframework.expression.EvaluationContext context,
+                        Object target, String name) throws org.springframework.expression.AccessException {
+                    if (target == bindings && !localNames.contains(name)) usedParameters.add(name);
+                    return super.read(context, target, name);
+                }
+            });
             context.setMethodResolvers(List.of());
             context.setBeanResolver(null);
             context.setTypeLocator(typeName -> {
@@ -340,7 +349,7 @@ public final class DynamicSqlSource {
                     continue;
                 }
                 if (ch == '#' && next == '{') {
-                    int end = text.indexOf('}', i + 2);
+                    int end = placeholderEnd(text, i + 2);
                     if (end < 0) {
                         throw new IllegalArgumentException("SQL 参数表达式缺少结束符 '}': " + text.substring(i));
                     }
@@ -350,6 +359,7 @@ public final class DynamicSqlSource {
                     }
                     if (PROPERTY_PATH_PATTERN.matcher(expression).matches()
                             && !localNames.contains(expression.split("\\.", 2)[0])) {
+                        usedParameters.add(expression.split("\\.", 2)[0]);
                         rendered.append(text, i, end + 1);
                         i = end;
                         continue;
@@ -362,6 +372,7 @@ public final class DynamicSqlSource {
                         && (i == 0 || text.charAt(i - 1) != ':') && next != '=') {
                     int end = i + 2;
                     while (end < text.length() && isParameterPart(text.charAt(end))) end++;
+                    usedParameters.add(text.substring(i + 1, end));
                     rendered.append("#{").append(text, i + 1, end).append('}');
                     i = end - 1;
                     continue;
@@ -369,6 +380,21 @@ public final class DynamicSqlSource {
                 rendered.append(ch);
             }
             return rendered.toString();
+        }
+
+        private int placeholderEnd(String text, int start) {
+            char quote = 0;
+            for (int i = start; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (quote != 0) {
+                    if (ch == quote) {
+                        if (i + 1 < text.length() && text.charAt(i + 1) == quote) i++;
+                        else quote = 0;
+                    }
+                } else if (ch == '\'' || ch == '"') quote = ch;
+                else if (ch == '}') return i;
+            }
+            return -1;
         }
 
         private String renderExpression(String expression) {
@@ -393,9 +419,13 @@ public final class DynamicSqlSource {
 
         private String renderValue(String expression) {
             if (SQL_FUNCTION_PATTERN.matcher(expression).matches()) {
+                for (String local : localNames) {
+                    if (Pattern.compile("(?<![a-zA-Z0-9_])" + Pattern.quote(local) + "(?![a-zA-Z0-9_])")
+                            .matcher(expression).find()) throw new IllegalArgumentException("foreach 局部参数不允许 SQL 函数内联：" + local);
+                }
                 return expression;
             }
-            Object value = EXPRESSION_PARSER.parseExpression(expression).getValue(evaluationContext());
+            Object value = value(expression);
             return "#{" + addLocalParameter(value) + "}";
         }
 

@@ -74,7 +74,11 @@ public class R2dbcQueryOperations {
             context.setSql(sql);
             Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
             return lifecycleExecutor.executeFlux(chain, context, preparation,
-                    () -> withExecutionLog(execute(context.getSql(), context.getParameters(), ignored).fetch().all(),
+                    () -> withExecutionLog(reactor.util.context.Context.of(ignored).put(SqlLifecycleExecutor.EXECUTION_CONTEXT_KEY, context), executeMapped(context.getSql(), context.getParameters(), (row, metadata) -> {
+                        Map<String, Object> values = new java.util.LinkedHashMap<>();
+                        metadata.getColumnMetadatas().forEach(column -> values.put(column.getName(), row.get(column.getName())));
+                        return values;
+                    }, ignored),
                             context.getSql(), context.getParameters()));
         });
     }
@@ -107,7 +111,7 @@ public class R2dbcQueryOperations {
             context.setSql(sql);
             Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
             return lifecycleExecutor.executeFlux(chain, context, preparation,
-                    () -> withExecutionLog(executeMapped(context.getSql(), context.getParameters(), mapper, ignored),
+                    () -> withExecutionLog(reactor.util.context.Context.of(ignored).put(SqlLifecycleExecutor.EXECUTION_CONTEXT_KEY, context), executeMapped(context.getSql(), context.getParameters(), mapper, ignored),
                             context.getSql(), context.getParameters()));
         });
     }
@@ -162,7 +166,7 @@ public class R2dbcQueryOperations {
     public <T> Flux<T> queryWithoutLifecycle(String sql, Map<?, ?> parameters,
                                               BiFunction<Row, RowMetadata, T> mapper) {
         return Flux.deferContextual(contextView -> {
-            return withExecutionLog(executeMapped(sql, parameters, mapper, contextView), sql, parameters);
+            return withExecutionLog(contextView, executeMapped(sql, parameters, mapper, contextView), sql, parameters);
         });
     }
 
@@ -178,6 +182,7 @@ public class R2dbcQueryOperations {
     private <T> Flux<T> executeMapped(String sql, Map<?, ?> parameters,
                                       BiFunction<Row, RowMetadata, T> mapper, reactor.util.context.ContextView context) {
         return execute(sql, parameters, context)
+                .filter((statement, next) -> Flux.from(next.execute(statement)).map(ResultColumnCache::new))
                 .map((row, metadata) -> MappingResult.capture(row, metadata, mapper))
                 .all()
                 .handle((result, sink) -> {
@@ -188,11 +193,11 @@ public class R2dbcQueryOperations {
                     }
                 });
     }
-    private <T> Flux<T> withExecutionLog(Flux<T> results, String sql, Map<?, ?> parameters) {
+    private <T> Flux<T> withExecutionLog(reactor.util.context.ContextView context, Flux<T> results, String sql, Map<?, ?> parameters) {
         AtomicLong resultCount = new AtomicLong();
         return results
                 .doOnNext(ignored -> resultCount.incrementAndGet())
-                .doFinally(signal -> sqlLogger.logExecution(sql, parameters,
+                .doFinally(signal -> sqlLogger.logExecution(context, sql, parameters,
                         signal == SignalType.ON_ERROR ? "ERROR" : resultCount.get()));
     }
 
@@ -282,10 +287,10 @@ public class R2dbcQueryOperations {
         return parameterBinder.bind(databaseClient, sql, parameters, context);
     }
 
-    private Map<String, Object> copyParameters(Map<?, ?> parameters) {
-        Map<String, Object> copy = new java.util.LinkedHashMap<>();
+    private Map<Object, Object> copyParameters(Map<?, ?> parameters) {
+        Map<Object, Object> copy = new java.util.LinkedHashMap<>();
         if (parameters != null) {
-            parameters.forEach((key, value) -> copy.put(String.valueOf(key), value));
+            parameters.forEach((key, value) -> copy.put(key, value));
         }
         return copy;
     }

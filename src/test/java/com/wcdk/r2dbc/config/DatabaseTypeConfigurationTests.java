@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DatabaseTypeConfigurationTests {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(WcdkR2dbcAutoConfiguration.class))
-            .withPropertyValues("wcdk.r2dbc.enabled=true", "spring.r2dbc.url=r2dbc:postgresql://localhost/demo",
+            .withPropertyValues("wcdk.r2dbc.snowflake-worker-id=21", "wcdk.r2dbc.enabled=true", "spring.r2dbc.url=r2dbc:postgresql://localhost/demo",
                     "spring.r2dbc.pool.enabled=false", "spring.r2dbc.username=test");
 
     @ParameterizedTest

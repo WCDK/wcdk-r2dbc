@@ -254,9 +254,14 @@ public class QueryWrapper<T> {
         if (pageNo <= 0) {
             throw new IllegalArgumentException("页码必须大于0");
         }
-        limit(pageSize);
+        if (pageSize <= 0 || pageSize > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("查询条数必须在 1 到 Integer.MAX_VALUE 之间");
+        }
         try {
-            return offset(Math.multiplyExact(pageNo - 1, pageSize));
+            long calculatedOffset = Math.multiplyExact(pageNo - 1, pageSize);
+            limit = pageSize;
+            offset = calculatedOffset;
+            return this;
         } catch (ArithmeticException error) {
             throw new IllegalArgumentException("分页偏移量计算溢出", error);
         }
@@ -356,9 +361,11 @@ public class QueryWrapper<T> {
     }
 
     /**
-     * 查询条件记录。
+     * 历史查询条件记录；使用 {@link SqlExpression} AST 描述条件。
+     * @deprecated 使用 {@link SqlExpression.Comparison}、{@link SqlExpression.In} 或 {@link SqlExpression.NullCheck}。
      * @author wcdk
      */
+    @Deprecated(since = "3.6.0", forRemoval = true)
     public record Condition(String column, String operator, Object value) {
     }
 

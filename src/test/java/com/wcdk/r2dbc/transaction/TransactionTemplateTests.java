@@ -89,7 +89,8 @@ class TransactionTemplateTests {
                 })
                 .verify();
 
-        verify(fixture.connection).rollbackTransaction();
+        // 首次回滚失败进入 FAILED；close 按契约再次 best-effort 回滚后关闭。
+        verify(fixture.connection, times(2)).rollbackTransaction();
         verify(fixture.connection).close();
     }
 

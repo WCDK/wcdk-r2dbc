@@ -19,13 +19,19 @@ final class LogicDeleteValueConverter {
         if (boxedType.isInstance(value)) {
             return value;
         }
+        if (boxedType == Boolean.class) {
+            if (value instanceof Number number) return new java.math.BigDecimal(number.toString()).signum() != 0;
+            if (value instanceof String text) {
+                if ("1".equals(text) || "true".equalsIgnoreCase(text)) return true;
+                if ("0".equals(text) || "false".equalsIgnoreCase(text)) return false;
+            }
+            throw new IllegalArgumentException("wcdk.r2dbc.logic-delete-value / logic-not-delete-value 的值 '"
+                    + value + "' 无法转换为布尔值（支持 1/0/true/false 或数值）");
+        }
         if (boxedType == String.class) {
-            return String.valueOf(value);
+            return value instanceof Enum<?> enumValue ? enumValue.name() : String.valueOf(value);
         }
         if (value instanceof String text) {
-            if (boxedType == Boolean.class) {
-                return Boolean.valueOf(text);
-            }
             if (boxedType == Byte.class) {
                 return Byte.valueOf(text);
             }

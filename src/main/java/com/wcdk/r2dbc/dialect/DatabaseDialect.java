@@ -33,6 +33,12 @@ public interface DatabaseDialect {
         return renderLimitOffset(Integer.valueOf((int) limit), offset);
     }
 
+    /** 仅设置偏移量时的分页子句。 */
+    default String renderOffsetOnly(long offset) {
+        if (offset < 0) throw new IllegalArgumentException("查询偏移量不能小于 0");
+        return "OFFSET " + offset + " ROWS";
+    }
+
     String renderGeneratedKey(String... columns);
 
     /** 请求生成值时，数据库驱动所需的列名参数。 */
@@ -57,17 +63,11 @@ public interface DatabaseDialect {
     }
 
 
-    default boolean supportsSavepoint() {
-        return false;
-    }
-
     default GeneratedKeyStrategy generatedKeyStrategy() {
-        return supportsReturning() ? GeneratedKeyStrategy.RETURNING : GeneratedKeyStrategy.NONE;
+        return supportsReturning() ? GeneratedKeyStrategy.CLAUSE_RETURNING : GeneratedKeyStrategy.NONE;
     }
 
     boolean supportsReturning();
-
-    boolean supportsUpsert();
 
     boolean supports(ConnectionFactory connectionFactory);
 }

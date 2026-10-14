@@ -56,6 +56,18 @@ class TransactionManagerTests {
         verify(connection, never()).beginTransaction(any(TransactionDefinition.class));
     }
 
+    @Test
+    void cancellationWhileBeginIsInFlightClosesAcquiredConnection() {
+        Connection connection = connection();
+        var begin = reactor.core.publisher.Sinks.<Void>empty();
+        when(connection.beginTransaction(any(TransactionDefinition.class))).thenReturn(begin.asMono());
+        StepVerifier.create(manager(connection).createTransaction())
+                .then(() -> verify(connection).beginTransaction(any(TransactionDefinition.class)))
+                .thenCancel().verify();
+        verify(connection, timeout(1000)).close();
+        verify(connection, never()).commitTransaction();
+    }
+
     private TransactionManager manager(Connection connection) {
         ConnectionFactory factory = mock(ConnectionFactory.class);
         doReturn(Mono.just(connection)).when(factory).create();

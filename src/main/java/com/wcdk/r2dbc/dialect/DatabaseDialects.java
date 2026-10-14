@@ -7,14 +7,25 @@ import io.r2dbc.spi.ConnectionFactory;
  * @author wcdk
  */
 public final class DatabaseDialects {
+    private static final java.util.concurrent.ConcurrentHashMap<ConnectionFactory, DatabaseDialect> CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
     private DatabaseDialects() {
     }
 
     public static DatabaseDialect get(ConnectionFactory factory) {
-        if (DmDatabaseDialect.INSTANCE.supports(factory)) return DmDatabaseDialect.INSTANCE;
-        if (PostgreSqlDatabaseDialect.INSTANCE.supports(factory)) return PostgreSqlDatabaseDialect.INSTANCE;
-        if (MySqlDatabaseDialect.INSTANCE.supports(factory)) return MySqlDatabaseDialect.INSTANCE;
-        if (OracleDatabaseDialect.INSTANCE.supports(factory)) return OracleDatabaseDialect.INSTANCE;
-        throw new IllegalStateException("不支持的R2DBC数据库：" + (factory == null || factory.getMetadata() == null ? "unknown" : factory.getMetadata().getName()));
+        if (factory == null) throw new IllegalStateException("不支持的R2DBC数据库：unknown");
+        return CACHE.computeIfAbsent(factory, DatabaseDialects::resolve);
+    }
+
+    private static DatabaseDialect resolve(ConnectionFactory factory) {
+        var metadata = factory.getMetadata();
+        String name = metadata == null ? null : metadata.getName();
+        return switch (DatabaseType.from(name)) {
+            case DM -> DmDatabaseDialect.INSTANCE;
+            case POSTGRESQL -> PostgreSqlDatabaseDialect.INSTANCE;
+            case MYSQL -> MySqlDatabaseDialect.INSTANCE;
+            case ORACLE -> OracleDatabaseDialect.INSTANCE;
+            case UNKNOWN -> throw new IllegalStateException("不支持的R2DBC数据库：" + name);
+        };
     }
 }

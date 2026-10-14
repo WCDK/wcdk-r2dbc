@@ -17,12 +17,14 @@ public final class PostgreSqlDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
+    public String renderOffsetOnly(long offset) {
+        if (offset < 0) throw new IllegalArgumentException("查询偏移量不能小于 0");
+        return "OFFSET " + offset;
+    }
+
+    @Override
     public boolean supportsReturning() {
         return true;
     }
 
-    @Override
-    public boolean supportsUpsert() {
-        return true;
-    }
 }

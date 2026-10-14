@@ -71,8 +71,13 @@ wcdk:
     enabled: true
     # SQL日志默认关闭，排查时显式开启
     sql-log-enabled: false
+    sql-log-complete-enabled: false
     # 雪花ID生成
     snowflake-id: true
 
     # 生产多实例必须分配不同节点编号，范围 0 到 1023
-    snowflake-worker-id: ${WCDK_R2DBC_WORKER_ID:0}
+    snowflake-worker-id: ${WCDK_R2DBC_WORKER_ID}
+
+    database-initializer:
+      enabled: false
+      timeout: 30s

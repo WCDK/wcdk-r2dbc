@@ -43,9 +43,6 @@ public class ParameterBinder {
         if (factory == null || factory.getMetadata() == null) return new ParameterBinder();
         ParameterValueConverter converter = switch (com.wcdk.r2dbc.dialect.DatabaseDialects.get(factory).databaseType()) {
             case DM -> new DmParameterValueConverter();
-            case POSTGRESQL -> new PostgreSqlParameterValueConverter();
-            case MYSQL -> new MysqlParameterValueConverter();
-            case ORACLE -> new OracleParameterValueConverter();
             default -> new DefaultParameterValueConverter();
         };
         return new ParameterBinder(converter);

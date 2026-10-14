@@ -32,18 +32,13 @@ public class OracleDatabaseDialect extends AbstractDatabaseDialect {
         return false;
     }
 
-    @Override
-    public boolean supportsUpsert() {
-        return false;
-    }
-
     /**
      * 驱动通过 RETURNING INTO 返回指定列，不支持 PostgreSQL 式 RETURNING 子句。
      * @author wcdk
      */
     @Override
     public GeneratedKeyStrategy generatedKeyStrategy() {
-        return GeneratedKeyStrategy.RETURNING;
+        return GeneratedKeyStrategy.DRIVER_GENERATED_KEYS;
     }
 
     @Override

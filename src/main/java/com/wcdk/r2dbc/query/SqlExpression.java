@@ -23,7 +23,7 @@ public sealed interface SqlExpression permits SqlExpression.Empty, SqlExpression
     record In(String column, boolean negated, List<?> values) implements SqlExpression {
         public In {
             Objects.requireNonNull(column, "字段名不能为空");
-            values = List.copyOf(values);
+            values = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
         }
     }
 

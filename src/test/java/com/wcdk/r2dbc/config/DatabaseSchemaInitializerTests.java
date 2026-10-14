@@ -163,6 +163,63 @@ class DatabaseSchemaInitializerTests {
         assertThat(output.getAll()).contains("database=postgresql", "script=schema.sql", "SQLSTATE=42P07", "code=0", "reason=duplicate table");
     }
 
+    @Test
+    void scriptClassificationUsesTheConfiguredResourceRoot() throws Exception {
+        var generic = new org.springframework.core.io.UrlResource("file:/deploy/oracle/app/sql/common/schema.sql");
+        assertThat(DatabaseSchemaInitializer.scriptDatabaseType(generic,"file:/deploy/oracle/app/sql/**/*.sql")).isNull();
+        assertThat(DatabaseSchemaInitializer.scriptDatabaseType(generic,"classpath*:sql/**/*.sql")).isNull();
+        var specific = new org.springframework.core.io.UrlResource("file:/deploy/oracle/app/sql/mysql/schema.sql");
+        assertThat(DatabaseSchemaInitializer.scriptDatabaseType(specific,"classpath*:sql/**/*.sql")).isEqualTo("mysql");
+        var archive = new org.springframework.core.io.UrlResource("jar:file:/deploy/oracle/app.jar!/sql/common/schema.sql");
+        assertThat(DatabaseSchemaInitializer.scriptDatabaseType(archive,"classpath*:sql/**/*.sql")).isNull();
+    }
+
+    @Test
+    void unreachableDatabaseTimesOutAndCancelsAcquisition(org.springframework.boot.test.system.CapturedOutput output) throws Exception {
+        Fixture fixture = fixture("always");
+        fixture.properties.getDatabaseInitializer().setTimeout(java.time.Duration.ofMillis(80));
+        when(fixture.resolver.getResources(anyString())).thenReturn(new Resource[]{resource("schema.sql","SELECT 1;")});
+        var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        doReturn(Mono.never().doOnCancel(()->cancelled.set(true))).when(fixture.factory).create();
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2),()->
+                assertThatThrownBy(fixture.initializer::run).hasMessageContaining("初始化超时", "database-initializer.timeout")
+                        .hasRootCauseInstanceOf(java.util.concurrent.TimeoutException.class));
+        assertThat(cancelled).isTrue();
+        assertThat(output.getAll()).contains("数据库Schema初始化失败", "database-initializer.timeout").doesNotContain("数据库Schema初始化完成");
+        verifyNoInteractions(fixture.connection);
+    }
+
+    @Test
+    void executionTimeoutRollsBackAndClosesTheAcquiredConnection() throws Exception {
+        Fixture fixture = fixture("always");
+        fixture.properties.getDatabaseInitializer().setTimeout(java.time.Duration.ofMillis(80));
+        when(fixture.resolver.getResources(anyString())).thenReturn(new Resource[]{resource("schema.sql","SELECT 1;")});
+        doReturn(Flux.never()).when(fixture.statement).execute();
+        assertThatThrownBy(fixture.initializer::run).hasMessageContaining("初始化超时");
+        verify(fixture.connection).beginTransaction();
+        verify(fixture.connection).rollbackTransaction(); verify(fixture.connection).close();
+        verify(fixture.connection,never()).commitTransaction();
+    }
+
+    @Test
+    void rejectsNonpositiveInitializationTimeout() throws Exception {
+        Fixture fixture = fixture("always");
+        when(fixture.resolver.getResources(anyString())).thenReturn(new Resource[]{resource("schema.sql","SELECT 1;")});
+        for (java.time.Duration duration : new java.time.Duration[]{java.time.Duration.ZERO,java.time.Duration.ofSeconds(-1),null}) {
+            fixture.properties.getDatabaseInitializer().setTimeout(duration);
+            assertThatThrownBy(fixture.initializer::run).hasMessageContaining("database-initializer.timeout", "正数");
+        }
+    }
+
+    @Test
+    void unknownDatabaseLogsFailureWithoutPretendingToUseDm(org.springframework.boot.test.system.CapturedOutput output) {
+        Fixture fixture = fixture("always");
+        fixture.properties.getDatabaseInitializer().setDatabaseType(null);
+        when(fixture.factory.getMetadata().getName()).thenReturn("");
+        assertThatThrownBy(fixture.initializer::run).hasMessageContaining("无法从配置或R2DBC元数据中确定数据库类型");
+        assertThat(output.getAll()).contains("无法识别数据库类型", "初始化终止").doesNotContain("默认使用dm");
+    }
+
     private void statementFailure(Fixture fixture, boolean transaction, Throwable error) {
         if (transaction) doReturn(Flux.error(error)).when(fixture.statement).execute();
         else {
@@ -208,10 +265,10 @@ class DatabaseSchemaInitializerTests {
         DatabaseClient client = mock(DatabaseClient.class);
         DatabaseSchemaInitializer initializer = new DatabaseSchemaInitializer(
                 client, factory, resolver, properties, "");
-        return new Fixture(initializer, connection, statement, resolver, properties, client);
+        return new Fixture(initializer, connection, statement, resolver, properties, client, factory);
     }
 
     private record Fixture(DatabaseSchemaInitializer initializer, Connection connection, Statement statement,
-                           ResourcePatternResolver resolver, WcdkR2dbcProperties properties, DatabaseClient client) {
+                           ResourcePatternResolver resolver, WcdkR2dbcProperties properties, DatabaseClient client, ConnectionFactory factory) {
     }
 }

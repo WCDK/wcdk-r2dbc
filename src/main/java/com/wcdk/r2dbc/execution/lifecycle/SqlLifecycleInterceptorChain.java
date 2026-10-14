@@ -109,8 +109,9 @@ public class SqlLifecycleInterceptorChain {
      * @return 完成信号
      */
     public Mono<Void> afterExecuteReactive(SqlExecutionContext context) {
-        return executeReactiveInterceptors(reactiveInterceptors,
-                interceptor -> interceptor.afterExecuteReactive(context), "afterExecuteReactive", context)
+        return Flux.fromIterable(reactiveInterceptors)
+                .concatMap(interceptor -> Mono.defer(() -> interceptor.afterExecuteReactive(context))
+                        .onErrorResume(error -> { recordFinallyFailure(context, error); return Mono.empty(); }))
                 .then(Mono.fromRunnable(() -> executeSyncAfterExecute(syncInterceptors, context)));
     }
 
@@ -128,7 +129,7 @@ public class SqlLifecycleInterceptorChain {
         return Flux.fromIterable(interceptors)
                 .concatMap(interceptor -> action.execute(interceptor)
                         .doOnSubscribe(s -> log.trace("Executing interceptor [{}] {}", interceptor.getClass().getSimpleName(), phase))
-                        .doOnError(e -> log.error("拦截器 [{}] 在 {} 阶段出错", interceptor.getClass().getSimpleName(), phase, e))
+                        .doOnError(e -> log.error("拦截器 [{}] 在 {} 阶段出错", interceptor.getClass().getSimpleName(), phase + " errorType=" + e.getClass().getName()))
                         .then(Mono.fromSupplier(context::isTerminated))
                 )
                 .takeUntil(Boolean::booleanValue)
@@ -159,8 +160,14 @@ public class SqlLifecycleInterceptorChain {
      */
     private void executeSyncAfterExecute(List<SqlLifecycleInterceptor> interceptors, SqlExecutionContext context) {
         for (SqlLifecycleInterceptor interceptor : interceptors) {
-            interceptor.afterExecute(context);
+            try { interceptor.afterExecute(context); }
+            catch (Throwable error) { reactor.core.Exceptions.throwIfFatal(error); recordFinallyFailure(context, error); }
         }
+    }
+
+    private void recordFinallyFailure(SqlExecutionContext context, Throwable error) {
+        if (context.getError() != null && context.getError() != error) context.getError().addSuppressed(error);
+        log.warn("SQL FINALLY 拦截器失败：executionId={}, errorType={}", context.getExecutionId(), error.getClass().getName());
     }
 
     /**

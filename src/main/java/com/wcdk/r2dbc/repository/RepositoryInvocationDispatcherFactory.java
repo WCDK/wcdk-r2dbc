@@ -66,15 +66,12 @@ final class RepositoryInvocationDispatcherFactory {
                 properties, metadata, repositoryInterface, sqlExecutionEngine);
         XmlRepositoryExecutor xmlExecutor = new XmlRepositoryExecutor(
                 metadata, repositoryInterface, repositoryXmlRegistry,
-                sqlExecutionEngine, parameterBinder);
-        ObjectMethodExecutor objectExecutor =
-                new ObjectMethodExecutor(repositoryInterface, metadata);
+                sqlExecutionEngine, parameterBinder, properties.isStrictUnusedParameters());
         return new RepositoryInvocationDispatcher(List.of(
                 new QuerySpecExecutor(crudExecutor),
                 crudExecutor,
                 derivedExecutor,
                 xmlExecutor,
-                objectExecutor,
                 new UnsupportedMethodExecutor()));
     }
 }

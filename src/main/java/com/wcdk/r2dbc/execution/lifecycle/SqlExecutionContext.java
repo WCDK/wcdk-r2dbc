@@ -20,7 +20,7 @@ public class SqlExecutionContext {
 
     private String sql;
 
-    private Map<String, Object> parameters;
+    private Map<Object, Object> parameters;
 
     private final Object[] arguments;
 
@@ -74,12 +74,22 @@ public class SqlExecutionContext {
         this.sql = sql;
     }
 
-    public Map<String, Object> getParameters() {
+    public Map<Object, Object> getParameters() {
         return parameters;
     }
 
-    public void setParameters(Map<String, Object> parameters) {
-        this.parameters = parameters;
+    public void setParameters(Map<?, ?> parameters) {
+        this.parameters = parameters == null ? new java.util.LinkedHashMap<>() : new java.util.LinkedHashMap<>(parameters);
+    }
+
+    /** XML 渲染仅支持命名键，数值键在普通 SQL 生命周期中保持原样。 */
+    public Map<String, Object> getNamedParameters() {
+        Map<String, Object> named = new java.util.LinkedHashMap<>();
+        parameters.forEach((key, value) -> {
+            if (!(key instanceof String name)) throw new IllegalArgumentException("XML 参数键必须为名称：" + key);
+            named.put(name, value);
+        });
+        return named;
     }
 
     public Object[] getArguments() {
@@ -298,6 +308,12 @@ public class SqlExecutionContext {
      *
      * @param reason 降级原因
      */
+    /** 提供降级备用结果；不提供结果的 degrade(reason) 会以原因明确失败。 */
+    public void degrade(String reason, Object fallback) {
+        degrade(reason);
+        this.result = fallback;
+    }
+
     public void degrade(String reason) {
         this.status = SqlExecutionStatus.DEGRADED;
         this.statusReason = reason;

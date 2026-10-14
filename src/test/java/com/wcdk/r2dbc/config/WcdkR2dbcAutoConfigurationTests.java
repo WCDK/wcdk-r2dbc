@@ -25,7 +25,7 @@ class WcdkR2dbcAutoConfigurationTests {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(WcdkR2dbcAutoConfiguration.class))
-            .withPropertyValues("wcdk.r2dbc.enabled=true");
+            .withPropertyValues("wcdk.r2dbc.snowflake-worker-id=21", "wcdk.r2dbc.enabled=true");
 
     @Test
     void backsOffWhenApplicationProvidesConnectionFactory() {
@@ -78,7 +78,7 @@ class WcdkR2dbcAutoConfigurationTests {
                 .withConfiguration(AutoConfigurations.of(
                         WcdkR2dbcAutoConfiguration.class,
                         R2dbcTransactionManagerAutoConfiguration.class))
-                .withPropertyValues("wcdk.r2dbc.enabled=true")
+                .withPropertyValues("wcdk.r2dbc.snowflake-worker-id=21", "wcdk.r2dbc.enabled=true")
                 .withBean(ConnectionFactory.class, () -> connectionFactory);
 
         orderedRunner.run(context -> {
@@ -116,13 +116,26 @@ class WcdkR2dbcAutoConfigurationTests {
     }
 
     @Test
-    void disposesManagedConnectionFactoryWhenContextCloses() {
+    void doesNotDisposeExternallyManagedConnectionFactoryWhenContextCloses() {
         DisposableConnectionFactory managed = new DisposableConnectionFactory();
 
         runner.withBean(ConnectionFactory.class, () -> managed)
                 .run(context -> assertThat(managed.isDisposed()).isFalse());
 
-        assertThat(managed.isDisposed()).isTrue();
+        assertThat(managed.isDisposed()).isFalse();
+    }
+
+    @Test
+    void disposesFrameworkCreatedPoolWhenContextCloses() {
+        var reference = new java.util.concurrent.atomic.AtomicReference<io.r2dbc.pool.ConnectionPool>();
+        runner.withPropertyValues("spring.r2dbc.url=r2dbc:postgresql://localhost/test",
+                "spring.r2dbc.username=test", "spring.r2dbc.pool.enabled=true", "spring.r2dbc.pool.initial-size=0")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var pool = (io.r2dbc.pool.ConnectionPool) context.getBean(ConnectionFactory.class);
+                    reference.set(pool); assertThat(pool.isDisposed()).isFalse();
+                });
+        assertThat(reference.get().isDisposed()).isTrue();
     }
 
     @Test

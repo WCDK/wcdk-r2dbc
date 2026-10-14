@@ -27,6 +27,7 @@ import reactor.core.publisher.Mono;
  * @version 1.0
  * @see SqlLifecycleInterceptor 同步版本
  */
+/** before 阶段异常立即失败；FINALLY 异常隔离并继续后续回调。 */
 public interface ReactiveSqlLifecycleInterceptor {
 
     /**

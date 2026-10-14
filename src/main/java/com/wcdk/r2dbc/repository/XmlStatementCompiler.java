@@ -24,10 +24,18 @@ public final class XmlStatementCompiler {
     public Optional<RepositoryMethodPlan> compile(Method method) {
         return registry.find(repositoryInterface, method.getName())
                 .map(statement -> {
-                    if (statement.commandType() != com.wcdk.r2dbc.execution.SqlCommandType.SELECT) {
-                        XmlUpdateResultPlan.compile(method, repositoryInterface);
-                    }
-                    return new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.XML, statement, statement.statementId());
+                    Object result = null;
+                    if (statement.commandType() == SqlCommandType.SELECT) {
+                        if (method.getReturnType() != reactor.core.publisher.Mono.class
+                                && method.getReturnType() != reactor.core.publisher.Flux.class)
+                            throw new IllegalStateException("XML SELECT " + statement.statementId()
+                                    + " 必须返回 Mono/Flux：" + method.toGenericString());
+                    } else result = XmlUpdateResultPlan.compile(method, repositoryInterface);
+                    return new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.XML, statement, statement.statementId(),
+                            new RepositoryMethodPlan.StatementDefinition(RepositoryMethodPlan.Kind.XML, statement.statementId()),
+                            new RepositoryMethodPlan.SqlPlan(null, false, result),
+                            RepositoryMethodPlan.ParameterPlan.of(method),
+                            com.wcdk.r2dbc.repository.plan.ResultPlan.of(method, null));
                 });
     }
 }

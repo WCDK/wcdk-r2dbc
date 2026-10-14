@@ -32,7 +32,7 @@ class NamingAndCommandContractsTests {
             var method = Methods.class.getMethod("findByURLValueAndCPUTime", String.class, Long.class);
             var definition = resolver.compile(method);
             var plan = DerivedQueryPlanModel.compile(method, definition, metadata);
-            assertThat(plan.conditions().getFirst().column()).isEqualTo(metadata.columnByName("URLValue").name());
+            assertThat(metadata.columnByName(plan.definition().conditions().getFirst().fieldName()).name()).isEqualTo(metadata.columnByName("URLValue").name());
             assertThat(resolver.resolveCompiled(plan, new Object[]{"link", 9L}).sql())
                     .contains(metadata.columnByName("URLValue").name() + " = :p0");
         }

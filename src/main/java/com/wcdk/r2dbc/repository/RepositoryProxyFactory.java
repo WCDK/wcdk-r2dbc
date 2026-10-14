@@ -36,7 +36,9 @@ public class RepositoryProxyFactory {
      */
     public RepositoryProxyFactory(RepositoryOperations repositoryOperations, WcdkR2dbcProperties properties,
                                   RepositoryXmlRegistry repositoryXmlRegistry) {
-        this(repositoryOperations, properties, repositoryXmlRegistry, new SnowflakeIdGenerator());
+        this(repositoryOperations, properties, repositoryXmlRegistry, properties.isSnowflakeId()
+                ? (properties.getSnowflakeWorkerId() == null ? new SnowflakeIdGenerator()
+                : new SnowflakeIdGenerator(properties.getSnowflakeWorkerId())) : null);
     }
 
     /**

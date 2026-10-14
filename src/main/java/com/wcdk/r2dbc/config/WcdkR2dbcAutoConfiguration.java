@@ -9,11 +9,6 @@ import com.wcdk.r2dbc.id.EnvironmentWorkerIdResolver;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceRouter;
 import com.wcdk.r2dbc.execution.ParameterBinder;
 import com.wcdk.r2dbc.execution.ParameterValueConverter;
-import com.wcdk.r2dbc.execution.DefaultParameterValueConverter;
-import com.wcdk.r2dbc.execution.DmParameterValueConverter;
-import com.wcdk.r2dbc.execution.PostgreSqlParameterValueConverter;
-import com.wcdk.r2dbc.execution.MysqlParameterValueConverter;
-import com.wcdk.r2dbc.execution.OracleParameterValueConverter;
 import com.wcdk.r2dbc.dialect.DatabaseDialects;
 import com.wcdk.r2dbc.dialect.DatabaseType;
 import com.wcdk.r2dbc.execution.R2dbcRowMapper;
@@ -95,6 +90,14 @@ public class WcdkR2dbcAutoConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(WcdkR2dbcAutoConfiguration.class);
 
+    private final java.util.Set<ConnectionFactory> ownedConnectionFactories =
+            java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+
+    private <T extends ConnectionFactory> T owned(T factory) {
+        ownedConnectionFactories.add(factory);
+        return factory;
+    }
+
     /** 统一解析已弃用的属性别名，Spring Boot 提供连接工厂时也执行该解析。 */
     @Bean
     public DatabaseTypeHint databaseTypeHint(WcdkR2dbcProperties properties, Environment environment) {
@@ -127,7 +130,7 @@ public class WcdkR2dbcAutoConfiguration {
         }
         Map<String, ConnectionFactory> connectionFactories = new LinkedHashMap<>();
         dataSources.forEach((name, dataSourceProperties) -> connectionFactories.put(name, createConnectionFactory(name, dataSourceProperties, properties.getPool())));
-        return new DynamicRoutingConnectionFactory(properties.getPrimary(), connectionFactories);
+        return owned(new DynamicRoutingConnectionFactory(properties.getPrimary(), connectionFactories));
     }
 
     /**
@@ -172,7 +175,7 @@ public class WcdkR2dbcAutoConfiguration {
         
         try {
             ConnectionFactory connectionFactory = ConnectionFactories.get(builder.build());
-            return poolConnectionFactory("primary", connectionFactory, properties.getPool());
+            return owned(poolConnectionFactory("primary", connectionFactory, properties.getPool()));
         } catch (IllegalStateException e) {
             String driver = databaseType == null || databaseType.isBlank()
                     ? options.getRequiredValue(ConnectionFactoryOptions.DRIVER).toString()
@@ -208,7 +211,7 @@ public class WcdkR2dbcAutoConfiguration {
     @Role(ROLE_INFRASTRUCTURE)
     public DisposableBean connectionFactoryDisposer(ConnectionFactory connectionFactory) {
         return () -> {
-            if (connectionFactory instanceof Disposable disposable) {
+            if (ownedConnectionFactories.remove(connectionFactory) && connectionFactory instanceof Disposable disposable) {
                 disposable.dispose();
             }
         };
@@ -365,6 +368,13 @@ public class WcdkR2dbcAutoConfiguration {
                                                            SnowflakeIdGenerator snowflakeIdGenerator) {
         return new RepositoryProxyFactory(repositoryOperations, properties, repositoryXmlRegistry,
                 snowflakeIdGenerator);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix="wcdk.r2dbc", name="sql-log-enabled", havingValue="true")
+    @ConditionalOnMissingBean(com.wcdk.r2dbc.execution.lifecycle.SqlAuditInterceptor.class)
+    public com.wcdk.r2dbc.execution.lifecycle.SqlAuditInterceptor sqlAuditInterceptor(R2dbcSqlLogger logger) {
+        return new com.wcdk.r2dbc.execution.lifecycle.SqlAuditInterceptor(logger);
     }
 
     @Bean

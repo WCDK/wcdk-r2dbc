@@ -28,7 +28,7 @@ public final class DerivedMethodCompiler {
     }
 
     public Optional<RepositoryMethodPlan> compile(Method method) {
-        if (resolver == null || !CustomMethodResolver.supports(method)) {
+        if (resolver == null || !method.getName().matches("^(find|count|exists|delete|update).*By.*$")) {
             return Optional.empty();
         }
         DerivedQueryDefinition derivedPlan;
@@ -36,7 +36,7 @@ public final class DerivedMethodCompiler {
             derivedPlan = resolver.compile(method);
         } catch (RuntimeException error) {
             throw new IllegalArgumentException("无效的派生仓库方法: "
-                    + method.toGenericString(), error);
+                    + method.toGenericString() + "：" + error.getMessage(), error);
         }
         String statementId = repositoryInterface.getName() + "." + method.getName();
         return Optional.of(new RepositoryMethodPlan(method, RepositoryMethodPlan.Kind.DERIVED, null, statementId,

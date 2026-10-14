@@ -113,19 +113,24 @@ class XmlRepositoryContractTests {
         return operations;
     }
     private XmlRepositoryExecutor executor(RepositoryOperations operations, RepositoryXmlRegistry registry) {
-        return new XmlRepositoryExecutor(null, Repository.class, registry, new SqlExecutionEngine(operations), new RepositoryParameterBinder());
+        return new XmlRepositoryExecutor(null, Repository.class, registry, new SqlExecutionEngine(operations), new RepositoryParameterBinder(), false);
     }
     private static Method method(String name) {
         return Arrays.stream(Repository.class.getDeclaredMethods()).filter(m -> m.getName().equals(name)).findFirst().orElseThrow();
     }
+    private com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan compile(RepositoryStatement statement, Method method) {
+        var registry = mock(RepositoryXmlRegistry.class);
+        when(registry.find(Repository.class, method.getName())).thenReturn(Optional.of(statement));
+        return new XmlStatementCompiler(Repository.class, registry).compile(method).orElseThrow();
+    }
     private Object write(XmlRepositoryExecutor executor, String name, Object... args) {
-        return ((Mono<?>) executor.executeXmlStatement(new RepositoryStatement(Repository.class.getName(), name,
-                SqlCommandType.UPDATE, "UPDATE t SET n=1"), method(name), args)).block();
+        var statement = new RepositoryStatement(Repository.class.getName(), name, SqlCommandType.UPDATE, "UPDATE t SET n=1");
+        return ((Mono<?>) executor.execute(compile(statement, method(name)), args, reactor.util.context.Context.empty(), null)).block();
     }
     private Object read(XmlRepositoryExecutor executor, String resultMap) {
         var statement = new RepositoryStatement(Repository.class.getName(), "find", SqlCommandType.SELECT,
                 DynamicSqlSource.staticSql("SELECT name, city FROM t"), null, resultMap);
-        return ((Mono<?>) executor.executeXmlStatement(statement, method("find"), new Object[0])).block();
+        return ((Mono<?>) executor.execute(compile(statement, method("find")), new Object[0], reactor.util.context.Context.empty(), null)).block();
     }
     private void register(RepositoryXmlRegistry registry, ResultMapDefinition map) {
         when(registry.findResultMap(map.id())).thenReturn(Optional.of(map));

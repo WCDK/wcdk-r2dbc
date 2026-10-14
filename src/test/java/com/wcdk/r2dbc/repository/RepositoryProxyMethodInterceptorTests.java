@@ -12,14 +12,16 @@ import static org.mockito.Mockito.*;
 
 class RepositoryProxyMethodInterceptorTests {
 
-    @Test
-    void registryReturnsCompiledPlanWithoutWrapping() throws Exception {
-        Method method = ReturnTypes.class.getDeclaredMethod("value");
-        RepositoryMethodPlan plan = new RepositoryMethodPlan(
-                method, RepositoryMethodPlan.Kind.DERIVED, null, "test.value");
-        RepositoryMethodPlanRegistry registry = new RepositoryMethodPlanRegistry(Map.of(method, plan));
+    interface ObjectMethods { String toString(); int hashCode(); boolean equals(Object other); }
 
-        assertThat(registry.get(method)).isSameAs(plan);
+    @Test
+    void redeclaredObjectMethodsUseProxyIdentity() {
+        var factory = new ProxyFactory(); factory.setInterfaces(ObjectMethods.class);
+        factory.addAdvice(new RepositoryProxyMethodInterceptor(Map.of(), mock(RepositoryInvocationDispatcher.class)));
+        var proxy = (ObjectMethods) factory.getProxy();
+        assertThat(proxy.toString()).contains("@" + Integer.toHexString(System.identityHashCode(proxy)));
+        assertThat(proxy.hashCode()).isEqualTo(System.identityHashCode(proxy));
+        assertThat(proxy.equals(proxy)).isTrue(); assertThat(proxy.equals(new Object())).isFalse();
     }
 
     @Test

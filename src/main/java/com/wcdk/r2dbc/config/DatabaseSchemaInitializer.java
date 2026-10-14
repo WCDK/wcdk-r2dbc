@@ -118,10 +118,21 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
             return;
         }
 
-        executeSqlResources(sqlResources, initConfig.isIgnoreErrors(), initConfig.isExecuteInTransaction(), databaseType)
-                .doOnSuccess(v -> log.info("数据库Schema初始化完成"))
-                .doOnError(e -> log.error("数据库Schema初始化失败", e))
-                .block();
+        java.time.Duration timeout = initConfig.getTimeout();
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("wcdk.r2dbc.database-initializer.timeout 必须为正数");
+        }
+        try {
+            executeSqlResources(sqlResources, initConfig.isIgnoreErrors(), initConfig.isExecuteInTransaction(), databaseType)
+                    .doOnSuccess(v -> log.info("数据库Schema初始化完成"))
+                    .block(timeout);
+        } catch (RuntimeException error) {
+            RuntimeException failure = error.getCause() instanceof java.util.concurrent.TimeoutException
+                    ? new IllegalStateException("数据库Schema初始化超时：wcdk.r2dbc.database-initializer.timeout=" + timeout, error)
+                    : error;
+            log.error("数据库Schema初始化失败", failure);
+            throw failure;
+        }
     }
 
     /**
@@ -154,7 +165,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
             log.warn("自动检测数据库类型失败", e);
         }
 
-        log.warn("无法识别数据库类型，默认使用dm");
+        log.error("无法识别数据库类型，Schema初始化终止；请配置 wcdk.r2dbc.database-initializer.database-type");
         throw new IllegalStateException("无法从配置或R2DBC元数据中确定数据库类型");
     }
 
@@ -172,7 +183,7 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
             for (Resource resource : resourcePatternResolver.getResources(sqlLocation)) {
                 String filename = resource.getFilename();
                 if (filename == null || !filename.toLowerCase(java.util.Locale.ROOT).endsWith(".sql")) continue;
-                String scriptType = scriptDatabaseType(resource);
+                String scriptType = scriptDatabaseType(resource, sqlLocation);
                 if (databaseType.equals(scriptType)) specific.add(resource);
                 else if (scriptType == null) generic.add(resource);
             }
@@ -183,9 +194,43 @@ public class DatabaseSchemaInitializer implements CommandLineRunner {
     }
 
     static String scriptDatabaseType(Resource resource) {
+        return scriptDatabaseType(resource, "");
+    }
+
+    static String scriptDatabaseType(Resource resource, String sqlLocation) {
         String path;
-        try { path = resource.getURL().getPath(); }
+        try {
+            path = resource.getURL().getPath().replace('\\', '/');
+            String location = sqlLocation.replace('\\', '/').replaceFirst("^(classpath\\*?:|file:)", "");
+            int wildcard = location.length();
+            for (char marker : new char[]{'*', '?'}) {
+                int index = location.indexOf(marker);
+                if (index >= 0) wildcard = Math.min(wildcard, index);
+            }
+            String root = location.substring(0, location.lastIndexOf('/', wildcard) + 1);
+            if (!root.isEmpty()) {
+                String anchor = root.startsWith("/") ? root : "/" + root;
+                int start = path.lastIndexOf(anchor);
+                path = start < 0 ? resource.getFilename() : path.substring(start + anchor.length());
+            } else if (!sqlLocation.isEmpty()) {
+                String classpathRoot = null;
+                try {
+                    var roots = org.springframework.util.ClassUtils.getDefaultClassLoader().getResources("");
+                    while (roots.hasMoreElements()) {
+                        String candidate = roots.nextElement().getPath();
+                        if (path.startsWith(candidate) && (classpathRoot == null || candidate.length() > classpathRoot.length())) {
+                            classpathRoot = candidate;
+                        }
+                    }
+                } catch (java.io.IOException ignored) { }
+                int archive = path.lastIndexOf("!/");
+                path = archive >= 0 ? path.substring(archive + 2)
+                        : classpathRoot != null && path.startsWith(classpathRoot) ? path.substring(classpathRoot.length())
+                        : resource.getFilename();
+            }
+        }
         catch (java.io.IOException error) { path = resource.getDescription(); }
+        if (path == null) return null;
         String[] segments = path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT).split("/");
         for (String segment : segments) {
             String type = DATABASE_TYPE_KEYWORDS.get(segment);

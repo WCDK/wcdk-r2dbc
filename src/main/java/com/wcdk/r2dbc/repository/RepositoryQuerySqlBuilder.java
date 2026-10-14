@@ -121,8 +121,9 @@ final class RepositoryQuerySqlBuilder {
     }
 
     String limitSql(QueryWrapper<?> queryWrapper, ContextView dialectContext) {
-        if (queryWrapper == null || queryWrapper.limit() == null) {
-            return "";
+        if (queryWrapper == null) return "";
+        if (queryWrapper.limit() == null) {
+            return queryWrapper.offset() == null ? "" : " " + resolveDialect(dialectContext).renderOffsetOnly(queryWrapper.offset());
         }
         Long offset = queryWrapper.offset() == null ? null : queryWrapper.offset().longValue();
         return paginationSql(queryWrapper.limit(), offset, dialectContext);

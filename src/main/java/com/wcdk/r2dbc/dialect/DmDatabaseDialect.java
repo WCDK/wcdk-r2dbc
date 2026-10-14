@@ -1,6 +1,5 @@
 package com.wcdk.r2dbc.dialect;
 
-import io.r2dbc.spi.ConnectionFactory;
 
 /**
  * 达梦数据库方言。
@@ -33,8 +32,4 @@ public final class DmDatabaseDialect extends OracleDatabaseDialect {
         return rawColumn;
     }
 
-    @Override
-    public boolean supports(ConnectionFactory connectionFactory) {
-        return DmDialectSupport.isDm(connectionFactory);
-    }
 }

@@ -27,8 +27,8 @@ import java.util.stream.Collectors;
  * - 计数：countBy[Field] / countBy[Field1]And[Field2]
  * - 判断是否存在：existsBy[Field] / existsBy[Field1]And[Field2]
  * - 删除：deleteBy[Field] (逻辑删除)
- * - 按主键更新：update[Field]ById
- * - 按条件更新：update[Field1]And[Field2]By[Condition]
+ * - 按主键更新：updateBy[Field]ById
+ * - 按条件更新：updateBy[Field1]And[Field2]By[Condition]
  * - 排序：orderBy[Field]Asc / orderBy[Field]Desc
  *
  * @author WCDK
@@ -42,6 +42,7 @@ public class CustomMethodResolver {
     );
 
     private final RepositoryMetadata metadata;
+    private final List<FieldToken> fieldTokens;
 
     private final Object logicDeleteValue;
 
@@ -49,6 +50,7 @@ public class CustomMethodResolver {
 
     public CustomMethodResolver(RepositoryMetadata metadata, Object logicDeleteValue, Object logicNotDeleteValue) {
         this.metadata = metadata;
+        this.fieldTokens = buildTokens();
         this.logicDeleteValue = logicDeleteValue;
         this.logicNotDeleteValue = logicNotDeleteValue;
     }
@@ -72,7 +74,7 @@ public class CustomMethodResolver {
     public DerivedQueryDefinition compile(Method method) {
         Matcher matcher = METHOD_PATTERN.matcher(method.getName());
         if (!matcher.matches() || matcher.group(2) != null) {
-            throw new IllegalArgumentException("不支持的派生仓库方法：" + method.toGenericString());
+            throw new IllegalArgumentException("不支持的派生仓库方法：" + method.toGenericString() + "；请使用 findBy/countBy/existsBy/deleteBy 或 updateBy<更新字段>By<条件>，不支持 findAllBy/findOneBy/updateXxxById");
         }
         validateMethodNameLength(method.getName());
         String operation = matcher.group(1);
@@ -81,9 +83,19 @@ public class CustomMethodResolver {
         String conditionPart = fieldPart;
         List<String> setFields = List.of();
         if ("update".equals(operation)) {
-            int byIndex = fieldPart == null ? -1 : fieldPart.indexOf("By");
-            if (byIndex <= 0) throw new IllegalArgumentException("update方法必须指定更新字段和条件：" + method.getName());
-            setFields = parseFieldNames(fieldPart.substring(0, byIndex));
+            int byIndex = -1;
+            for (int position = fieldPart == null ? -1 : fieldPart.lastIndexOf("By"); position > 0;
+                 position = fieldPart.lastIndexOf("By", position - 1)) {
+                try {
+                    setFields = parseFieldNames(fieldPart.substring(0, position));
+                    byIndex = position;
+                    break;
+                } catch (IllegalArgumentException error) {
+                    if (error.getMessage().contains("歧义")) throw error;
+                    // 下一候选切分继续按字段集合校验。
+                }
+            }
+            if (byIndex <= 0) throw new IllegalArgumentException("update方法必须使用 updateBy<更新字段>By<条件>：" + method.getName());
             conditionPart = fieldPart.substring(byIndex + 2);
             if ("Id".equals(conditionPart)) conditionPart = metadata.requireIdColumn().field().getName();
         }
@@ -130,7 +142,7 @@ public class CustomMethodResolver {
         if (fieldPart == null || fieldPart.isEmpty()) {
             String sql = "SELECT " + selectColumns() + " FROM " + metadata.tableName()
                     + logicalNotDeleteSql();
-            return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
+            return new ParsedMethod(sql, buildParameters(List.of()), SqlCommandType.SELECT);
         }
 
         List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
@@ -150,7 +162,7 @@ public class CustomMethodResolver {
         if (fieldPart == null || fieldPart.isEmpty()) {
             String sql = "SELECT COUNT(1) FROM " + metadata.tableName()
                     + logicalNotDeleteSql();
-            return new ParsedMethod(sql, Map.of(), SqlCommandType.SELECT);
+            return new ParsedMethod(sql, buildParameters(List.of()), SqlCommandType.SELECT);
         }
 
         List<Condition> conditions = bindConditions(compiledConditions, arguments, 0, method.getName());
@@ -219,7 +231,7 @@ public class CustomMethodResolver {
         String logical = "And";
         while (offset < text.length()) {
             boolean matched = false;
-            for (FieldToken candidate : longestTokens()) {
+            for (FieldToken candidate : matchingTokens(text, offset)) {
                 FieldColumn column = candidate.column();
                 String token = candidate.token();
                 if (!text.regionMatches(true, offset, token, 0, token.length())) continue;
@@ -235,7 +247,16 @@ public class CustomMethodResolver {
                 }
                 if (matched) break;
             }
-            if (!matched) throw new IllegalArgumentException("实体字段不存在或算子无效：" + text.substring(offset));
+            if (!matched) {
+                String remaining = text.substring(offset);
+                String known = longestTokens().stream().map(FieldToken::token)
+                        .filter(token -> remaining.regionMatches(true, 0, token, 0, token.length())).findFirst().orElse(null);
+                if (known != null) throw new IllegalArgumentException("算子不支持：" + remaining.substring(known.length())
+                        + "；支持算子：" + java.util.Arrays.stream(DerivedOperator.values())
+                        .map(operator -> operator.suffix().isEmpty() ? "(等值)" : operator.suffix()).toList());
+                throw new IllegalArgumentException("实体字段不存在：" + remaining + "；候选字段："
+                        + metadata.columns().stream().map(c -> c.field().getName()).toList());
+            }
             if (offset < text.length()) {
                 logical = text.startsWith("And", offset) ? "And" : "Or";
                 offset += logical.length();
@@ -247,12 +268,36 @@ public class CustomMethodResolver {
 
     private record FieldToken(FieldColumn column, String token) {}
 
-    private List<FieldToken> longestTokens() {
+    private List<FieldToken> longestTokens() { return fieldTokens; }
+
+    private List<FieldToken> buildTokens() {
         return metadata.columns().stream().flatMap(column ->
-                java.util.stream.Stream.of(column.field().getName(), column.rawName(), column.rawName().replace("_", "")).distinct()
+                java.util.stream.Stream.of(column.field().getName(), capitalize(column.field().getName()), column.rawName(), column.rawName().replace("_", "")).distinct()
                         .map(token -> new FieldToken(column, token)))
                 .sorted(java.util.Comparator.comparingInt((FieldToken token) -> token.token().length()).reversed())
                 .toList();
+    }
+
+    private static String capitalize(String name) {
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+
+    private List<FieldToken> matchingTokens(String text, int offset) {
+        List<FieldToken> matches = longestTokens().stream()
+                .filter(t -> text.regionMatches(true, offset, t.token(), 0, t.token().length())).toList();
+        if (matches.isEmpty()) return matches;
+        int length = matches.getFirst().token().length();
+        List<FieldToken> longest = matches.stream().filter(t -> t.token().length() == length).toList();
+        List<FieldToken> exact = longest.stream()
+                .filter(t -> text.startsWith(t.column().field().getName(), offset)
+                        || text.startsWith(capitalize(t.column().field().getName()), offset)).toList();
+        List<FieldToken> preferred = exact.isEmpty() ? longest : exact;
+        List<String> fields = preferred.stream().map(t -> t.column().field().getName()).distinct().toList();
+        if (fields.size() > 1) throw new IllegalArgumentException("字段令牌有歧义：" + text.substring(offset)
+                + "；候选字段：" + fields);
+        List<FieldToken> result = new ArrayList<>(preferred);
+        matches.stream().filter(t -> t.token().length() < length).forEach(result::add);
+        return result;
     }
 
     private List<Condition> bindConditions(List<DerivedQueryDefinition.ConditionDefinition> definitions,
@@ -426,7 +471,7 @@ public class CustomMethodResolver {
         int offset = 0;
         while (offset < text.length()) {
             boolean matched = false;
-            for (FieldToken candidate : longestTokens()) {
+            for (FieldToken candidate : matchingTokens(text, offset)) {
                 FieldColumn column = candidate.column();
                 String token = candidate.token();
                 if (!text.regionMatches(true, offset, token, 0, token.length())) continue;

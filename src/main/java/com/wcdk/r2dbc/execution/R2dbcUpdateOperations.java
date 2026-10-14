@@ -5,7 +5,6 @@ import com.wcdk.r2dbc.execution.lifecycle.SqlLifecycleInterceptorChain;
 import com.wcdk.r2dbc.execution.log.R2dbcSqlLogger;
 import com.wcdk.r2dbc.dialect.DatabaseDialect;
 import com.wcdk.r2dbc.dialect.DatabaseDialects;
-import com.wcdk.r2dbc.dialect.GeneratedKeyStrategy;
 import com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory;
 import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -32,10 +31,19 @@ public class R2dbcUpdateOperations {
 
     private final R2dbcSqlLogger sqlLogger;
 
+    private final boolean quoteIdentifier;
+
     public R2dbcUpdateOperations(DatabaseClient databaseClient,
                                  ParameterBinder parameterBinder,
                                  SqlLifecycleExecutor lifecycleExecutor,
                                  R2dbcSqlLogger sqlLogger) {
+        this(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger, true);
+    }
+
+    public R2dbcUpdateOperations(DatabaseClient databaseClient, ParameterBinder parameterBinder,
+                                 SqlLifecycleExecutor lifecycleExecutor, R2dbcSqlLogger sqlLogger,
+                                 boolean quoteIdentifier) {
+        this.quoteIdentifier = quoteIdentifier;
         this.databaseClient = databaseClient;
         this.parameterBinder = parameterBinder;
         this.lifecycleExecutor = lifecycleExecutor;
@@ -62,18 +70,18 @@ public class R2dbcUpdateOperations {
     public Mono<Long> update(String sql, Map<?, ?> parameters) {
         return Mono.deferContextual(ignored -> {
             SqlLifecycleInterceptorChain chain = lifecycleExecutor.getChain();
-            Map<String, Object> parameterCopy = new java.util.LinkedHashMap<>();
+            Map<Object, Object> parameterCopy = new java.util.LinkedHashMap<>();
             if (parameters != null) {
-                parameters.forEach((key, value) -> parameterCopy.put(String.valueOf(key), value));
+                parameters.forEach((key, value) -> parameterCopy.put(key, value));
             }
             SqlExecutionContext context = lifecycleExecutor.createContext("update", parameterCopy);
             context.setSql(sql);
             Mono<Boolean> preparation = lifecycleExecutor.prepare(chain, context, Mono::empty);
             return lifecycleExecutor.executeMono(chain, context, preparation,
                     () -> execute(context.getSql(), context.getParameters(), ignored).fetch().rowsUpdated()
-                            .doOnSuccess(count -> sqlLogger.logExecution(context.getSql(), context.getParameters(),
+                            .doOnSuccess(count -> sqlLogger.logExecution(context.getExecutionId(), context.getSql(), context.getParameters(),
                                     count == null ? 0 : count))
-                            .doOnError(error -> sqlLogger.logExecution(
+                            .doOnError(error -> sqlLogger.logExecution(context.getExecutionId(),
                                     context.getSql(), context.getParameters(), error)));
         });
     }
@@ -82,8 +90,8 @@ public class R2dbcUpdateOperations {
     public Mono<Long> updateWithoutLifecycle(String sql, Map<?, ?> parameters) {
         return Mono.deferContextual(contextView -> {
             return execute(sql, parameters, contextView).fetch().rowsUpdated()
-                    .doOnSuccess(count -> sqlLogger.logExecution(sql, parameters, count == null ? 0 : count))
-            .doOnError(error -> sqlLogger.logExecution(sql, parameters, error));
+                    .doOnSuccess(count -> sqlLogger.logExecution(contextView, sql, parameters, count == null ? 0 : count))
+            .doOnError(error -> sqlLogger.logExecution(contextView, sql, parameters, error));
         });
     }
 
@@ -105,26 +113,31 @@ public class R2dbcUpdateOperations {
             }
             DatabaseDialect dialect = DatabaseDialects.get(factory);
             String renderedColumn = renderedIdColumn == null
-                    ? dialect.quoteIdentifier(idColumn) : renderedIdColumn;
-            GeneratedKeyStrategy strategy = dialect.generatedKeyStrategy();
-            if (strategy == GeneratedKeyStrategy.NONE) {
-                return Mono.error(new UnsupportedOperationException("方言不支持数据库生成主键：" + dialect.databaseType()));
-            }
-            // PostgreSQL 拼接 SQL RETURNING；Oracle/达梦由驱动请求生成值。
-            String insertSql = strategy == GeneratedKeyStrategy.RETURNING
-                    ? sql + dialect.renderGeneratedKey(renderedColumn) : sql;
-            var spec = execute(insertSql, parameters, context);
-            if (strategy == GeneratedKeyStrategy.LAST_INSERT_ID || !dialect.supportsReturning()) {
-                // MySQL 从本条 INSERT 的响应读取 last insert id，避免额外连接上的 SELECT。
-                spec = spec.filter(statement -> statement.returnGeneratedValues(dialect.generatedValueColumn(idColumn, renderedColumn)));
+                    ? (quoteIdentifier ? dialect.quoteIdentifier(idColumn) : idColumn) : renderedIdColumn;
+            String insertSql;
+            DatabaseClient.GenericExecuteSpec spec;
+            switch (dialect.generatedKeyStrategy()) {
+                case NONE -> {
+                    return Mono.error(new UnsupportedOperationException("方言不支持数据库生成主键：" + dialect.databaseType()));
+                }
+                case CLAUSE_RETURNING -> {
+                    insertSql = NamedParameterParser.appendClause(sql, dialect.renderGeneratedKey(renderedColumn));
+                    spec = execute(insertSql, parameters, context);
+                }
+                case DRIVER_GENERATED_KEYS -> {
+                    insertSql = sql;
+                    spec = execute(insertSql, parameters, context).filter(statement -> statement.returnGeneratedValues(
+                            dialect.generatedValueColumn(idColumn, renderedColumn)));
+                }
+                default -> throw new IllegalStateException("未知生成键策略");
             }
             return spec
                 .map((row, metadata) -> java.util.Objects.requireNonNull(row.get(0), "数据库返回的主键为空"))
                 .all()
                 .singleOrEmpty()
                 .switchIfEmpty(Mono.error(new IllegalStateException("数据库未返回生成的主键：" + idColumn)))
-                .doOnSuccess(id -> sqlLogger.logExecution(insertSql, parameters, 1L))
-                .doOnError(error -> sqlLogger.logExecution(insertSql, parameters, error));
+                .doOnSuccess(id -> sqlLogger.logExecution(context, insertSql, parameters, 1L))
+                .doOnError(error -> sqlLogger.logExecution(context, insertSql, parameters, error));
         });
     }
 

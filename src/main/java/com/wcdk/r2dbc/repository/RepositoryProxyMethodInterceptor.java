@@ -84,13 +84,14 @@ final class RepositoryProxyMethodInterceptor implements MethodInterceptor {
      * @author wcdk
      */
     private Object invokeObjectMethod(MethodInvocation invocation) {
+        Object proxy = ((ProxyMethodInvocation) invocation).getProxy();
         return switch (invocation.getMethod().getName()) {
-            case "toString" -> invocation.getThis().getClass().getName()
-                    + "@" + Integer.toHexString(System.identityHashCode(invocation.getThis()));
-            case "hashCode" -> System.identityHashCode(invocation.getThis());
+            case "toString" -> proxy.getClass().getName()
+                    + "@" + Integer.toHexString(System.identityHashCode(proxy));
+            case "hashCode" -> System.identityHashCode(proxy);
             case "equals" -> invocation.getArguments() != null
                     && invocation.getArguments().length == 1
-                    && invocation.getThis() == invocation.getArguments()[0];
+                    && proxy == invocation.getArguments()[0];
             default -> throw new IllegalStateException("不支持的 Object 方法：" + invocation.getMethod());
         };
     }

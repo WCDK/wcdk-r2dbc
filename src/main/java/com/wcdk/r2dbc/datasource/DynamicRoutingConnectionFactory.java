@@ -25,6 +25,14 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
 
     private final Map<String, ConnectionFactory> connectionFactories;
 
+    // 弱键仅记录连接的路由来源，不在无实际事务时绑定 Spring 事务资源。
+    private final Map<Connection, String> connectionDataSources =
+            Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    String dataSourceOf(Connection connection) {
+        return connectionDataSources.get(connection);
+    }
+
     private final AtomicBoolean disposed = new AtomicBoolean();
 
     public DynamicRoutingConnectionFactory(String primary, Map<String, ConnectionFactory> connectionFactories) {
@@ -47,7 +55,8 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
             String dataSource = R2dbcDataSourceContext.get(contextView);
             String selected = dataSource == null ? primary : dataSource;
             return R2dbcDataSourceContext.guardTransactionDataSource(contextView, selected, primary)
-                    .then(Mono.from(getConnectionFactory(selected).create()));
+                    .then(Mono.from(getConnectionFactory(selected).create())
+                            .doOnNext(connection -> connectionDataSources.put(connection, selected)));
         });
     }
 

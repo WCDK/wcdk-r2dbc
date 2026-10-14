@@ -1,71 +1,24 @@
 package com.wcdk.r2dbc.execution.lifecycle;
 
+import com.wcdk.r2dbc.execution.log.R2dbcSqlLogger;
+import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
+import com.wcdk.r2dbc.config.WcdkSpringR2dbcProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
-import java.lang.reflect.Method;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-
-/**
- * SQL审计拦截器示例。
- * <p>
- * 记录所有SQL操作的审计信息。
- *
- * @author WCDK
- *
- * @version 1.0
- */
-@Component
+/** 审计输出与 SQL 日志共用开关和脱敏管线，仅记录执行终态。 */
 public class SqlAuditInterceptor implements SqlLifecycleInterceptor {
-
-    private static final Logger auditLog = LoggerFactory.getLogger("SQL_AUDIT");
-
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-
-    @Override
-    public void beforeCompile(SqlExecutionContext context) {
-        Method method = context.getMethod();
-        Class<?> repo = context.getRepositoryInterface();
-        auditLog.info("[AUDIT] {} - {}.{} - SQL compilation started",
-                LocalDateTime.now().format(FORMATTER),
-                repo.getSimpleName(),
-                method.getName());
+    private static final Logger log = LoggerFactory.getLogger("SQL_AUDIT");
+    private final R2dbcSqlLogger logger;
+    public SqlAuditInterceptor() { this(new R2dbcSqlLogger(new WcdkR2dbcProperties(), new WcdkSpringR2dbcProperties())); }
+    public SqlAuditInterceptor(R2dbcSqlLogger logger) { this.logger = java.util.Objects.requireNonNull(logger); }
+    @Override public void afterExecute(SqlExecutionContext context) {
+        if (!logger.isEnabled()) return;
+        log.info("AUDIT executionId={} statementId={} termination={} reason={} durationMs={} SQL={} error={}",
+                context.getExecutionId(), context.getStatementId(), context.getTerminationType(),
+                logger.sanitizeText(context.getStatusReason(), context.getParameters()), context.getDuration()/1_000_000,
+                logger.sanitizeText(context.getSql(), context.getParameters()),
+                context.hasError() ? logger.sanitizeText(context.getError().getMessage(), context.getParameters()) : "none");
     }
-
-    @Override
-    public void afterCompile(SqlExecutionContext context) {
-        auditLog.info("[AUDIT] {} - SQL compiled: {}",
-                LocalDateTime.now().format(FORMATTER),
-                context.getSql());
-    }
-
-    @Override
-    public void beforeExecute(SqlExecutionContext context) {
-        auditLog.info("[AUDIT] {} - SQL execution started",
-                LocalDateTime.now().format(FORMATTER));
-    }
-
-    @Override
-    public void afterExecute(SqlExecutionContext context) {
-        long durationMs = context.getDuration() / 1_000_000;
-        if (context.hasError()) {
-            auditLog.error("[AUDIT] {} - SQL execution failed ({}ms): {} - Error: {}",
-                    LocalDateTime.now().format(FORMATTER),
-                    durationMs,
-                    context.getSql(),
-                    context.getError().getMessage());
-        } else {
-            auditLog.info("[AUDIT] {} - SQL execution completed ({}ms): {}",
-                    LocalDateTime.now().format(FORMATTER),
-                    durationMs,
-                    context.getSql());
-        }
-    }
-
-    @Override
-    public int getOrder() {
-        return -100;
-    }
+    @Override public int getOrder() { return -100; }
 }

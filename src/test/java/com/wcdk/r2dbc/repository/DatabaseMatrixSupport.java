@@ -60,6 +60,8 @@ final class DatabaseMatrixSupport {
     static void verify(ConnectionFactory factory) {
         verify(factory, true);
         verify(factory, false);
+        verifyExecution(factory, true);
+        verifyExecution(factory, false);
     }
 
     private static void verify(ConnectionFactory factory, boolean quoted) {
@@ -98,12 +100,24 @@ final class DatabaseMatrixSupport {
             next.name = "second";
             repository.insert(next).block(TIMEOUT);
             assertThat(next.id).isGreaterThan(defaults.id);
+            assertThat(repository.existsByName(MatrixName.second).block(TIMEOUT)).isTrue();
+            var utilProperties = new WcdkR2dbcProperties();
+            utilProperties.setSnowflakeId(false); utilProperties.setSqlLogEnabled(false);
+            var enumUtil = new R2dbcUtil(client, null, null, utilProperties);
+            assertThat(enumUtil.queryOne("SELECT COUNT(*) FROM " + table + " WHERE " + name + " = :name",
+                    java.util.Map.of("name", MatrixName.second), (row, metadata) -> ((Number) row.get(0)).longValue())
+                    .block(TIMEOUT)).isEqualTo(1L);
+
             var page = repository.selectPage(PageRequest.of(0, 1, Sort.by(Sort.Order.desc("id"))))
                     .block(TIMEOUT);
             assertThat(page.getTotalElements()).isEqualTo(2);
             assertThat(page.getContent()).extracting(row -> row.id).containsExactly(next.id);
             assertThat(repository.selectPage(PageRequest.of(1, 1, Sort.by("id"))).block(TIMEOUT).getContent())
                     .extracting(row -> row.id).containsExactly(next.id);
+
+            assertThat(repository.selectList(new QueryWrapper<MatrixRow>().orderByAsc("id").offset(1)).collectList().block(TIMEOUT))
+                    .extracting(row -> row.id).containsExactly(next.id);
+            assertThat(repository.selectList(new QueryWrapper<MatrixRow>().orderByAsc("id").offset(2)).collectList().block(TIMEOUT)).isEmpty();
 
             assertThat(repository.deleteById(defaults.id).block(TIMEOUT)).isEqualTo(1);
             assertThat(repository.existsByName("default").block(TIMEOUT)).isFalse();
@@ -121,6 +135,8 @@ final class DatabaseMatrixSupport {
             }
             assertThat(repository.existsByName("rollback").block(TIMEOUT)).isFalse();
 
+            verifyManualTransactions(factory, client, table, name, deleted);
+
             // 直接验证数值契约：SQL 返回 1/0，不依赖数据库特有的布尔类型。
             String query = dialect.pagination("SELECT 1 FROM " + table + " WHERE " + name + " = 'second'", 0, 1);
             assertThat(client.sql(dialect.existsResult(query)).map((row, metadata) -> ((Number) row.get(0)).intValue())
@@ -133,8 +149,120 @@ final class DatabaseMatrixSupport {
         }
     }
 
+    /** 四方言共享：使用真实连接提交、回滚，并在真实 begin 后验证切库拒绝。 */
+    private static void verifyManualTransactions(ConnectionFactory factory, DatabaseClient client,
+                                                  String table, String name, String deleted) {
+        var routing = new com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory(
+                "primary", java.util.Map.of("primary", factory, "secondary", factory));
+        var template = new com.wcdk.r2dbc.transaction.TransactionTemplate(
+                new com.wcdk.r2dbc.transaction.TransactionManager(routing));
+        java.util.function.Function<String, String> insert = value -> "INSERT INTO " + table
+                + " (" + name + ", " + deleted + ") VALUES ('" + value + "', 0)";
+
+        template.executeManual(tx -> execute(tx.getConnection(), insert.apply("manual_commit"))
+                .then(tx.commit())).block(TIMEOUT);
+        assertThat(count(client, table, name, "manual_commit")).isEqualTo(1L);
+
+        template.executeManual(tx -> execute(tx.getConnection(), insert.apply("manual_rollback"))
+                .then(tx.rollback())).block(TIMEOUT);
+        assertThat(count(client, table, name, "manual_rollback")).isZero();
+
+        // 拒绝发生前已通过事务连接写入；错误收尾必须真实回滚。
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> template.executeManual(tx ->
+                execute(tx.getConnection(), insert.apply("manual_guard"))
+                        .then(com.wcdk.r2dbc.datasource.R2dbcDataSourceContext.use("secondary",
+                                Mono.from(routing.create()).flatMap(connection -> Mono.from(connection.close())))))
+                .block(TIMEOUT))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("primary").hasMessageContaining("secondary")
+                .hasMessageContaining("事务内禁止切换");
+        assertThat(count(client, table, name, "manual_guard")).isZero();
+    }
+
+    private static Mono<Void> execute(io.r2dbc.spi.Connection connection, String sql) {
+        return reactor.core.publisher.Flux.from(connection.createStatement(sql).execute())
+                .concatMap(result -> Mono.from(result.getRowsUpdated())).then();
+    }
+
+    private static long count(DatabaseClient client, String table, String column, String value) {
+        return client.sql("SELECT COUNT(*) FROM " + table + " WHERE " + column + " = '" + value + "'")
+                .map((row, metadata) -> ((Number) row.get(0)).longValue()).one().block(TIMEOUT);
+    }
+
+    private static void verifyExecution(ConnectionFactory factory, boolean quoted) {
+        var dialect = DatabaseDialects.get(factory);
+        var client = DatabaseClient.create(factory);
+        java.util.function.Function<String, String> identifier = value -> quoted ? dialect.quoteIdentifier(value) : value;
+        String table = identifier.apply("wcdk_execution_qa"), pk = identifier.apply("pk"), id = identifier.apply("id"), enabled = identifier.apply("enabled");
+        String booleanType = switch (dialect.databaseType()) {
+            case POSTGRESQL -> "BOOLEAN";
+            case MYSQL -> "BOOLEAN";
+            default -> "INTEGER";
+        };
+        String keyType = dialect.databaseType() == com.wcdk.r2dbc.dialect.DatabaseType.ORACLE ? "NUMBER(19)" : "BIGINT";
+        client.sql("CREATE TABLE " + table + " (" + pk + " " + keyType + " PRIMARY KEY, " + id + " VARCHAR(64), " + enabled + " " + booleanType + ")")
+                .then().block(TIMEOUT);
+        try {
+            String falseValue = dialect.databaseType() == com.wcdk.r2dbc.dialect.DatabaseType.POSTGRESQL ? "FALSE" : "0";
+            client.sql("INSERT INTO " + table + " (" + pk + ", " + id + ", " + enabled + ") VALUES (1, 'before', " + falseValue + ")")
+                    .then().block(TIMEOUT);
+            var properties = new WcdkR2dbcProperties(); properties.setQuoteIdentifier(quoted); properties.setSqlLogEnabled(false);
+            var util = new R2dbcUtil(client, null, null, properties);
+            var registry = org.mockito.Mockito.mock(RepositoryXmlRegistry.class);
+            String query = "SELECT " + enabled + " FROM " + table + " WHERE " + pk + " = 1";
+            for (String method : java.util.List.of("flag", "flags")) {
+                org.mockito.Mockito.when(registry.find(ExecutionRepository.class, method)).thenReturn(java.util.Optional.of(
+                        new com.wcdk.r2dbc.query.xml.RepositoryStatement(ExecutionRepository.class.getName(), method,
+                                com.wcdk.r2dbc.execution.SqlCommandType.SELECT, query)));
+            }
+            org.mockito.Mockito.when(registry.find(ExecutionRepository.class, "projection")).thenReturn(java.util.Optional.of(
+                    new com.wcdk.r2dbc.query.xml.RepositoryStatement(ExecutionRepository.class.getName(), "projection",
+                            com.wcdk.r2dbc.execution.SqlCommandType.SELECT,
+                            com.wcdk.r2dbc.query.xml.DynamicSqlSource.staticSql("SELECT " + id + " FROM " + table + " WHERE " + pk + " = 1"),
+                            Projection.class.getName(), null)));
+            var repository = (ExecutionRepository) new RepositoryProxyFactory(new R2dbcRepositoryOperations(util), properties, registry).create(ExecutionRepository.class);
+            assertThat(repository.flag().block(TIMEOUT)).isFalse();
+            var patch = new ExecutionRow(); patch.pk = 1L; patch.id = "after";
+            assertThat(repository.updateById(patch).block(TIMEOUT)).isEqualTo(1L);
+            assertThat(repository.selectById(1L).block(TIMEOUT).id).isEqualTo("after");
+            assertThat(repository.projection().block(TIMEOUT).externalId()).isEqualTo("after");
+            var projected = (ProjectionRepository) new RepositoryProxyFactory(new R2dbcRepositoryOperations(util), properties, registry).create(ProjectionRepository.class);
+            assertThat(projected.selectById(1L).block(TIMEOUT).externalId()).isEqualTo("after");
+            String trueValue = dialect.databaseType() == com.wcdk.r2dbc.dialect.DatabaseType.POSTGRESQL ? "TRUE" : "1";
+            client.sql("UPDATE " + table + " SET " + enabled + " = " + trueValue).then().block(TIMEOUT);
+            assertThat(repository.flag().block(TIMEOUT)).isTrue();
+            assertThat(repository.flags().collectList().block(TIMEOUT)).containsExactly(true);
+            if (dialect.databaseType() == com.wcdk.r2dbc.dialect.DatabaseType.POSTGRESQL) {
+                org.mockito.Mockito.when(registry.find(ExecutionRepository.class, "flag")).thenReturn(java.util.Optional.of(
+                        new com.wcdk.r2dbc.query.xml.RepositoryStatement(ExecutionRepository.class.getName(), "flag",
+                                com.wcdk.r2dbc.execution.SqlCommandType.SELECT, "SELECT EXISTS(SELECT 1 FROM " + table + ")")));
+                var existsRepository = (ExecutionRepository) new RepositoryProxyFactory(new R2dbcRepositoryOperations(util), properties, registry).create(ExecutionRepository.class);
+                assertThat(existsRepository.flag().block(TIMEOUT)).isTrue();
+            }
+        } finally { client.sql("DROP TABLE " + table).then().block(TIMEOUT); }
+    }
+
+    interface ExecutionRepository extends BaseRepository<ExecutionRow> {
+        Mono<Boolean> flag(); reactor.core.publisher.Flux<Boolean> flags(); Mono<Projection> projection();
+    }
+    @Table("wcdk_execution_qa")
+    static class ExecutionRow { @Id Long pk; String id; Boolean enabled; }
+    interface ProjectionRepository extends BaseRepository<Projection> { }
+    @Table("wcdk_execution_qa")
+    record Projection(@Id Long pk, String externalId) {
+        Projection(Long pk, @com.wcdk.r2dbc.annotation.Column("id") String externalId) {
+            this.pk = pk; this.externalId = externalId;
+        }
+    }
+
     interface MatrixRepository extends BaseRepository<MatrixRow> {
         Mono<Boolean> existsByName(String name);
+        Mono<Boolean> existsByName(MatrixName name);
+    }
+
+    enum MatrixName {
+        second;
+        @Override public String toString() { return "must-use-name"; }
     }
 
     @Table("wcdk_matrix_qa")

@@ -17,6 +17,12 @@ public final class MySqlDatabaseDialect extends AbstractDatabaseDialect {
     }
 
     @Override
+    public String renderOffsetOnly(long offset) {
+        if (offset < 0) throw new IllegalArgumentException("查询偏移量不能小于 0");
+        return "LIMIT 18446744073709551615 OFFSET " + offset;
+    }
+
+    @Override
     public String renderGeneratedKey(String... columns) {
         return "";
     }
@@ -28,7 +34,7 @@ public final class MySqlDatabaseDialect extends AbstractDatabaseDialect {
 
     @Override
     public GeneratedKeyStrategy generatedKeyStrategy() {
-        return GeneratedKeyStrategy.LAST_INSERT_ID;
+        return GeneratedKeyStrategy.DRIVER_GENERATED_KEYS;
     }
 
     @Override
@@ -36,8 +42,4 @@ public final class MySqlDatabaseDialect extends AbstractDatabaseDialect {
         return "INSERT INTO " + table + " () VALUES ()";
     }
 
-    @Override
-    public boolean supportsUpsert() {
-        return true;
-    }
 }

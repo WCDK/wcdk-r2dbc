@@ -6,6 +6,7 @@ import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.relational.core.mapping.Column;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
@@ -75,7 +76,10 @@ public class R2dbcRowMapper {
         try {
             mappingRequests.increment();
             MappingPlan plan = mappingPlans.get(entityClass);
-            return entityClass.cast(plan.map(row, rowColumns(row), null));
+            return entityClass.cast(plan.map(row, ResultColumnCache.Columns.of(row.getMetadata()), null));
+        } catch (InvocationTargetException error) {
+            Throwable cause = error.getTargetException();
+            throw new IllegalStateException("实体构造器执行失败: " + entityClass.getName() + "：" + cause.getMessage(), cause);
         } catch (ReflectiveOperationException | RuntimeException e) {
             if (e instanceof IllegalStateException illegalStateException) {
                 throw illegalStateException;
@@ -94,7 +98,10 @@ public class R2dbcRowMapper {
                     throw new IllegalStateException("未知属性 '" + property + "'");
                 }
             }
-            return type.cast(plan.map(null, Set.of(), values));
+            return type.cast(plan.map(null, ResultColumnCache.Columns.empty(), values));
+        } catch (InvocationTargetException error) {
+            Throwable cause = error.getTargetException();
+            throw new IllegalStateException("resultMap " + context + " 构造器执行失败：" + cause.getMessage(), cause);
         } catch (ReflectiveOperationException | RuntimeException error) {
             throw new IllegalStateException("resultMap " + context + " 映射到 " + type.getName()
                     + " 失败：" + error.getMessage(), error);
@@ -103,8 +110,7 @@ public class R2dbcRowMapper {
 
     private Map<String, Object> rowToMap(Row row) {
         Map<String, Object> map = new LinkedHashMap<>();
-        row.getMetadata().getColumnMetadatas().forEach(column ->
-                map.put(column.getName(), row.get(column.getName())));
+        ResultColumnCache.Columns.of(row.getMetadata()).names().forEach(name -> map.put(name, row.get(name)));
         return map;
     }
 
@@ -234,7 +240,7 @@ public class R2dbcRowMapper {
         return null;
     }
 
-    private Object mappedValue(Row row, Set<String> rowColumns, ValueTarget target, Map<String, Object> values) {
+    private Object mappedValue(Row row, ResultColumnCache.Columns rowColumns, ValueTarget target, Map<String, Object> values) {
         if (values != null) {
             Object value = values.get(target.name());
             if (value == null && target.type().isPrimitive()) throw new IllegalStateException("属性 '" + target.name() + "' 缺少非 null 值");
@@ -243,7 +249,7 @@ public class R2dbcRowMapper {
                 throw new IllegalStateException("属性 '" + target.name() + "' 无法转换到 " + target.type().getName(), error);
             }
         }
-        String actualColumn = actualColumnName(rowColumns, target.column());
+        String actualColumn = rowColumns.actualName(target.column());
         if (actualColumn == null) {
             if (target.type().isPrimitive()) {
                 throw new IllegalStateException("必需的基本类型属性 '" + target.name()
@@ -260,7 +266,7 @@ public class R2dbcRowMapper {
             return convertValue(value, target.type());
         } catch (RuntimeException e) {
             throw new IllegalStateException("无法将列 '" + actualColumn + "' 映射到 '"
-                    + target.name() + "' (" + target.type().getName() + ")", e);
+                    + target.name() + "' (" + target.type().getName() + ")：" + e.getMessage(), e);
         }
     }
 
@@ -325,6 +331,9 @@ public class R2dbcRowMapper {
             }
         }
         if (boxedType == String.class) {
+            if (value instanceof byte[]) {
+                throw new IllegalArgumentException("不支持 byte[] 到 String 的隐式映射，请显式指定二进制编码");
+            }
             return String.valueOf(value);
         }
         if (boxedType == Boolean.class) {
@@ -341,7 +350,11 @@ public class R2dbcRowMapper {
             Object enumValue = Enum.valueOf((Class<? extends Enum>) boxedType.asSubclass(Enum.class), text.toString());
             return enumValue;
         }
-        return value;
+        throw unsupportedConversion(value, boxedType);
+    }
+
+    private IllegalArgumentException unsupportedConversion(Object value, Class<?> targetType) {
+        return new IllegalArgumentException("不支持类型转换：" + value.getClass().getName() + " → " + targetType.getName());
     }
 
     private Object convertDate(Date date, Class<?> targetType) {
@@ -378,31 +391,31 @@ public class R2dbcRowMapper {
     }
 
     private Object convertNumber(Number number, Class<?> targetType) {
-        if (targetType == Long.class) {
-            return number.longValue();
+        if (targetType == Double.class) return number.doubleValue();
+        if (targetType == Float.class) return number.floatValue();
+        BigDecimal decimal = number instanceof BigDecimal value ? value
+                : number instanceof BigInteger integer ? new BigDecimal(integer)
+                : number instanceof Long || number instanceof Integer || number instanceof Short || number instanceof Byte
+                ? BigDecimal.valueOf(number.longValue()) : new BigDecimal(number.toString());
+        if (targetType == BigDecimal.class) return decimal;
+        try {
+            BigInteger integer = decimal.toBigIntegerExact();
+            if (targetType == BigInteger.class) return integer;
+            long value = integer.longValueExact();
+            if (targetType == Long.class) return value;
+            if (targetType == Integer.class) return Math.toIntExact(value);
+            if (targetType == Short.class) {
+                if (value < Short.MIN_VALUE || value > Short.MAX_VALUE) throw new ArithmeticException();
+                return (short) value;
+            }
+            if (targetType == Byte.class) {
+                if (value < Byte.MIN_VALUE || value > Byte.MAX_VALUE) throw new ArithmeticException();
+                return (byte) value;
+            }
+            throw unsupportedConversion(number, targetType);
+        } catch (ArithmeticException error) {
+            throw new IllegalArgumentException("数值 " + number + " 无法精确转换到 " + targetType.getName(), error);
         }
-        if (targetType == Integer.class) {
-            return number.intValue();
-        }
-        if (targetType == Short.class) {
-            return number.shortValue();
-        }
-        if (targetType == Byte.class) {
-            return number.byteValue();
-        }
-        if (targetType == Double.class) {
-            return number.doubleValue();
-        }
-        if (targetType == Float.class) {
-            return number.floatValue();
-        }
-        if (targetType == BigDecimal.class) {
-            return number instanceof BigDecimal decimal ? decimal : BigDecimal.valueOf(number.doubleValue());
-        }
-        if (targetType == BigInteger.class) {
-            return number instanceof BigInteger integer ? integer : BigInteger.valueOf(number.longValue());
-        }
-        return number;
     }
 
     private Class<?> boxedType(Class<?> type) {
@@ -441,7 +454,7 @@ public class R2dbcRowMapper {
     }
 
     private interface MappingPlan {
-        Object map(Row row, Set<String> rowColumns, Map<String, Object> values) throws ReflectiveOperationException;
+        Object map(Row row, ResultColumnCache.Columns rowColumns, Map<String, Object> values) throws ReflectiveOperationException;
         Set<String> properties();
     }
 
@@ -471,7 +484,7 @@ public class R2dbcRowMapper {
         }
 
         @Override
-        public Object map(Row row, Set<String> rowColumns, Map<String, Object> values) throws ReflectiveOperationException {
+        public Object map(Row row, ResultColumnCache.Columns rowColumns, Map<String, Object> values) throws ReflectiveOperationException {
             Object[] arguments = new Object[targets.size()];
             for (int i = 0; i < targets.size(); i++) {
                 arguments[i] = mappedValue(row, rowColumns, targets.get(i), values);
@@ -479,7 +492,7 @@ public class R2dbcRowMapper {
             Object entity = constructor.newInstance(arguments);
             for (FieldTarget target : transientFields) {
                 if (values != null ? !values.containsKey(target.field().getName())
-                        : actualColumnName(rowColumns, target.column()) == null) {
+                        : rowColumns.actualName(target.column()) == null) {
                     continue;
                 }
                 ValueTarget valueTarget = new ValueTarget(target.field().getName(),
@@ -506,10 +519,10 @@ public class R2dbcRowMapper {
         }
 
         @Override
-        public Object map(Row row, Set<String> rowColumns, Map<String, Object> values) throws ReflectiveOperationException {
+        public Object map(Row row, ResultColumnCache.Columns rowColumns, Map<String, Object> values) throws ReflectiveOperationException {
             Object entity = constructor.newInstance();
             for (FieldTarget target : targets) {
-                String actualColumn = values == null ? actualColumnName(rowColumns, target.column()) : target.column();
+                String actualColumn = values == null ? rowColumns.actualName(target.column()) : target.column();
                 if (values != null && !values.containsKey(target.field().getName())) {
                     if (target.required() && target.field().getType().isPrimitive()) throw new IllegalStateException("属性 '" + target.field().getName() + "' 缺少值");
                     continue;
@@ -529,21 +542,4 @@ public class R2dbcRowMapper {
         }
     }
 
-    private Set<String> rowColumns(Row row) {
-        Set<String> columns = new HashSet<>();
-        row.getMetadata().getColumnMetadatas().forEach(column -> columns.add(column.getName()));
-        return columns;
-    }
-
-    private String actualColumnName(Set<String> rowColumns, String columnName) {
-        if (rowColumns.contains(columnName)) {
-            return columnName;
-        }
-        for (String rowColumn : rowColumns) {
-            if (rowColumn.equalsIgnoreCase(columnName)) {
-                return rowColumn;
-            }
-        }
-        return null;
-    }
 }

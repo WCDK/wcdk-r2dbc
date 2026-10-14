@@ -110,6 +110,79 @@ class ManualTransactionTests {
         verify(connection).createSavepoint("release_me");
         verify(connection).releaseSavepoint("release_me");
     }
+    @Test
+    void cancelledCommitWaitsForTerminalBeforeCloseWithoutRollback() {
+        Connection connection = connection();
+        var commit = reactor.core.publisher.Sinks.<Void>empty();
+        when(connection.commitTransaction()).thenReturn(commit.asMono());
+        ManualTransactionImpl transaction = new ManualTransactionImpl(connection);
+        transaction.activate().block();
+        StepVerifier.create(transaction.commit())
+                .then(() -> assertThat(transaction.getStatus()).isEqualTo(TransactionStatus.COMMITTING))
+                .thenCancel().verify();
+        StepVerifier.create(transaction.close())
+                .then(() -> {
+                    verify(connection, never()).rollbackTransaction();
+                    verify(connection, never()).close();
+                    commit.tryEmitEmpty();
+                }).verifyComplete();
+        assertThat(transaction.getStatus()).isEqualTo(TransactionStatus.COMMITTED);
+        verify(connection).close();
+        StepVerifier.create(transaction.commit()).expectError(IllegalStateException.class).verify();
+    }
+
+    @Test
+    void failedCommitCloseTriesRollbackEvenIfRollbackFails() {
+        Connection connection = connection();
+        when(connection.commitTransaction()).thenReturn(Mono.error(new IllegalStateException("commit")));
+        when(connection.rollbackTransaction()).thenReturn(Mono.error(new IllegalStateException("rollback")));
+        ManualTransactionImpl transaction = new ManualTransactionImpl(connection);
+        transaction.activate().block();
+        StepVerifier.create(transaction.commit()).expectErrorMessage("commit").verify();
+        assertThat(transaction.getStatus()).isEqualTo(TransactionStatus.FAILED);
+        StepVerifier.create(transaction.close()).verifyComplete();
+        InOrder order = inOrder(connection);
+        order.verify(connection).beginTransaction(any(TransactionDefinition.class));
+        order.verify(connection).commitTransaction();
+        order.verify(connection).rollbackTransaction();
+        order.verify(connection).close();
+    }
+
+    @Test
+    void rejectsCommitAndRollbackForEveryNonActiveState() {
+        for (TransactionStatus state : TransactionStatus.values()) {
+            if (state == TransactionStatus.ACTIVE || state == TransactionStatus.FAILED) continue;
+            ManualTransactionImpl transaction = new ManualTransactionImpl(connection());
+            transaction.setStatus(state);
+            StepVerifier.create(transaction.commit()).expectError(IllegalStateException.class).verify();
+            StepVerifier.create(transaction.rollback()).expectError(IllegalStateException.class).verify();
+            assertThat(transaction.getStatus()).isEqualTo(state);
+        }
+    }
+
+    @Test
+    void duplicateSavepointIsRejectedWhileDriverCreationIsInFlight() {
+        Connection connection = connection();
+        var created = reactor.core.publisher.Sinks.<Void>empty();
+        when(connection.createSavepoint("same")).thenReturn(created.asMono());
+        ManualTransactionImpl transaction = new ManualTransactionImpl(connection);
+        transaction.activate().block();
+        StepVerifier.create(transaction.createSavepoint("same"))
+                .then(() -> {
+                    StepVerifier.create(transaction.createSavepoint("same"))
+                            .expectErrorMatches(error -> error.getMessage().contains("same")).verify();
+                    created.tryEmitEmpty();
+                }).assertNext(point -> assertThat(point.isValid()).isTrue()).verifyComplete();
+        verify(connection, times(1)).createSavepoint("same");
+    }
+
+    @Test
+    void timeoutDocumentationMatchesDriverLockWaitDefinition() throws Exception {
+        String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/com/wcdk/r2dbc/transaction/ManualTransaction.java"));
+        assertThat(source).contains("LOCK_WAIT_TIMEOUT", "不提供事务执行超时或自动回滚");
+    }
+
     private Connection connection() {
         Connection connection = mock(Connection.class);
         when(connection.beginTransaction(any(TransactionDefinition.class))).thenReturn(Mono.empty());

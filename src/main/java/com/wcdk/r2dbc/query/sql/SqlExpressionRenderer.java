@@ -16,8 +16,10 @@ import java.util.Map;
  */
 public final class SqlExpressionRenderer {
     private final RepositoryMetadata metadata;
-    private final Map<String, Object> bindings = new LinkedHashMap<>();
-    private int index;
+    private static final class RenderState {
+        private final Map<String, Object> bindings = new LinkedHashMap<>();
+        private int index;
+    }
 
     public SqlExpressionRenderer(RepositoryMetadata metadata) {
         this.metadata = metadata;
@@ -27,8 +29,9 @@ public final class SqlExpressionRenderer {
         if (expression == null || expression instanceof SqlExpression.Empty) {
             return RenderedPredicate.empty();
         }
-        String sql = renderExpression(expression);
-        return new RenderedPredicate(sql.isBlank() ? "" : " WHERE " + sql, bindings);
+        RenderState state = new RenderState();
+        String sql = renderExpression(expression, state);
+        return new RenderedPredicate(sql.isBlank() ? "" : " WHERE " + sql, state.bindings);
     }
 
     /**
@@ -49,46 +52,46 @@ public final class SqlExpressionRenderer {
         };
     }
 
-    private String renderExpression(SqlExpression expression) {
+    private String renderExpression(SqlExpression expression, RenderState state) {
         return switch (expression) {
             case SqlExpression.Empty ignored -> "";
-            case SqlExpression.Comparison comparison -> renderComparison(comparison);
-            case SqlExpression.In in -> renderIn(in);
+            case SqlExpression.Comparison comparison -> renderComparison(comparison, state);
+            case SqlExpression.In in -> renderIn(in, state);
             case SqlExpression.NullCheck check -> column(check.column()).name()
                     + (check.negated() ? " IS NOT NULL" : " IS NULL");
-            case SqlExpression.Logical logical -> renderLogical(logical);
+            case SqlExpression.Logical logical -> renderLogical(logical, state);
         };
     }
 
-    private String renderComparison(SqlExpression.Comparison comparison) {
+    private String renderComparison(SqlExpression.Comparison comparison, RenderState state) {
         FieldColumn column = column(comparison.column());
         if (comparison.value() == null
                 && ("=".equals(comparison.operator()) || "<>".equals(comparison.operator()))) {
             return column.name() + ("=".equals(comparison.operator()) ? " IS NULL" : " IS NOT NULL");
         }
-        String parameter = "p" + index++;
-        bindings.put(parameter, typedNull(comparison.value(), column));
+        String parameter = "p" + state.index++;
+        state.bindings.put(parameter, typedNull(comparison.value(), column));
         return column.name() + " " + comparison.operator() + " :" + parameter;
     }
 
-    private String renderIn(SqlExpression.In in) {
+    private String renderIn(SqlExpression.In in, RenderState state) {
         FieldColumn column = column(in.column());
         if (in.values().isEmpty()) {
             return in.negated() ? "1 = 1" : "1 = 0";
         }
         List<String> parameters = new ArrayList<>();
         for (Object value : in.values()) {
-            String parameter = "p" + index++;
+            String parameter = "p" + state.index++;
             parameters.add(":" + parameter);
-            bindings.put(parameter, typedNull(value, column));
+            state.bindings.put(parameter, typedNull(value, column));
         }
         return column.name() + (in.negated() ? " NOT IN (" : " IN (")
                 + String.join(", ", parameters) + ")";
     }
 
-    private String renderLogical(SqlExpression.Logical logical) {
+    private String renderLogical(SqlExpression.Logical logical, RenderState state) {
         List<String> operands = logical.operands().stream()
-                .map(this::renderExpression)
+                .map(operand -> renderExpression(operand, state))
                 .filter(sql -> !sql.isBlank())
                 .toList();
         if (operands.isEmpty()) {

@@ -85,7 +85,7 @@ class SqlLifecycleExecutorTests {
     }
 
     @Test
-    void propagatesAfterExecuteErrorOnSuccessfulStatement() {
+    void isolatesAfterExecuteErrorOnSuccessfulStatement() {
         IllegalStateException afterError = new IllegalStateException("after");
         ReactiveSqlLifecycleInterceptor interceptor = new ReactiveSqlLifecycleInterceptor() {
             @Override
@@ -99,8 +99,7 @@ class SqlLifecycleExecutorTests {
         StepVerifier.create(executor.executeMono(chain, context,
                         executor.prepare(chain, context, Mono::empty),
                         () -> Mono.just("value")))
-                .expectErrorSatisfies(error -> assertSame(afterError, error))
-                .verify();
+                .expectNext("value").verifyComplete();
     }
 
     @Test

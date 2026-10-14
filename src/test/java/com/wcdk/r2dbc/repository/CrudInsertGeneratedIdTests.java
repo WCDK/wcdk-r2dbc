@@ -257,6 +257,20 @@ class CrudInsertGeneratedIdTests {
         assertThat(user.userId).isEqualTo(42L);
     }
 
+    @Test
+    void generatedColumnFallbackHonorsQuotingPolicyForOracleAndDm() {
+        for (DatabaseDialect dialect : List.of(OracleDatabaseDialect.INSTANCE, DmDatabaseDialect.INSTANCE)) {
+            for (boolean quoted : new boolean[]{true, false}) {
+                Fixture fixture = new Fixture(User.class, false, 42L, dialect, quoted);
+                String column = quoted ? dialect.quoteIdentifier("user_key") : "user_key";
+                StepVerifier.create(fixture.operations.insertReturningIdWithoutLifecycle(
+                        "INSERT INTO sample (name) VALUES (:name)", java.util.Map.of("name", "value"), "user_key"))
+                        .expectNext(42L).verifyComplete();
+                verify(fixture.statement).returnGeneratedValues(dialect.generatedValueColumn("user_key", column));
+            }
+        }
+    }
+
     /**
      * 使用真实 DatabaseClient 和仓储适配器，仅替换数据库驱动边界。
      * @author wcdk
@@ -266,6 +280,7 @@ class CrudInsertGeneratedIdTests {
         final Statement statement = mock(Statement.class, RETURNS_SELF);
         final SqlLifecycleInterceptor interceptor = mock(SqlLifecycleInterceptor.class);
         final CrudRepositoryExecutor executor;
+        final R2dbcRepositoryOperations operations;
 
         Fixture(Class<?> type, boolean snowflake, Object generatedId) {
             this(type, snowflake, generatedId, MySqlDatabaseDialect.INSTANCE, true);
@@ -294,10 +309,11 @@ class CrudInsertGeneratedIdTests {
             properties.setSqlLogEnabled(false);
             R2dbcUtil util = new R2dbcUtil(client, null, null, properties, new WcdkSpringR2dbcProperties(),
                     null, new SqlLifecycleInterceptorChain(List.of(interceptor), List.of()));
+            operations = new R2dbcRepositoryOperations(util);
             executor = new CrudRepositoryExecutor(properties,
                     new RepositoryMetadata(type, properties, dialect),
                     BaseRepository.class, null, dialect, new SnowflakeIdGenerator(1),
-                    new SqlExecutionEngine(new R2dbcRepositoryOperations(util)), new RepositoryParameterBinder());
+                    new SqlExecutionEngine(operations), new RepositoryParameterBinder());
         }
 
         Mono<Object> insert(Object entity) throws Exception {

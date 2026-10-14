@@ -57,11 +57,11 @@ final class RepositoryParameterBinder {
         while (matcher.find()) {
             String name = matcher.group(1);
             parameterNames.add(name);
-            matcher.appendReplacement(builder, ":" + bindName(name));
+            matcher.appendReplacement(builder, Matcher.quoteReplacement(":" + bindName(name)));
         }
         matcher.appendTail(builder);
         if ((arguments == null ? 0 : arguments.length) == 1 && parameterNames.size() == 1
-                && !sourceParameters.containsKey(parameterNames.get(0))) {
+                && !sourceParameters.containsKey(parameterNames.get(0)) && isSimpleValue(arguments[0])) {
             boundParameters.put(bindName(parameterNames.get(0)), typedNull(arguments[0], method.getParameterTypes()[0]));
             return new BoundSql(builder.toString(), boundParameters);
         }
@@ -70,6 +70,24 @@ final class RepositoryParameterBinder {
             boundParameters.put(bindName(name), typedNull(value, parameterJavaType(method, name)));
         }
         return new BoundSql(builder.toString(), boundParameters);
+    }
+
+    void validateUnused(Method method, Object[] arguments, java.util.Set<String> usedNames) {
+        String[] names = PARAMETER_NAME_DISCOVERER.getParameterNames(method);
+        List<String> unused = new ArrayList<>();
+        for (int i = 0; i < method.getParameterCount(); i++) {
+            Param param = method.getParameters()[i].getAnnotation(Param.class);
+            String actual = param != null ? param.value() : names == null ? "arg" + i : names[i];
+            java.util.Set<String> aliases = new java.util.HashSet<>(List.of("arg" + i, "param" + (i + 1), actual));
+            boolean used = usedNames.stream().map(name -> name.split("\\.", 2)[0]).anyMatch(aliases::contains);
+            if (!used && method.getParameterCount() == 1) {
+                Object value = arguments[0];
+                used = isSimpleValue(value) ? !usedNames.isEmpty()
+                        : usedNames.stream().anyMatch(name -> findField(method.getParameterTypes()[0], name) != null);
+            }
+            if (!used) unused.add(actual);
+        }
+        if (!unused.isEmpty()) throw new IllegalArgumentException("未使用的 XML SQL 参数：" + unused);
     }
 
     private Object typedNull(Object value, Class<?> javaType) {
@@ -154,12 +172,14 @@ final class RepositoryParameterBinder {
         if (type.getModule() != null && type.getModule().isNamed()) {
             return;
         }
-        for (Field field : type.getDeclaredFields()) {
-            if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
-                continue;
+        for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+            for (Field field : current.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                field.setAccessible(true);
+                if (!parameters.containsKey(field.getName())) {
+                    parameters.put(field.getName(), fieldValue(field, argument));
+                }
             }
-            field.setAccessible(true);
-            parameters.putIfAbsent(field.getName(), fieldValue(field, argument));
         }
     }
 

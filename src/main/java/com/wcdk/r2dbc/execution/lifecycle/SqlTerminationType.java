@@ -7,6 +7,7 @@ package com.wcdk.r2dbc.execution.lifecycle;
  */
 public enum SqlTerminationType {
     COMPLETE,
+    SKIPPED,
     ERROR,
     CANCELLED
 }

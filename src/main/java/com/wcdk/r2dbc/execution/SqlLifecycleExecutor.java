@@ -31,6 +31,8 @@ import java.util.function.Supplier;
  */
 public class SqlLifecycleExecutor {
 
+    public static final Object EXECUTION_CONTEXT_KEY = new Object();
+
     private static final Logger log = LoggerFactory.getLogger(SqlLifecycleExecutor.class);
 
     private final SqlLifecycleInterceptorChain chain;
@@ -56,7 +58,7 @@ public class SqlLifecycleExecutor {
      * @param parameters 参数
      * @return SQL执行上下文
      */
-    public SqlExecutionContext createContext(String methodName, Map<String, Object> parameters) {
+    public SqlExecutionContext createContext(String methodName, Map<?, ?> parameters) {
         SqlExecutionContext context = new SqlExecutionContext(findMethod(methodName), R2dbcUtil.class, null);
         context.setParameters(parameters);
         return context;
@@ -129,9 +131,8 @@ public class SqlLifecycleExecutor {
                                    SqlExecutionContext context,
                                    Mono<Boolean> preparation,
                                    Supplier<? extends Mono<T>> statement) {
-        return Mono.defer(() -> preparation.flatMap(terminated -> terminated
-                ? terminatedMono(context)
-                : executeAndFinalizeMono(chain, context, statement)));
+        return Mono.defer(() -> executeAndFinalizeMono(chain, context, preparation, statement))
+                .contextWrite(values -> values.put(EXECUTION_CONTEXT_KEY, context));
     }
 
     /** 执行多结果语句，并在同一响应式链中等待执行后回调完成。 */
@@ -139,19 +140,19 @@ public class SqlLifecycleExecutor {
                                    SqlExecutionContext context,
                                    Mono<Boolean> preparation,
                                    Supplier<? extends Publisher<T>> statement) {
-        return Flux.defer(() -> preparation.flatMapMany(terminated -> terminated
-                ? terminatedFlux(context)
-                : executeAndFinalizeFlux(chain, context, statement)));
+        return Flux.defer(() -> executeAndFinalizeFlux(chain, context, preparation, statement))
+                .contextWrite(values -> values.put(EXECUTION_CONTEXT_KEY, context));
     }
 
     private <T> Mono<T> executeAndFinalizeMono(SqlLifecycleInterceptorChain chain,
                                                 SqlExecutionContext context,
-                                                Supplier<? extends Mono<T>> statement) {
+                                                Mono<Boolean> preparation, Supplier<? extends Mono<T>> statement) {
         AtomicBoolean finalized = new AtomicBoolean();
         AtomicLong resultCount = new AtomicLong();
         Mono<T> observed = Mono.defer(() -> {
                     context.setStartTime(System.nanoTime());
-                    return observe(SqlExecutionPhase.EXECUTE, context, statement.get());
+                    return preparation.flatMap(terminated -> terminated ? terminatedMono(context)
+                            : observe(SqlExecutionPhase.EXECUTE, context, Mono.defer(statement)));
                 })
                 .materialize()
                 .flatMap(signal -> finalizeMonoSignal(chain, context, signal, finalized, resultCount))
@@ -164,12 +165,13 @@ public class SqlLifecycleExecutor {
 
     private <T> Flux<T> executeAndFinalizeFlux(SqlLifecycleInterceptorChain chain,
                                                 SqlExecutionContext context,
-                                                Supplier<? extends Publisher<T>> statement) {
+                                                Mono<Boolean> preparation, Supplier<? extends Publisher<T>> statement) {
         AtomicBoolean finalized = new AtomicBoolean();
         AtomicLong resultCount = new AtomicLong();
         Flux<T> observed = Flux.defer(() -> {
                     context.setStartTime(System.nanoTime());
-                    return observer.observeFlux(SqlExecutionPhase.EXECUTE, context, Flux.from(statement.get()));
+                    return preparation.flatMapMany(terminated -> terminated ? terminatedFlux(context)
+                            : observer.observeFlux(SqlExecutionPhase.EXECUTE, context, Flux.defer(() -> statement.get())));
                 })
                 .doOnNext(ignored -> resultCount.incrementAndGet())
                 .materialize()
@@ -201,7 +203,8 @@ public class SqlLifecycleExecutor {
         } else if (signal.isOnError()) {
             context.setError(signal.getThrowable());
         }
-        context.setTerminationType(signal.isOnError() ? SqlTerminationType.ERROR : SqlTerminationType.COMPLETE);
+        context.setTerminationType(context.isTerminated() ? SqlTerminationType.SKIPPED
+                : signal.isOnError() ? SqlTerminationType.ERROR : SqlTerminationType.COMPLETE);
         context.setResultCount(resultCount.get());
         context.setEndTime(System.nanoTime());
         return runAfterExecute(chain, context, signal.getThrowable()).thenReturn(signal);
@@ -218,7 +221,8 @@ public class SqlLifecycleExecutor {
         if (signal.isOnError()) {
             context.setError(signal.getThrowable());
         }
-        context.setTerminationType(signal.isOnError() ? SqlTerminationType.ERROR : SqlTerminationType.COMPLETE);
+        context.setTerminationType(context.isTerminated() ? SqlTerminationType.SKIPPED
+                : signal.isOnError() ? SqlTerminationType.ERROR : SqlTerminationType.COMPLETE);
         context.setResultCount(resultCount.get());
         context.setEmittedItemCount(resultCount.get());
         context.setReturnedRowCount(resultCount.get());
@@ -243,7 +247,7 @@ public class SqlLifecycleExecutor {
         return runAfterExecute(chain, context, null)
                 .doOnError(error -> log.error(
                         "SQL cancellation cleanup failed: executionId={}, statementId={}, errorType={}",
-                        context.getExecutionId(), context.getStatementId(), error.getClass().getName(), error));
+                        context.getExecutionId(), context.getStatementId(), error.getClass().getName()));
     }
 
     private long monoResultCount(SqlExecutionContext context, Object result) {
@@ -273,10 +277,11 @@ public class SqlLifecycleExecutor {
                         log.warn("SQL finally error suppressed by business error: executionId={}, statementId={}, "
                                         + "businessErrorType={}, suppressedErrorType={}",
                                 context.getExecutionId(), context.getStatementId(),
-                                businessError.getClass().getName(), afterError.getClass().getName(), afterError);
+                                businessError.getClass().getName(), afterError.getClass().getName());
                         return Mono.error(businessError);
                     }
-                    return Mono.error(afterError);
+                    log.warn("SQL FINALLY observer failure: executionId={}, errorType={}", context.getExecutionId(), afterError.getClass().getName());
+                    return Mono.empty();
                 });
     }
 

@@ -54,7 +54,8 @@ final class RepositoryInvocationDispatcher {
             Map<java.lang.reflect.Method, RepositoryMethodPlan> plans) {
         return plans.entrySet().stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
                 Map.Entry::getKey,
-                entry -> entry.getValue().withExecutor(findExecutor(entry.getValue()))));
+                entry -> entry.getValue().kind() == RepositoryMethodPlan.Kind.OBJECT ? entry.getValue()
+                        : entry.getValue().withExecutor(findExecutor(entry.getValue()))));
     }
     Object dispatch(RepositoryMethodPlan plan, Object[] args) {
         if (plan.method().getReturnType() == Mono.class) {

@@ -123,13 +123,41 @@ public final class RepositoryMetadata {
 
     private List<FieldColumn> columns(Class<?> entityClass) {
         List<FieldColumn> result = new ArrayList<>();
+        java.util.Map<String, String> constructorColumns = constructorColumns(entityClass);
         ReflectionUtils.doWithFields(entityClass, field -> {
             ReflectionUtils.makeAccessible(field);
-            String name = com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field);
-            result.add(new FieldColumn(field, identifier(name), field.isAnnotationPresent(Id.class)));
+            String name = constructorColumns.getOrDefault(field.getName(), com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field));
+            result.add(new FieldColumn(field, identifier(name), field.isAnnotationPresent(Id.class), name));
         }, field -> !java.lang.reflect.Modifier.isStatic(field.getModifiers())
                 && !field.isAnnotationPresent(Transient.class));
         return List.copyOf(result);
+    }
+
+    private java.util.Map<String, String> constructorColumns(Class<?> type) {
+        java.lang.reflect.Constructor<?> selected = null;
+        if (type.isRecord()) {
+            try {
+                selected = type.getDeclaredConstructor(java.util.Arrays.stream(type.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getType).toArray(Class<?>[]::new));
+            } catch (NoSuchMethodException error) { throw new IllegalStateException("无法解析 record 构造器：" + type, error); }
+        } else {
+            for (var constructor : type.getDeclaredConstructors()) {
+                if (constructor.isAnnotationPresent(org.springframework.data.annotation.PersistenceCreator.class)) {
+                    if (selected != null) throw new IllegalStateException("多个 @PersistenceCreator 构造器：" + type);
+                    selected = constructor;
+                }
+            }
+            if (selected == null && type.getDeclaredConstructors().length == 1) selected = type.getDeclaredConstructors()[0];
+        }
+        java.util.Map<String, String> names = new java.util.HashMap<>();
+        if (selected != null) for (var parameter : selected.getParameters()) {
+            var column = parameter.getAnnotation(com.wcdk.r2dbc.annotation.Column.class);
+            if (column != null) {
+                if (!parameter.isNamePresent()) throw new IllegalStateException("仓储构造器列映射需启用 -parameters：" + selected);
+                names.put(parameter.getName(), column.value());
+            }
+        }
+        return names;
     }
 
     /**
@@ -140,13 +168,9 @@ public final class RepositoryMetadata {
         return properties.isQuoteIdentifier() ? dialect.quoteIdentifier(name) : name;
     }
 
-    public record FieldColumn(Field field, String name, boolean id) {
-        /**
-         * 返回驱动请求生成值时使用的原始映射列名。
-         * @author wcdk
-         */
-        public String rawName() {
-            return com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field);
+    public record FieldColumn(Field field, String name, boolean id, String rawName) {
+        public FieldColumn(Field field, String name, boolean id) {
+            this(field, name, id, com.wcdk.r2dbc.mapping.NamingStrategy.columnName(field));
         }
     }
 }

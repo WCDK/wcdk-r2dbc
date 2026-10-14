@@ -5,5 +5,5 @@ package com.wcdk.r2dbc.dialect;
  * @author wcdk
  */
 public enum GeneratedKeyStrategy {
-    NONE, RETURNING, LAST_INSERT_ID
+    CLAUSE_RETURNING, DRIVER_GENERATED_KEYS, NONE
 }

@@ -112,10 +112,6 @@ Object executeCustomMethod(RepositoryMethodPlan plan, Object[] arguments) {
                     parsedMethod.parameters(), parsedMethod.commandType());
         }
 
-        if (parsedMethod == null) {
-            throw new UnsupportedOperationException("暂不支持自定义仓储方法：" + method.getName());
-        }
-
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
         context.setSql(parsedMethod.sql());
@@ -128,8 +124,8 @@ Object executeCustomMethod(RepositoryMethodPlan plan, Object[] arguments) {
         Class<?> valueType = reactiveValueType(derivedPlan);
 
         if (parsedMethod.commandType() == SqlCommandType.SELECT) {
-            if (valueType == Long.class || valueType == long.class) {
-                return executeCustomCountQuery(lifecycle, context, chain);
+            if (valueType == Long.class || valueType == long.class || valueType == Integer.class || valueType == int.class) {
+                return executeCustomCountQuery(lifecycle, context, chain, valueType);
             } else if (valueType == Boolean.class || valueType == boolean.class) {
                 return executeCustomExistsQuery(lifecycle, context, chain);
             } else if (returnsFlux) {
@@ -143,11 +139,12 @@ Object executeCustomMethod(RepositoryMethodPlan plan, Object[] arguments) {
     }
 
     private Object executeCustomCountQuery(Mono<Boolean> lifecycle, SqlExecutionContext context,
-                                           SqlLifecycleInterceptorChain chain) {
-        return lifecycleExecutor().executeMono(chain, context, lifecycle,
+                                           SqlLifecycleInterceptorChain chain, Class<?> valueType) {
+        Mono<Long> count = lifecycleExecutor().executeMono(chain, context, lifecycle,
                 () -> sqlExecutionEngine.queryOneWithoutLifecycle(context.getSql(), context.getParameters(),
                                 (row, rowMetadata) -> numberValue(row).longValue())
                         .defaultIfEmpty(0L));
+        return valueType == Integer.class || valueType == int.class ? count.map(Math::toIntExact) : count;
     }
 
     private Object executeCustomExistsQuery(Mono<Boolean> lifecycle, SqlExecutionContext context,

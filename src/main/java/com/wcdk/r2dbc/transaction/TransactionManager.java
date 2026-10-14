@@ -40,18 +40,15 @@ public class TransactionManager {
     }
 
     private Mono<ManualTransaction> createTransaction(Consumer<ManualTransactionImpl> configure) {
-        return Mono.from(connectionFactory.create())
-                .flatMap(connection -> {
+        return Mono.usingWhen(Mono.from(connectionFactory.create()), connection -> {
                     ManualTransactionImpl transaction = new ManualTransactionImpl(connection);
-                    try {
+                    return Mono.defer(() -> {
                         configure.accept(transaction);
-                    } catch (Throwable error) {
-                        return closeAfterAcquireFailure(connection, error);
-                    }
-                    return transaction.activate()
-                            .thenReturn((ManualTransaction) transaction)
-                            .onErrorResume(error -> closeAfterAcquireFailure(transaction, error));
-                });
+                        return transaction.activate().thenReturn((ManualTransaction) transaction);
+                    });
+                }, connection -> Mono.empty(),
+                (connection, error) -> closeAfterAcquireFailure(connection, error).then(),
+                connection -> Mono.from(connection.close()));
     }
 
     private Mono<ManualTransaction> closeAfterAcquireFailure(Connection connection, Throwable error) {
@@ -60,16 +57,7 @@ public class TransactionManager {
                     error.addSuppressed(closeError);
                     return Mono.empty();
                 })
-                .then(Mono.error(error));
-    }
-
-    private Mono<ManualTransaction> closeAfterAcquireFailure(ManualTransactionImpl transaction, Throwable error) {
-        return transaction.close()
-                .onErrorResume(closeError -> {
-                    error.addSuppressed(closeError);
-                    return Mono.empty();
-                })
-                .then(Mono.error(error));
+                .then(Mono.empty());
     }
 
     public ConnectionFactory getConnectionFactory() {

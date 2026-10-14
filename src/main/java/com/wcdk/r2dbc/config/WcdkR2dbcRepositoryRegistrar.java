@@ -75,12 +75,14 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
             for (Class<?> basePackageClass : attributes.getClassArray("basePackageClasses")) {
                 result.add(basePackageClass.getPackageName());
             }
-            if (result.isEmpty()) {
-                result.add(ClassUtils.getPackageName(importingClassMetadata.getClassName()));
-            }
         }
         if (environment != null) {
             result.addAll(List.of(environment.getProperty("wcdk.r2dbc.base-packages", String[].class, new String[0])));
+        }
+        result.removeIf(value -> !StringUtils.hasText(value));
+        if (!result.isEmpty()) return result;
+        if (attributes != null) {
+            result.add(ClassUtils.getPackageName(importingClassMetadata.getClassName()));
         }
         if (beanFactory != null && AutoConfigurationPackages.has(beanFactory)) {
             result.addAll(AutoConfigurationPackages.get(beanFactory));
@@ -107,7 +109,12 @@ public class WcdkR2dbcRepositoryRegistrar implements ImportBeanDefinitionRegistr
     private void registerRepository(BeanDefinitionRegistry registry, String className) {
         String beanName = StringUtils.uncapitalize(ClassUtils.getShortName(className));
         if (registry.containsBeanDefinition(beanName)) {
-            return;
+            BeanDefinition existing = registry.getBeanDefinition(beanName);
+            Object objectType = existing.getAttribute(FactoryBean.OBJECT_TYPE_ATTRIBUTE);
+            if (objectType instanceof Class<?> type && type.getName().equals(className)) return;
+            String existingName = objectType instanceof Class<?> type ? type.getName() : existing.getBeanClassName();
+            throw new IllegalStateException("仓储 Bean 名冲突 '" + beanName + "'：" + existingName + " 与 " + className
+                    + "；请收窄 @EnableWcdkR2dbcRepositories 的扫描范围或重命名接口");
         }
         Class<?> repositoryInterface = resolveClass(className);
         GenericBeanDefinition beanDefinition = new GenericBeanDefinition();

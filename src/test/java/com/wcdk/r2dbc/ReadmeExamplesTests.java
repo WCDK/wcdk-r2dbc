@@ -40,6 +40,31 @@ class ReadmeExamplesTests {
         }
         """;
 
+    @Test void documentedWcdkConfigurationKeysAndDefaultsMatchPublishedMetadata() throws Exception {
+        var parser = new org.yaml.snakeyaml.Yaml();
+        var metadata = new java.util.HashMap<String, java.util.Map<String,Object>>();
+        for (String resource : java.util.List.of("META-INF/spring-configuration-metadata.json", "META-INF/additional-spring-configuration-metadata.json")) {
+            try (var input = Files.newInputStream(Path.of("target/classes").resolve(resource))) {
+                assertThat(input).isNotNull();
+                java.util.Map<String,Object> document=parser.load(new String(input.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8).replace("\\/", "/"));
+                for (Object item : (java.util.List<?>)document.get("properties")) {
+                    @SuppressWarnings("unchecked") var property=(java.util.Map<String,Object>)item;
+                    metadata.put((String)property.get("name"),property);
+                }
+            }
+        }
+        var rows=Pattern.compile("(?m)^[|] `([a-z0-9.-]+)` [|] ([^|]+)[|]").matcher(Files.readString(Path.of("README.md")));
+        int count=0;
+        while (rows.find()) {
+            String key=rows.group(1); if (!key.startsWith("wcdk.r2dbc.")) continue;
+            assertThat(metadata).as(key).containsKey(key);
+            Object value=metadata.get(key).get("defaultValue");
+            if (value!=null && !(value instanceof java.util.Collection<?>)) assertThat(rows.group(2).replace("`", "").trim()).as(key).isEqualTo(value.toString());
+            count++;
+        }
+        assertThat(count).isEqualTo(23);
+    }
+
     @Test void everyYamlBlockBindsToDeclaredConfiguration() throws Exception {
         String readme = Files.readString(Path.of("README.md"));
         Matcher matcher = Pattern.compile("```yaml\\R(.*?)```", Pattern.DOTALL).matcher(readme);
@@ -109,7 +134,7 @@ class ReadmeExamplesTests {
                     assertThat(success).as("README Java 片段 %s：%s", count, diagnostics.getDiagnostics()).isTrue();
                 }
             }
-            assertThat(count).isEqualTo(19);
+            assertThat(count).isEqualTo(21);
         } finally {
             try (var paths = Files.walk(output)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);

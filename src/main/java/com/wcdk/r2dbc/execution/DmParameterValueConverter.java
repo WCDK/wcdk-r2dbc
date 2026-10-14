@@ -26,7 +26,7 @@ public class DmParameterValueConverter extends DefaultParameterValueConverter {
         if (value instanceof LocalDateTime dateTime) return Timestamp.valueOf(dateTime);
         if (value instanceof LocalDate date) return java.sql.Date.valueOf(date);
         if (value instanceof LocalTime time) return Time.valueOf(time);
-        return value;
+        return super.convert(value);
     }
 
     @Override
@@ -35,6 +35,6 @@ public class DmParameterValueConverter extends DefaultParameterValueConverter {
         if (javaType == LocalDateTime.class) return Timestamp.class;
         if (javaType == LocalTime.class) return Time.class;
         if (javaType == Instant.class) return Date.class;
-        return javaType;
+        return super.nullType(javaType);
     }
 }

@@ -1,6 +1,7 @@
 package com.wcdk.r2dbc.repository;
 
 import com.wcdk.r2dbc.repository.plan.RepositoryMethodPlan;
+import com.wcdk.r2dbc.execution.SqlCommandType;
 
 import com.wcdk.r2dbc.R2dbcUtil;
 import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
@@ -53,7 +54,13 @@ final class XmlRepositoryExecutor implements RepositoryMethodExecutor {
     private final RepositoryXmlRegistry repositoryXmlRegistry;
     private final SqlExecutionEngine sqlExecutionEngine;
     private final RepositoryParameterBinder parameterBinder;
+    private final boolean strictUnusedParameters;
     XmlRepositoryExecutor(RepositoryMetadata metadata, Class<?> repositoryInterface, RepositoryXmlRegistry repositoryXmlRegistry, SqlExecutionEngine sqlExecutionEngine, RepositoryParameterBinder parameterBinder) {
+        this(metadata, repositoryInterface, repositoryXmlRegistry, sqlExecutionEngine, parameterBinder, true);
+    }
+    XmlRepositoryExecutor(RepositoryMetadata metadata, Class<?> repositoryInterface, RepositoryXmlRegistry repositoryXmlRegistry,
+                          SqlExecutionEngine sqlExecutionEngine, RepositoryParameterBinder parameterBinder, boolean strictUnusedParameters) {
+        this.strictUnusedParameters = strictUnusedParameters;
         this.metadata = metadata; this.repositoryInterface = repositoryInterface; this.repositoryXmlRegistry = repositoryXmlRegistry; this.sqlExecutionEngine = sqlExecutionEngine; this.parameterBinder = parameterBinder;
     }
     private SqlLifecycleExecutor lifecycleExecutor() { return sqlExecutionEngine.lifecycleExecutor(); }
@@ -64,9 +71,11 @@ final class XmlRepositoryExecutor implements RepositoryMethodExecutor {
 
     @Override
     public Object execute(RepositoryMethodPlan plan, Object[] args, ContextView context, Object proxy) {
-        return executeXmlStatement(plan.xmlStatement(), plan.method(), args);
+        return executeXmlStatement(plan, args);
     }
-Object executeXmlStatement(RepositoryStatement statement, Method method, Object[] arguments) {
+    private Object executeXmlStatement(RepositoryMethodPlan plan, Object[] arguments) {
+        RepositoryStatement statement = plan.xmlStatement();
+        Method method = plan.method();
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(method, repositoryInterface, arguments);
         context.setParameters(parameterBinder.methodParameters(method, arguments));
@@ -74,10 +83,11 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
 
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
-                    DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getParameters());
-                    Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getParameters());
+                    DynamicSqlSource.RenderedSql renderedSql = statement.render(context.getNamedParameters());
+                    Map<String, Object> sourceParameters = new LinkedHashMap<>(context.getNamedParameters());
                     sourceParameters.putAll(renderedSql.additionalParameters());
                     RepositoryParameterBinder.BoundSql boundSql = parameterBinder.bindSql(renderedSql.sql(), method, arguments, sourceParameters);
+                    if (strictUnusedParameters) parameterBinder.validateUnused(method, arguments, renderedSql.usedParameters());
                     context.setSql(boundSql.sql());
                     context.setParameters(boundSql.parameters());
                 }));
@@ -87,59 +97,28 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
         if (returnsFlux) {
             return lifecycleExecutor().executeFlux(chain, context, lifecycle,
                     () -> Flux.defer(() -> {
-                        RepositoryParameterBinder.BoundSql finalBoundSql = new RepositoryParameterBinder.BoundSql(context.getSql(), context.getParameters());
-
-                        Object result;
-                        try {
-                            result = switch (statement.commandType()) {
-                                case INSERT, UPDATE, DELETE, MERGE -> executeXmlUpdate(finalBoundSql, method, arguments);
-                                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
-                                case UNKNOWN -> throw new IllegalStateException("未知的XML SQL命令类型");
-                            };
-                        } catch (Exception e) {
-                            return Flux.error(e);
-                        }
-
-                        @SuppressWarnings("unchecked")
-                        Flux<Object> flux = result instanceof Flux<?> f
-                                ? (Flux<Object>) f
-                                : result instanceof Mono<?> m
-                                        ? (Flux<Object>) m.flux()
-                                        : Flux.just(result);
-                        return flux;
-                    }));
-        } else {
-            return lifecycleExecutor().executeMono(chain, context, lifecycle,
-                    () -> Mono.defer(() -> {
-                        RepositoryParameterBinder.BoundSql finalBoundSql = new RepositoryParameterBinder.BoundSql(context.getSql(), context.getParameters());
-
-                        Object result;
-                        try {
-                            result = switch (statement.commandType()) {
-                                case INSERT, UPDATE, DELETE, MERGE -> executeXmlUpdate(finalBoundSql, method, arguments);
-                                case SELECT -> executeXmlSelect(finalBoundSql, method, statement);
-                                case UNKNOWN -> throw new IllegalStateException("未知的XML SQL命令类型");
-                            };
-                        } catch (Exception e) {
-                            return Mono.error(e);
-                        }
-
-                        if (result instanceof Mono<?> mono) {
-                            return mono;
-                        } else if (result instanceof Flux<?> flux) {
-                            return flux.singleOrEmpty();
-                        }
-                        return Mono.justOrEmpty(result);
-                    }));
+                        RepositoryParameterBinder.BoundSql bound = new RepositoryParameterBinder.BoundSql(context.getSql(), context.getNamedParameters());
+                        return (Flux<?>) executeXmlSelect(bound, method, statement);
+                    })).onErrorMap(error -> xmlError(statement, error));
         }
+        return lifecycleExecutor().executeMono(chain, context, lifecycle,
+                () -> Mono.defer(() -> {
+                    RepositoryParameterBinder.BoundSql bound = new RepositoryParameterBinder.BoundSql(context.getSql(), context.getNamedParameters());
+                    return (Mono<?>) (statement.commandType() == SqlCommandType.SELECT
+                            ? executeXmlSelect(bound, method, statement)
+                            : executeXmlUpdate(bound, (XmlUpdateResultPlan) plan.sqlPlan().compiledPlan(), arguments));
+                })).onErrorMap(error -> xmlError(statement, error));
     }
 
-    private Object executeXmlUpdate(RepositoryParameterBinder.BoundSql boundSql, Method method, Object[] arguments) {
+    private IllegalStateException xmlError(RepositoryStatement statement, Throwable error) {
+        return new IllegalStateException("XML " + statement.statementId() + " 执行失败：" + error.getMessage(), error);
+    }
+
+    private Object executeXmlUpdate(RepositoryParameterBinder.BoundSql boundSql, XmlUpdateResultPlan result, Object[] arguments) {
         Mono<Long> rows = sqlExecutionEngine.updateWithoutLifecycle(boundSql.sql(), boundSql.parameters());
-        XmlUpdateResultPlan result = XmlUpdateResultPlan.compile(method, repositoryInterface);
         if (result.entityArgumentIndex() >= 0) {
             Object entity = arguments[result.entityArgumentIndex()];
-            if (entity == null) throw new IllegalArgumentException("XML 更新返回实体入参不能为 null：" + method);
+            if (entity == null) throw new IllegalArgumentException("XML 更新返回实体入参不能为 null");
             return rows.thenReturn(entity);
         }
         if (result.valueType() == Boolean.class) return rows.map(count -> count > 0);
@@ -158,7 +137,7 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
                     mapXmlRow(row, valueType, resultType, resultMapId));
         }
         if (valueType == Boolean.class || valueType == boolean.class) {
-            return sqlExecutionEngine.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> numberValue(row).longValue() > 0)
+            return sqlExecutionEngine.queryOneWithoutLifecycle(boundSql.sql(), boundSql.parameters(), (row, rowMetadata) -> booleanValue(row))
                     .defaultIfEmpty(false);
         }
         if (valueType == Long.class || valueType == long.class) {
@@ -173,10 +152,16 @@ Object executeXmlStatement(RepositoryStatement statement, Method method, Object[
                 mapXmlRow(row, valueType, resultType, resultMapId));
     }
 
+    private boolean booleanValue(Row row) {
+        Object value = row.get(0);
+        return value instanceof Boolean bool ? bool : numberValue(row).longValue() != 0;
+    }
+
     private Object mapXmlRow(Row row, Class<?> valueType, String resultType, String resultMapId) {
         if (StringUtils.hasText(resultMapId)) {
             return mapRowByResultMap(row, resultMapId);
         }
+        if ((valueType == Boolean.class || valueType == boolean.class) && !StringUtils.hasText(resultMapId)) return booleanValue(row);
         if (StringUtils.hasText(resultType)) {
             Class<?> targetClass = resolveClass(resultType);
             if (Map.class.isAssignableFrom(targetClass)) {

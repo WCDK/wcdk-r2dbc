@@ -2,6 +2,7 @@ package com.wcdk.r2dbc.execution.lifecycle;
 
 /**
  * SQL生命周期拦截器接口。
+ * before 阶段异常立即失败；FINALLY 阶段逐个隔离异常，继续其余回调，不改变成功结果。
  * <p>
  * 提供四个生命周期钩子，允许在SQL执行的不同阶段进行自定义操作：
  * <ul>

@@ -40,20 +40,56 @@ public final class R2dbcDataSourceContext {
                 .contextWrite(context -> context.put(CONTEXT_KEY, key));
     }
 
-    public static <T> Mono<T> pinTransactionDataSource(Mono<T> publisher) {
+    /**
+     * 将选库和 Spring 事务传播放在同一作用域。
+     * <p>目标键在获取新事务连接前可见；校验在 operator 完成挂起/加入后执行。
+     * REQUIRES_NEW 使用新事务的钉扎，NOT_SUPPORTED 放行，REQUIRED 仍拒绝跨库加入。
+     * 手动事务钉扎不由 Spring 管理，仍在进入此作用域前校验。
+     */
+    public static <T> Mono<T> use(String dataSource,
+                                  org.springframework.transaction.reactive.TransactionalOperator operator,
+                                  Mono<T> publisher) {
+        String key = requireDataSource(dataSource);
+        java.util.Objects.requireNonNull(operator, "事务操作符不能为空");
+        java.util.Objects.requireNonNull(publisher, "业务流不能为空");
         return Mono.deferContextual(context -> {
-            String dataSource = get(context);
-            String pinned = dataSource == null ? PRIMARY : dataSource;
-            return publisher.contextWrite(current -> current.put(TRANSACTION_KEY, pinned));
-        });
+                    assertTransactionDataSource(context, key);
+                    return operator.transactional(use(key, publisher));
+                })
+                .contextWrite(context -> context.put(CONTEXT_KEY, key));
+    }
+
+    /** {@link #use(String, org.springframework.transaction.reactive.TransactionalOperator, Mono)} 的流式入口。 */
+    public static <T> Flux<T> use(String dataSource,
+                                  org.springframework.transaction.reactive.TransactionalOperator operator,
+                                  Flux<T> publisher) {
+        String key = requireDataSource(dataSource);
+        java.util.Objects.requireNonNull(operator, "事务操作符不能为空");
+        java.util.Objects.requireNonNull(publisher, "业务流不能为空");
+        return Flux.deferContextual(context -> {
+                    assertTransactionDataSource(context, key);
+                    return operator.transactional(use(key, publisher));
+                })
+                .contextWrite(context -> context.put(CONTEXT_KEY, key));
+    }
+
+    public static <T> Mono<T> pinTransactionDataSource(Mono<T> publisher) {
+        return pinTransactionDataSource(publisher, PRIMARY);
     }
 
     public static <T> Flux<T> pinTransactionDataSource(Flux<T> publisher) {
-        return Flux.deferContextual(context -> {
-            String dataSource = get(context);
-            String pinned = dataSource == null ? PRIMARY : dataSource;
-            return publisher.contextWrite(current -> current.put(TRANSACTION_KEY, pinned));
-        });
+        return pinTransactionDataSource(publisher, PRIMARY);
+    }
+
+    /** 手动事务作用域使用真实主键；单连接工厂传 null，选键不改变物理连接。 */
+    public static <T> Mono<T> pinTransactionDataSource(Mono<T> publisher, String primary) {
+        return Mono.deferContextual(context -> primary == null ? publisher : publisher.contextWrite(current ->
+                current.put(TRANSACTION_KEY, get(context) == null ? primary : get(context))));
+    }
+
+    public static <T> Flux<T> pinTransactionDataSource(Flux<T> publisher, String primary) {
+        return Flux.deferContextual(context -> primary == null ? publisher : publisher.contextWrite(current ->
+                current.put(TRANSACTION_KEY, get(context) == null ? primary : get(context))));
     }
 
     public static String get(ContextView contextView) {
@@ -98,70 +134,98 @@ public final class R2dbcDataSourceContext {
      */
     static Mono<Void> guardTransactionDataSource(ContextView context, String requested, String primary) {
         assertTransactionDataSource(context, requested, primary);
-        return TransactionSynchronizationManager.forCurrentTransaction()
-                .flatMap(manager -> {
-                    Object pinned = manager.getResource(TRANSACTION_RESOURCE_KEY);
-                    if (pinned != null && !pinned.equals(requested)) {
-                        return Mono.error(transactionDataSourceSwitchException(pinned.toString(), requested));
-                    }
-                    if (pinned == null) {
-                        manager.bindResource(TRANSACTION_RESOURCE_KEY, requested);
-                    }
-                    return Mono.<Void>empty();
-                })
-                .onErrorResume(NoTransactionException.class, ignored -> Mono.empty());
+        return assertSpringTransactionDataSource(requested, Mono.<Void>empty());
     }
 
     private static void assertTransactionDataSource(ContextView context, String requested, String primary) {
         String pinned = context.getOrDefault(TRANSACTION_KEY, null);
-        boolean defaultPrimary = PRIMARY.equals(pinned) && primary.equals(requested);
-        if (pinned != null && !pinned.equals(requested) && !defaultPrimary) {
-            throw transactionDataSourceSwitchException(pinned, requested);
+        String canonical = PRIMARY.equals(pinned) ? primary : pinned;
+        if (canonical != null && !canonical.equals(requested)) {
+            throw transactionDataSourceSwitchException(canonical, requested);
         }
     }
 
     private static void assertTransactionDataSource(ContextView context, String requested) {
-        String pinned = context.getOrDefault(TRANSACTION_KEY, null);
-        if (pinned != null && !pinned.equals(requested)) {
+        // 历史入口仅知道默认主键；框架入口均传入路由工厂的真实主键。
+        assertTransactionDataSource(context, requested, "primary");
+    }
+
+    /** 查找阶段恢复为空，业务错误始终原样传播，不重放业务流。 */
+    public static Mono<TransactionSynchronizationManager> currentManager() {
+        return org.springframework.transaction.reactive.TransactionContextManager.currentContext()
+                .map(context -> {
+                    TransactionSynchronizationManager manager = new TransactionSynchronizationManager(context);
+                    if (manager.isActualTransactionActive() && !manager.hasResource(TRANSACTION_RESOURCE_KEY)) {
+                        for (var resource : context.getResources().entrySet()) {
+                            if (resource.getKey() instanceof DynamicRoutingConnectionFactory routing
+                                    && resource.getValue() instanceof org.springframework.r2dbc.connection.ConnectionHolder holder) {
+                                String selected = routing.dataSourceOf(holder.getConnection());
+                                if (selected != null) {
+                                    bindSpringDataSource(manager, selected);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    return manager;
+                })
+                .onErrorResume(NoTransactionException.class, ignored -> Mono.empty());
+    }
+
+    private static <T> Mono<T> assertSpringTransactionDataSource(String requested, Mono<T> publisher) {
+        return currentManager().doOnNext(manager -> verifySpringDataSource(manager, requested))
+                .then(publisher);
+    }
+
+    private static <T> Flux<T> assertSpringTransactionDataSource(String requested, Flux<T> publisher) {
+        return currentManager().doOnNext(manager -> verifySpringDataSource(manager, requested))
+                .thenMany(publisher);
+    }
+
+    /** 标准/自定义 R2DBC 管理器的钉扎来源是当前实际事务持有的连接。 */
+    public static String springTransactionDataSource(TransactionSynchronizationManager manager) {
+        if (!manager.isActualTransactionActive()) return null;
+        Object explicit = manager.getResource(TRANSACTION_RESOURCE_KEY);
+        if (explicit != null) return explicit.toString();
+        return null;
+    }
+
+    public static void verifySpringDataSource(TransactionSynchronizationManager manager, String requested) {
+        String pinned = springTransactionDataSource(manager);
+        if (pinned != null && !PRIMARY.equals(pinned) && !pinned.equals(requested)) {
             throw transactionDataSourceSwitchException(pinned, requested);
         }
     }
-    /**
-     * 校验标准 Spring 响应式事务登记的数据源，防止事务中跨数据源执行 SQL。
-     * @author wcdk
-     */
-    private static <T> Mono<T> assertSpringTransactionDataSource(String requested, Mono<T> publisher) {
-        return TransactionSynchronizationManager.forCurrentTransaction()
-                .flatMap(manager -> {
-                    Object pinned = manager.getResource(TRANSACTION_RESOURCE_KEY);
-                    if (pinned != null && !pinned.equals(requested)) {
-                        return Mono.error(transactionDataSourceSwitchException(pinned.toString(), requested));
-                    }
-                    return publisher;
-                })
-                .onErrorResume(NoTransactionException.class, ignored -> publisher);
+
+    /** 钉扎随 Spring 事务挂起/恢复，不能遗留到无事务或新事务窗口。 */
+    public static void bindSpringDataSource(TransactionSynchronizationManager manager, String dataSource) {
+        if (!manager.isActualTransactionActive() || dataSource == null || PRIMARY.equals(dataSource)) return;
+        verifySpringDataSource(manager, dataSource);
+        if (manager.hasResource(TRANSACTION_RESOURCE_KEY)) return;
+        manager.bindResource(TRANSACTION_RESOURCE_KEY, dataSource);
+        if (manager.isSynchronizationActive()) {
+            manager.registerSynchronization(new org.springframework.transaction.reactive.TransactionSynchronization() {
+                @Override
+                public Mono<Void> suspend() {
+                    return Mono.fromRunnable(() -> manager.unbindResourceIfPossible(TRANSACTION_RESOURCE_KEY));
+                }
+                @Override
+                public Mono<Void> resume() {
+                    return Mono.fromRunnable(() -> manager.bindResource(TRANSACTION_RESOURCE_KEY, dataSource));
+                }
+                @Override
+                public Mono<Void> afterCompletion(int completionStatus) {
+                    return Mono.fromRunnable(() -> manager.unbindResourceIfPossible(TRANSACTION_RESOURCE_KEY));
+                }
+            });
+        }
     }
 
-    /**
-     * 校验 Flux 类型响应式事务的数据源。
-     * @author wcdk
-     */
-    private static <T> Flux<T> assertSpringTransactionDataSource(String requested, Flux<T> publisher) {
-        return TransactionSynchronizationManager.forCurrentTransaction()
-                .flatMapMany(manager -> {
-                    Object pinned = manager.getResource(TRANSACTION_RESOURCE_KEY);
-                    if (pinned != null && !pinned.equals(requested)) {
-                        return Flux.error(transactionDataSourceSwitchException(pinned.toString(), requested));
-                    }
-                    return publisher;
-                })
-                .onErrorResume(NoTransactionException.class, ignored -> publisher);
-    }
     /**
      * 创建统一的数据源切换异常。
      * @author wcdk
      */
     public static IllegalStateException transactionDataSourceSwitchException(String pinned, String requested) {
-        return new IllegalStateException("事务开始后无法将 R2DBC 数据源从 " + pinned + " 切换到 " + requested);
+        return new IllegalStateException("事务开始后无法将 R2DBC 数据源从 " + pinned + " 切换到 " + requested + "：事务内禁止切换数据源");
     }
 }

@@ -13,7 +13,7 @@ class ExtensionBeanContractsTests {
     private ApplicationContextRunner runner() {
         var factory = mock(ConnectionFactory.class); when(factory.getMetadata()).thenReturn(() -> "PostgreSQL");
         return new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(WcdkR2dbcAutoConfiguration.class))
-                .withPropertyValues("wcdk.r2dbc.enabled=true").withBean(ConnectionFactory.class, () -> factory);
+                .withPropertyValues("wcdk.r2dbc.snowflake-worker-id=21", "wcdk.r2dbc.enabled=true").withBean(ConnectionFactory.class, () -> factory);
     }
     @Test void suppliesDefaultsOnlyWhenNoAssignableUserBeanExists() {
         runner().run(context -> {

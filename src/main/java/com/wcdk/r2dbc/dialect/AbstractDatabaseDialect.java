@@ -36,11 +36,6 @@ abstract class AbstractDatabaseDialect implements DatabaseDialect {
     }
 
     @Override
-    public boolean supportsSavepoint() {
-        return true;
-    }
-
-    @Override
     public String renderGeneratedKey(String... columns) {
         if (!supportsReturning()) return "";
         return columns == null || columns.length == 0 ? " RETURNING *" : " RETURNING " + String.join(", ", columns);
@@ -49,6 +44,6 @@ abstract class AbstractDatabaseDialect implements DatabaseDialect {
     @Override
     public boolean supports(ConnectionFactory factory) {
         if (factory == null || factory.getMetadata() == null || factory.getMetadata().getName() == null) return false;
-        return factory.getMetadata().getName().toLowerCase().contains(databaseName);
+        return DatabaseType.from(factory.getMetadata().getName()) == databaseType();
     }
 }

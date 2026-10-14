@@ -16,10 +16,20 @@ public class WcdkR2dbcProperties {
 
     private boolean enabled;
 
+    /** XML 方法入参未使用时拒绝执行；false 为历史兼容模式。 */
+    private boolean strictUnusedParameters = true;
+
     /** 可选的数据库驱动类型提示，供单数据源回退和数据库结构初始化使用。 */
     private String databaseType;
 
     private boolean sqlLogEnabled = false;
+
+    /** 完整 SQL 日志独立开关；同时开启 sql-log-enabled 才输出。 */
+    private boolean sqlLogCompleteEnabled;
+
+    /** 日志敏感参数/列名，关键词脱敏与值模式始终生效。 */
+    private java.util.Set<String> sensitiveColumns = new java.util.LinkedHashSet<>(java.util.List.of(
+            "phone", "mobile", "tel", "cardNo", "idCard", "password", "token", "secret", "credential"));
 
     /** 存在 ObservationRegistry Bean 时，启用可选的 Micrometer 观测。 */
     private boolean observabilityEnabled;
@@ -103,5 +113,8 @@ public class WcdkR2dbcProperties {
          * 是否在事务中执行
          */
         private boolean executeInTransaction = true;
+
+        /** 初始化的总等待时间，必须为正数；超时取消初始化并使启动失败。 */
+        private java.time.Duration timeout = java.time.Duration.ofSeconds(30);
     }
 }

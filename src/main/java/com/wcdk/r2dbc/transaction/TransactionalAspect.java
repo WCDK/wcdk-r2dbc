@@ -108,7 +108,7 @@ public class TransactionalAspect {
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
         }
-        return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
+        return wrapped;
     }
 
     /**
@@ -121,7 +121,7 @@ public class TransactionalAspect {
         if (hasTimeout(timeout)) {
             wrapped = wrapped.timeout(Duration.ofSeconds(timeout));
         }
-        return R2dbcDataSourceContext.pinTransactionDataSource(wrapped);
+        return wrapped;
     }
 
     /** 将注解属性传给响应式事务管理器。 */

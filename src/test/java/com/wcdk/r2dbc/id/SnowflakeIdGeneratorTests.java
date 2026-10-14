@@ -10,8 +10,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SnowflakeIdGeneratorTests {
 
     @Test
-    void defaultGeneratorProducesUniqueIds() {
-        SnowflakeIdGenerator generator = new SnowflakeIdGenerator();
+    void configuredGeneratorProducesUniqueIds() {
+        SnowflakeIdGenerator generator = new SnowflakeIdGenerator(17);
         Set<Long> ids = new HashSet<>();
 
         for (int i = 0; i < 10_000; i++) {

@@ -9,11 +9,11 @@ public enum DatabaseType {
 
     public static DatabaseType from(String name) {
         if (name == null) return UNKNOWN;
-        String value = name.toLowerCase();
+        String value = name.toLowerCase(java.util.Locale.ROOT);
         if (value.contains("mysql")) return MYSQL;
         if (value.contains("postgres")) return POSTGRESQL;
         if (value.contains("oracle")) return ORACLE;
-        if (value.contains("dm")) return DM;
+        if (value.contains("dm") || value.contains("dameng")) return DM;
         return UNKNOWN;
     }
 }

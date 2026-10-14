@@ -11,24 +11,19 @@ class DatabaseDialectCapabilitiesTests {
         var mysql = MySqlDatabaseDialect.INSTANCE;
         var oracle = OracleDatabaseDialect.INSTANCE;
         var dm = DmDatabaseDialect.INSTANCE;
-        assertThat(postgres.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.RETURNING);
-        assertThat(mysql.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.LAST_INSERT_ID);
-        assertThat(oracle.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.RETURNING);
-        assertThat(dm.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.RETURNING);
+        assertThat(postgres.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.CLAUSE_RETURNING);
+        assertThat(mysql.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.DRIVER_GENERATED_KEYS);
+        assertThat(oracle.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.DRIVER_GENERATED_KEYS);
+        assertThat(dm.generatedKeyStrategy()).isEqualTo(GeneratedKeyStrategy.DRIVER_GENERATED_KEYS);
         assertThat(postgres.supportsReturning()).isTrue();
         assertThat(postgres.renderGeneratedKey("\"id\"")).isEqualTo(" RETURNING \"id\"");
         assertThat(mysql.supportsReturning()).isFalse();
         assertThat(oracle.supportsReturning()).isFalse();
         assertThat(dm.supportsReturning()).isFalse();
-        assertThat(postgres.supportsUpsert()).isTrue();
-        assertThat(mysql.supportsUpsert()).isTrue();
-        assertThat(oracle.supportsUpsert()).isFalse();
-        assertThat(dm.supportsUpsert()).isFalse();
         for (DatabaseDialect dialect : List.of(mysql, oracle, dm)) {
             assertThat(dialect.renderGeneratedKey("id")).isEmpty();
         }
         for (DatabaseDialect dialect : List.of(postgres, mysql, oracle, dm)) {
-            assertThat(dialect.supportsSavepoint()).isTrue();
             assertThat(dialect.existsResult("SELECT 1 FROM sample"))
                     .contains("THEN 1 ELSE 0 END").doesNotContain("TRUE", "FALSE", "COUNT");
         }

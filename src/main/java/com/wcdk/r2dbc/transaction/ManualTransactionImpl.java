@@ -20,11 +20,21 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class ManualTransactionImpl implements ManualTransaction {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ManualTransactionImpl.class);
+
     private final Connection connection;
     private final AtomicReference<TransactionStatus> status = new AtomicReference<>(TransactionStatus.NEW);
     private final Map<String, SavepointImpl> savepoints = new ConcurrentHashMap<>();
     private final AtomicInteger savepointCounter = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean();
+    // cache 保持已发起的驱动操作运行，取消订阅只撤销等待，不能取消提交后并发回滚。
+    private final Mono<Boolean> commitCompletion = Mono.defer(() -> Mono.from(getConnection().commitTransaction()))
+            .doOnSuccess(ignored -> finish(TransactionStatus.COMMITTED))
+            .doOnError(error -> finish(TransactionStatus.FAILED)).thenReturn(true).cache();
+    private final Mono<Boolean> rollbackCompletion = Mono.defer(() -> Mono.from(getConnection().rollbackTransaction()))
+            .doOnSuccess(ignored -> finish(TransactionStatus.ROLLED_BACK))
+            .doOnError(error -> finish(TransactionStatus.FAILED)).thenReturn(true).cache();
+    private final Mono<Void> closeCompletion = Mono.defer(this::closeOnce).cache();
     private volatile boolean readOnly;
     private volatile int timeoutSeconds;
     private volatile IsolationLevel isolationLevel;
@@ -46,26 +56,10 @@ class ManualTransactionImpl implements ManualTransaction {
     @Override
     public Mono<Boolean> commit() {
         return Mono.defer(() -> {
-            TransactionStatus current = status.get();
-            if (current == TransactionStatus.COMMITTED) {
-                return Mono.error(new IllegalStateException("Transaction already committed"));
+            if (closed.get() || !status.compareAndSet(TransactionStatus.ACTIVE, TransactionStatus.COMMITTING)) {
+                return Mono.error(new IllegalStateException("事务状态为 " + status.get() + "，无法提交"));
             }
-            if (current == TransactionStatus.ROLLED_BACK) {
-                return Mono.error(new IllegalStateException("Transaction already rolled back, cannot commit"));
-            }
-            if (current == TransactionStatus.FAILED) {
-                return Mono.error(new IllegalStateException("Transaction has failed, cannot commit"));
-            }
-            if (current != TransactionStatus.ACTIVE) {
-                return Mono.error(new IllegalStateException("Transaction is not active, cannot commit"));
-            }
-            return Mono.from(connection.commitTransaction())
-                    .doOnSuccess(ignored -> {
-                        status.set(TransactionStatus.COMMITTED);
-                        invalidateAllSavepoints();
-                    })
-                    .doOnError(error -> status.set(TransactionStatus.FAILED))
-                    .thenReturn(true);
+            return commitCompletion;
         });
     }
 
@@ -73,23 +67,17 @@ class ManualTransactionImpl implements ManualTransaction {
     public Mono<Boolean> rollback() {
         return Mono.defer(() -> {
             TransactionStatus current = status.get();
-            if (current == TransactionStatus.ROLLED_BACK) {
-                return Mono.error(new IllegalStateException("Transaction already rolled back"));
+            if (closed.get() || (current != TransactionStatus.ACTIVE && current != TransactionStatus.FAILED)
+                    || !status.compareAndSet(current, TransactionStatus.CLOSING)) {
+                return Mono.error(new IllegalStateException("事务状态为 " + status.get() + "，无法回滚"));
             }
-            if (current == TransactionStatus.COMMITTED) {
-                return Mono.error(new IllegalStateException("Transaction already committed, cannot rollback"));
-            }
-            if (current != TransactionStatus.ACTIVE && current != TransactionStatus.FAILED) {
-                return Mono.error(new IllegalStateException("Transaction is not active or failed, cannot rollback"));
-            }
-            return Mono.from(connection.rollbackTransaction())
-                    .doOnSuccess(ignored -> {
-                        status.set(TransactionStatus.ROLLED_BACK);
-                        invalidateAllSavepoints();
-                    })
-                    .doOnError(error -> status.set(TransactionStatus.FAILED))
-                    .thenReturn(true);
+            return rollbackCompletion;
         });
+    }
+
+    private void finish(TransactionStatus terminal) {
+        invalidateAllSavepoints();
+        status.set(terminal);
     }
 
     @Override
@@ -101,15 +89,17 @@ class ManualTransactionImpl implements ManualTransaction {
             if (savepointName == null || !savepointName.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
                 return Mono.error(new IllegalArgumentException("Invalid savepoint name: " + savepointName));
             }
-            if (savepoints.containsKey(savepointName)) {
-                return Mono.error(new IllegalArgumentException("Savepoint already exists: " + savepointName));
+            SavepointImpl savepoint = new SavepointImpl(savepointName, savepointCounter.incrementAndGet());
+            savepoint.invalidate(); // 在驱动完成前仅作为预占位，不可回滚/释放。
+            if (savepoints.putIfAbsent(savepointName, savepoint) != null) {
+                return Mono.error(new IllegalArgumentException("保存点已存在或正在创建: " + savepointName));
             }
-            return Mono.from(connection.createSavepoint(savepointName))
-                    .then(Mono.fromSupplier(() -> {
-                        SavepointImpl savepoint = new SavepointImpl(savepointName, savepointCounter.incrementAndGet());
-                        savepoints.put(savepointName, savepoint);
-                        return (Savepoint) savepoint;
-                    }));
+            return Mono.defer(() -> Mono.from(connection.createSavepoint(savepointName)))
+                    .doOnSuccess(ignored -> savepoint.valid = true)
+                    .doOnError(error -> savepoints.remove(savepointName, savepoint))
+                    .thenReturn((Savepoint) savepoint)
+                    .cache(); // 创建在途取消仍完成登记，避免驱动留下未登记保存点。
+
         });
     }
 
@@ -240,21 +230,41 @@ class ManualTransactionImpl implements ManualTransaction {
 
     @Override
     public Mono<Void> close() {
-        return Mono.defer(() -> {
-            if (!closed.compareAndSet(false, true)) {
-                return Mono.empty();
-            }
-            if (status.get() != TransactionStatus.ACTIVE) {
-                return Mono.from(connection.close());
-            }
-            return rollback().then(Mono.from(connection.close()))
-                    .onErrorResume(rollbackError -> Mono.from(connection.close())
-                            .onErrorResume(closeError -> {
-                                rollbackError.addSuppressed(closeError);
-                                return Mono.empty();
-                            })
-                            .then(Mono.error(rollbackError)));
-        });
+        return closeCompletion;
+    }
+
+    private Mono<Void> closeOnce() {
+        closed.set(true);
+        TransactionStatus current = status.get();
+        if (current == TransactionStatus.COMMITTING) {
+            return commitCompletion.onErrorResume(error -> Mono.empty())
+                    .then(Mono.defer(() -> closeConnection(status.get())));
+        }
+        if (current == TransactionStatus.CLOSING) {
+            return rollbackCompletion.onErrorResume(error -> Mono.empty())
+                    .then(Mono.defer(() -> closeConnection(status.get())));
+        }
+        if (!status.compareAndSet(current, TransactionStatus.CLOSING)) {
+            return Mono.defer(this::closeOnce);
+        }
+        if (current == TransactionStatus.ACTIVE || current == TransactionStatus.FAILED) {
+            return Mono.defer(() -> Mono.from(getConnection().rollbackTransaction()))
+                    .doOnSuccess(ignored -> finish(TransactionStatus.ROLLED_BACK))
+                    .onErrorResume(error -> {
+                        finish(TransactionStatus.FAILED);
+                        log.warn("关闭事务时回滚失败，继续关闭连接", error);
+                        return Mono.empty();
+                    })
+                    .then(Mono.defer(() -> closeConnection(status.get())));
+        }
+        return closeConnection(current);
+    }
+
+    private Mono<Void> closeConnection(TransactionStatus terminal) {
+        status.set(TransactionStatus.CLOSING);
+        return Mono.defer(() -> Mono.from(connection.close()))
+                .doOnSuccess(ignored -> finish(terminal == TransactionStatus.NEW ? TransactionStatus.COMPLETED : terminal))
+                .doOnError(error -> finish(TransactionStatus.FAILED));
     }
 
     Mono<Void> activate() {

@@ -1,11 +1,7 @@
 package com.wcdk.r2dbc.query;
 
-import com.wcdk.r2dbc.config.WcdkR2dbcProperties;
-import com.wcdk.r2dbc.repository.metadata.RepositoryMetadata;
 
 import java.io.Serializable;
-import java.lang.invoke.SerializedLambda;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -236,70 +232,9 @@ public class LambdaUpdateWrapper<T> {
      * 解析 Lambda 表达式对应的数据库列名。
      */
     private String resolveColumn(SFunction<T, ?> field) {
-        WcdkR2dbcProperties properties = new WcdkR2dbcProperties();
-        properties.setQuoteIdentifier(false);
         return LambdaPropertyResolver.defaultResolver()
-                .resolve(field, new RepositoryMetadata(entityClass, properties)).name();
+                .resolve(field, LambdaPropertyResolver.metadata(entityClass)).name();
     }
-
-    /**
-     * 解析 Lambda 表达式对应的字段名。
-     */
-    private String resolveFieldName(SFunction<T, ?> field) {
-        Method writeMethod = getWriteMethod(field);
-        String methodName = writeMethod.getName();
-
-        if (methodName.startsWith("get") && methodName.length() > 3) {
-            return java.beans.Introspector.decapitalize(methodName.substring(3));
-        }
-        if (methodName.startsWith("is") && methodName.length() > 2) {
-            return java.beans.Introspector.decapitalize(methodName.substring(2));
-        }
-        if (methodName.startsWith("set") && methodName.length() > 3) {
-            return java.beans.Introspector.decapitalize(methodName.substring(3));
-        }
-
-        return methodName;
-    }
-
-    /**
-     * 获取 Lambda 表达式对应的方法。
-     */
-    private Method getWriteMethod(SFunction<T, ?> field) {
-        try {
-            if (field instanceof Serializable serializable) {
-                Method writeMethod = serializable.getClass().getDeclaredMethod("writeReplace");
-                writeMethod.setAccessible(true);
-                SerializedLambda lambda = (SerializedLambda) writeMethod.invoke(serializable);
-                String implMethodName = lambda.getImplMethodName();
-                return findMethod(entityClass, implMethodName);
-            }
-        } catch (Exception ignored) {
-        }
-
-        throw new IllegalArgumentException("无法解析 Lambda 表达式对应的字段，请确保使用方法引用语法（如 User::getName）");
-    }
-
-    /**
-     * 在类中查找方法。
-     */
-    private Method findMethod(Class<?> clazz, String methodName) {
-        Class<?> current = clazz;
-        while (current != null && current != Object.class) {
-            for (Method method : current.getDeclaredMethods()) {
-                if (method.getName().equals(methodName)) {
-                    return method;
-                }
-            }
-            current = current.getSuperclass();
-        }
-        throw new IllegalArgumentException("在类 " + clazz.getName() + " 中找不到方法：" + methodName);
-    }
-
-    /**
-     * 驼峰转下划线。
-     */
-
 
     // ==================== 类型定义 ====================
 

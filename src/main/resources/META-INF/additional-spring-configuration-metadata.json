@@ -14,6 +14,46 @@
       "name": "wcdk.r2dbc.database-type",
       "type": "java.lang.String",
       "description": "Driver hint for the single-source WCDK fallback and schema initializer; does not override Spring Boot or multi-source URL drivers. Blank values fall back to database.type, then the URL/metadata."
+    },
+    {
+      "name": "wcdk.r2dbc.strict-unused-parameters",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "XML 方法入参未使用时拒绝执行；false 仅用于迁移期间保留历史兼容行为。"
+    },
+    {
+      "name": "wcdk.r2dbc.base-packages",
+      "type": "java.lang.String[]",
+      "description": "显式仓储扫描包；设置后不追加 Spring Boot 自动配置包。"
+    },
+    {
+      "name": "wcdk.r2dbc.logic-delete-value",
+      "type": "java.lang.Object",
+      "defaultValue": 1,
+      "description": "逻辑删除值，按实体列类型转换。"
+    },
+    {
+      "name": "wcdk.r2dbc.logic-not-delete-value",
+      "type": "java.lang.Object",
+      "defaultValue": 0,
+      "description": "未删除值，按实体列类型转换。"
+    },
+    {
+      "name": "wcdk.r2dbc.database-initializer.timeout",
+      "type": "java.time.Duration",
+      "defaultValue": "30s",
+      "description": "Schema 初始化总阻塞等待上限，必须为正数；超时取消初始化并使启动失败。"
+    },
+    {
+      "name": "wcdk.r2dbc.sql-log-complete-enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "独立完整 SQL 日志开关；同时开启 sql-log-enabled 才生效，敏感值仍脱敏。"
+    },
+    {
+      "name": "wcdk.r2dbc.sensitive-columns",
+      "type": "java.util.Set<java.lang.String>",
+      "description": "敏感参数/列名，默认含 phone/mobile/tel/cardNo/idCard/password/token/secret/credential；关键词和值模式额外生效。"
     }
   ]
 }

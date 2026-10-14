@@ -22,6 +22,11 @@ public interface LambdaPropertyResolver {
      */
     RepositoryMetadata.FieldColumn resolve(Serializable getter, RepositoryMetadata metadata);
 
+    /** 获取历史 Wrapper 共用的不引用标识符元数据，按实体类缓存。 */
+    static RepositoryMetadata metadata(Class<?> entityClass) {
+        return Default.METADATA.get(entityClass);
+    }
+
     /**
      * 返回默认 Lambda 属性解析器。
      * @author wcdk
@@ -37,6 +42,14 @@ public interface LambdaPropertyResolver {
      */
     final class Default implements LambdaPropertyResolver {
         private static final Default INSTANCE = new Default();
+        private static final ClassValue<RepositoryMetadata> METADATA = new ClassValue<>() {
+            @Override
+            protected RepositoryMetadata computeValue(Class<?> type) {
+                var properties = new com.wcdk.r2dbc.config.WcdkR2dbcProperties();
+                properties.setQuoteIdentifier(false);
+                return new RepositoryMetadata(type, properties);
+            }
+        };
 
         @Override
         public RepositoryMetadata.FieldColumn resolve(Serializable getter, RepositoryMetadata metadata) {

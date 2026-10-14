@@ -19,7 +19,7 @@ public record SqlExecutionRequest<T>(
         List<SqlParameter> parameters,
         Class<T> resultType,
         ExecutionOptions options,
-        Map<String, Object> namedParameters,
+        Map<?, ?> namedParameters,
         BiFunction<Row, RowMetadata, T> mapper) {
 
     public SqlExecutionRequest {
@@ -27,7 +27,7 @@ public record SqlExecutionRequest<T>(
         Objects.requireNonNull(commandType, "commandType");
         parameters = List.copyOf(parameters == null ? List.of() : parameters);
         options = options == null ? ExecutionOptions.DEFAULT : options;
-        namedParameters = Map.copyOf(namedParameters == null ? Map.of() : namedParameters);
+        namedParameters = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(namedParameters == null ? Map.of() : namedParameters));
     }
 
     /**
@@ -61,10 +61,10 @@ public record SqlExecutionRequest<T>(
                 ExecutionOptions.DEFAULT, copy(parameters), null);
     }
 
-    private static Map<String, Object> copy(Map<?, ?> parameters) {
+    private static Map<Object, Object> copy(Map<?, ?> parameters) {
         if (parameters == null || parameters.isEmpty()) return Map.of();
-        Map<String, Object> result = new java.util.LinkedHashMap<>();
-        parameters.forEach((key, value) -> result.put(String.valueOf(key), value));
+        Map<Object, Object> result = new java.util.LinkedHashMap<>();
+        parameters.forEach((key, value) -> result.put(key, value));
         return result;
     }
 }

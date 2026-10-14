@@ -59,8 +59,13 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
     public Mono<ReactiveTransaction> getReactiveTransaction(TransactionDefinition definition) {
         return Mono.deferContextual(context -> {
             String currentDataSource = R2dbcDataSourceContext.get(context);
-            String dataSource = currentDataSource == null ? primaryDataSource : currentDataSource;
-            return verifyExistingDataSource(dataSource)
+            String dataSource = "<primary>".equals(primaryDataSource) ? null
+                    : currentDataSource == null ? primaryDataSource : currentDataSource;
+            int propagation = definition == null ? TransactionDefinition.PROPAGATION_REQUIRED
+                    : definition.getPropagationBehavior();
+            boolean suspends = propagation == TransactionDefinition.PROPAGATION_REQUIRES_NEW
+                    || propagation == TransactionDefinition.PROPAGATION_NOT_SUPPORTED;
+            return (suspends || dataSource == null ? Mono.<Void>empty() : verifyExistingDataSource(dataSource))
                     .then(delegate.getReactiveTransaction(definition))
                     .flatMap(transaction -> bindDataSource(dataSource).thenReturn(transaction));
         });
@@ -104,13 +109,9 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
      * @return 校验结果
      */
     private Mono<Void> verifyExistingDataSource(String requested) {
-        return TransactionSynchronizationManager.forCurrentTransaction()
+        return R2dbcDataSourceContext.currentManager()
                 .flatMap(manager -> {
-                    Object pinned = manager.getResource(R2dbcDataSourceContext.transactionResourceKey());
-                    if (pinned != null && !pinned.equals(requested)) {
-                        return Mono.error(R2dbcDataSourceContext
-                                .transactionDataSourceSwitchException(pinned.toString(), requested));
-                    }
+                    R2dbcDataSourceContext.verifySpringDataSource(manager, requested);
                     return Mono.<Void>empty();
                 })
                 .onErrorResume(NoTransactionException.class, ignored -> Mono.empty());
@@ -123,13 +124,12 @@ public final class WcdkReactiveTransactionManager implements ReactiveTransaction
      * @return 登记结果
      */
     private Mono<Void> bindDataSource(String dataSource) {
-        return TransactionSynchronizationManager.forCurrentTransaction()
-                .doOnNext(manager -> {
-                    Object key = R2dbcDataSourceContext.transactionResourceKey();
-                    if (!manager.hasResource(key)) {
-                        manager.bindResource(key, dataSource);
-                    }
-                })
+        return R2dbcDataSourceContext.currentManager()
+                .switchIfEmpty(Mono.error(new IllegalStateException(
+                        "委托事务管理器未建立响应式事务上下文，无法锁定数据源；请使用 R2dbcTransactionManager "
+                                + "并通过 TransactionalOperator 或 Spring 响应式 @Transactional 调用",
+                        new NoTransactionException("未找到响应式事务上下文"))))
+                .doOnNext(manager -> R2dbcDataSourceContext.bindSpringDataSource(manager, dataSource))
                 .then();
     }
 }

@@ -19,6 +19,12 @@ public enum TransactionStatus {
      */
     ACTIVE,
 
+    /** 提交在途，关闭必须等待提交终态。 */
+    COMMITTING,
+
+    /** 关闭或回滚在途，不接受新的提交操作。 */
+    CLOSING,
+
     /**
      * 事务已提交
      */

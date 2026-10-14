@@ -150,6 +150,180 @@ class DataSourceTransactionOrderingTests {
         verify(fixture.secondaryFactory).create();
     }
 
+    @Test
+    void businessNoTransactionExceptionIsNeverReplayedForMonoOrFlux() {
+        var count = new java.util.concurrent.atomic.AtomicInteger();
+        var error = new org.springframework.transaction.NoTransactionException("business");
+        Mono<String> work = Mono.defer(() -> { count.incrementAndGet(); return Mono.error(error); });
+        StepVerifier.create(R2dbcDataSourceContext.use("primary", work))
+                .expectErrorSatisfies(actual -> assertThat(actual).isSameAs(error)).verify();
+        assertThat(count).hasValue(1);
+        StepVerifier.create(R2dbcDataSourceContext.use("primary", work.flux()))
+                .expectErrorSatisfies(actual -> assertThat(actual).isSameAs(error)).verify();
+        assertThat(count).hasValue(2);
+    }
+
+    @Test
+    void realPrimaryAndSingleFactoryAliasesAreAccepted() {
+        RoutingFixture fixture = routingFixture();
+        TransactionTemplate template = new TransactionTemplate(new TransactionManager(fixture.routing));
+        StepVerifier.create(template.execute(connection -> R2dbcDataSourceContext.use("primary", Mono.just("ok"))))
+                .expectNext("ok").verifyComplete();
+        TransactionTemplate single = new TransactionTemplate(new TransactionManager(fixture.primaryFactory));
+        StepVerifier.create(single.execute(connection -> R2dbcDataSourceContext.use("any-alias", Mono.just("ok"))))
+                .expectNext("ok").verifyComplete();
+        StepVerifier.create(TransactionalOperator.create(new WcdkReactiveTransactionManager(fixture.primaryFactory))
+                .transactional(R2dbcDataSourceContext.use("any-alias", Mono.just("ok"))))
+                .expectNext("ok").verifyComplete();
+    }
+
+    @Test
+    void scopedManualTransactionRejectsSwitchAndAcceptsExplicitPrimary() {
+        RoutingFixture fixture = routingFixture();
+        TransactionTemplate template = new TransactionTemplate(new TransactionManager(fixture.routing));
+        StepVerifier.create(template.executeManual(transaction -> R2dbcDataSourceContext.use("secondary",
+                        Mono.just("bad"))))
+                .expectErrorSatisfies(DataSourceTransactionOrderingTests::assertSwitchRejected).verify();
+        StepVerifier.create(template.executeManual(transaction -> R2dbcDataSourceContext.use("primary",
+                        transaction.commit().thenReturn("ok"))))
+                .expectNext("ok").verifyComplete();
+    }
+
+    @Test
+    void requiresNewPinsSecondaryAndRestoresOuterPrimary() {
+        for (boolean wrapped : new boolean[]{false, true}) {
+            RoutingFixture fixture = routingFixture();
+            ReactiveTransactionManager manager = wrapped ? new WcdkReactiveTransactionManager(fixture.routing)
+                    : new R2dbcTransactionManager(fixture.routing);
+            var outer = TransactionalOperator.create(manager);
+            var definition = new org.springframework.transaction.support.DefaultTransactionDefinition(
+                    TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            var inner = TransactionalOperator.create(manager, definition);
+            Mono<String> work = Mono.defer(() -> R2dbcDataSourceContext.use("secondary", inner,
+                    Mono.defer(() -> R2dbcDataSourceContext.use("secondary", Mono.just("inner")))))
+                    .doOnNext(value -> assertThat(value).isEqualTo("inner"))
+                    .then(R2dbcDataSourceContext.use("primary", Mono.just("outer")))
+                    .flatMap(value -> R2dbcDataSourceContext.use("secondary", Mono.just(value)));
+            StepVerifier.create(outer.transactional(work))
+                    .expectErrorSatisfies(DataSourceTransactionOrderingTests::assertSwitchRejected).verify();
+            verify(fixture.secondaryConnection).commitTransaction();
+            verify(fixture.primaryConnection).rollbackTransaction();
+        }
+    }
+
+    @Test
+    void notSupportedAllowsSelectionAndRestoresOuterGuard() {
+        RoutingFixture fixture = routingFixture();
+        var manager = new WcdkReactiveTransactionManager(fixture.routing);
+        var outer = TransactionalOperator.create(manager);
+        var definition = new org.springframework.transaction.support.DefaultTransactionDefinition(
+                TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        var inner = TransactionalOperator.create(manager, definition);
+        Mono<Void> work = inner.transactional(R2dbcDataSourceContext.use("secondary",
+                Mono.from(fixture.routing.create()).then()))
+                .then(R2dbcDataSourceContext.use("secondary", Mono.just("rejected"))).then();
+        StepVerifier.create(outer.transactional(work))
+                .expectErrorSatisfies(DataSourceTransactionOrderingTests::assertSwitchRejected).verify();
+        verify(fixture.secondaryFactory).create();
+        verify(fixture.secondaryConnection, never()).beginTransaction(any(io.r2dbc.spi.TransactionDefinition.class));
+    }
+
+    @Test
+    void supportsWithoutActualTransactionDoesNotBindOrValidate() {
+        RoutingFixture fixture = routingFixture();
+        var definition = new org.springframework.transaction.support.DefaultTransactionDefinition(
+                TransactionDefinition.PROPAGATION_SUPPORTS);
+        var operator = TransactionalOperator.create(new WcdkReactiveTransactionManager(fixture.routing), definition);
+        Mono<String> work = Mono.from(fixture.routing.create()).then(R2dbcDataSourceContext.use("secondary",
+                Mono.from(fixture.routing.create()))).then(R2dbcDataSourceContext.currentManager()
+                .map(manager -> {
+                    assertThat(manager.isActualTransactionActive()).isFalse();
+                    assertThat(manager.hasResource(R2dbcDataSourceContext.transactionResourceKey())).isFalse();
+                    return "ok";
+                }));
+        StepVerifier.create(operator.transactional(work)).expectNext("ok").verifyComplete();
+    }
+
+    @Test
+    void requiredScopeCannotUseSecondaryConnectionFromPrimaryTransaction() {
+        for (boolean wrapped : new boolean[]{false, true}) {
+            RoutingFixture fixture = routingFixture();
+            ReactiveTransactionManager manager = wrapped ? new WcdkReactiveTransactionManager(fixture.routing)
+                    : new R2dbcTransactionManager(fixture.routing);
+            var required = TransactionalOperator.create(manager);
+            StepVerifier.create(required.transactional(R2dbcDataSourceContext.use("secondary", required,
+                            Mono.from(fixture.routing.create()).thenReturn("bad"))))
+                    .expectErrorSatisfies(DataSourceTransactionOrderingTests::assertSwitchRejected).verify();
+            verify(fixture.secondaryFactory, never()).create();
+        }
+    }
+
+    @Test
+    void requiresNewRejectsChangingItsOwnPinnedDataSource() {
+        RoutingFixture fixture = routingFixture();
+        var manager = new WcdkReactiveTransactionManager(fixture.routing);
+        var inner = TransactionalOperator.create(manager,
+                new org.springframework.transaction.support.DefaultTransactionDefinition(
+                        TransactionDefinition.PROPAGATION_REQUIRES_NEW));
+        StepVerifier.create(TransactionalOperator.create(manager).transactional(
+                        R2dbcDataSourceContext.use("secondary", inner,
+                                R2dbcDataSourceContext.use("primary", Mono.just("bad")))))
+                .expectErrorMatches(error -> error instanceof IllegalStateException
+                        && error.getMessage().contains("从 secondary 切换到 primary")).verify();
+        verify(fixture.secondaryConnection).rollbackTransaction();
+        verify(fixture.primaryConnection).rollbackTransaction();
+    }
+
+    @Test
+    void requiresNewFailureRestoresOuterGuardAfterInnerRollback() {
+        RoutingFixture fixture = routingFixture();
+        var manager = new WcdkReactiveTransactionManager(fixture.routing);
+        var inner = TransactionalOperator.create(manager,
+                new org.springframework.transaction.support.DefaultTransactionDefinition(
+                        TransactionDefinition.PROPAGATION_REQUIRES_NEW));
+        var marker = new IllegalArgumentException("inner failure");
+        Mono<String> work = R2dbcDataSourceContext.use("secondary", inner, Mono.<String>error(marker))
+                .onErrorResume(IllegalArgumentException.class, error -> {
+                    assertThat(error).isSameAs(marker);
+                    return R2dbcDataSourceContext.use("primary", Mono.just("restored"));
+                });
+        StepVerifier.create(TransactionalOperator.create(manager).transactional(work))
+                .expectNext("restored").verifyComplete();
+        verify(fixture.secondaryConnection).rollbackTransaction();
+        verify(fixture.primaryConnection).commitTransaction();
+    }
+
+    @Test
+    void fluxScopeSupportsRequiresNewAndNotSupportedWithoutGuardBypass() {
+        for (int propagation : new int[]{TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+                TransactionDefinition.PROPAGATION_NOT_SUPPORTED}) {
+            RoutingFixture fixture = routingFixture();
+            var manager = new WcdkReactiveTransactionManager(fixture.routing);
+            var inner = TransactionalOperator.create(manager,
+                    new org.springframework.transaction.support.DefaultTransactionDefinition(propagation));
+            reactor.core.publisher.Flux<String> work = R2dbcDataSourceContext.use("secondary", inner,
+                    R2dbcDataSourceContext.use("secondary", Mono.from(fixture.routing.create())
+                            .thenMany(reactor.core.publisher.Flux.just("one", "two"))))
+                    .concatWith(R2dbcDataSourceContext.use("primary", Mono.just("restored")));
+            StepVerifier.create(TransactionalOperator.create(manager).transactional(work))
+                    .expectNext("one", "two", "restored").verifyComplete();
+            verify(fixture.primaryConnection).commitTransaction();
+        }
+    }
+
+    @Test
+    void missingDelegateContextExplainsCauseAndRepair() {
+        var delegate = mock(ReactiveTransactionManager.class);
+        var transaction = mock(ReactiveTransaction.class);
+        when(delegate.getReactiveTransaction(any())).thenReturn(Mono.just(transaction));
+        StepVerifier.create(new WcdkReactiveTransactionManager(delegate, "primary")
+                        .getReactiveTransaction(new org.springframework.transaction.support.DefaultTransactionDefinition()))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("未建立响应式事务上下文").hasMessageContaining("无法锁定数据源")
+                        .hasMessageContaining("R2dbcTransactionManager").hasMessageContaining("TransactionalOperator")
+                        .hasCauseInstanceOf(org.springframework.transaction.NoTransactionException.class)).verify();
+    }
+
     private static void assertSwitchRejected(Throwable error) {
         assertThat(error)
                 .isInstanceOf(IllegalStateException.class)

@@ -27,6 +27,12 @@ public class R2dbcSqlLogger {
     private static final Logger log = LoggerFactory.getLogger(R2dbcSqlLogger.class);
     private static final Pattern SENSITIVE_KEY = Pattern.compile(
             "(?i).*(password|passwd|pwd|token|secret|credential|certificate|cert|idcard|identity).*");
+    private static final Pattern PRIVATE_VALUE = Pattern.compile(
+            "(?<!\\d)(?:1[3-9]\\d{9}|\\d{17}[\\dXx]|\\d{15})(?![\\dXx])");
+    private static final Pattern CREDENTIAL_TEXT = Pattern.compile(
+            "(?i)((?:password|passwd|pwd|token|secret|credential)[a-z0-9_-]*\\s*[:=]\\s*)[^\\s,:;$?'\"][^\\s,;'\"]*");
+    private static final Pattern CREDENTIAL_QUOTED = Pattern.compile(
+            "(?i)((?:password|passwd|pwd|token|secret|credential)[a-z0-9_-]*\\s*[:=]\\s*)(?:'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\")");
     private static final int MAX_VALUE_LENGTH = 256;
     private static final int MAX_COLLECTION_ITEMS = 20;
 
@@ -54,13 +60,13 @@ public class R2dbcSqlLogger {
         if (parameters == null || parameters.isEmpty()) {
             log.info("=================R2DBC==========START==========");
             log.info("数据源：{}", dataSource);
-            log.info("执行SQL：{}", normalizeSql(sql));
+            log.info("执行SQL：{}", sanitizeText(normalizeSql(sql), parameters));
 
             return;
         }
         log.info("=================R2DBC==========START==========");
         log.info("数据源：{}", dataSource);
-        log.info("执行SQL：{}", normalizeSql(sql));
+        log.info("执行SQL：{}", sanitizeText(normalizeSql(sql), parameters));
         log.info("参数：{}", sanitizeParameters(parameters));
     }
 
@@ -86,15 +92,67 @@ public class R2dbcSqlLogger {
         if (!properties.isSqlLogEnabled()) {
             return;
         }
-        log.info("=========r2dbc==start==========\n" +
-                        "executionId：{}\n" +
-                        "excuteSQl：{}\n" +
-                        "excuteParam：{}\n" +
-                        "completeSql：{}\n" +
-                        "result：{}\n" +
-                        "=========r2dbc==end==========",
-                UUID.randomUUID(), normalizeSql(sql), sanitizeParameters(parameters),
-                completeSql(sql, parameters), describeResult(result));
+        logExecution(UUID.randomUUID().toString(), sql, parameters, result);
+    }
+
+    public void logExecution(ContextView context, String sql, Map<?, ?> parameters, Object result) {
+        var execution = context.<com.wcdk.r2dbc.execution.lifecycle.SqlExecutionContext>getOrDefault(
+                com.wcdk.r2dbc.execution.SqlLifecycleExecutor.EXECUTION_CONTEXT_KEY, null);
+        logExecution(execution == null ? UUID.randomUUID().toString() : execution.getExecutionId(), sql, parameters, result);
+    }
+
+    public void logExecution(String executionId, String sql, Map<?, ?> parameters, Object result) {
+        if (!properties.isSqlLogEnabled()) return;
+        log.info("R2DBC executionId={} SQL={} parameters={} result={}", executionId,
+                sanitizeText(normalizeSql(sql), parameters), sanitizeParameters(parameters),
+                result instanceof Throwable error ? error.getClass().getSimpleName() + ": " + sanitizeText(error.getMessage(), parameters) : result);
+        if (properties.isSqlLogCompleteEnabled()) {
+            log.info("R2DBC executionId={} completeSql={}", executionId, completeSql(sql, parameters));
+        }
+    }
+
+    public boolean isEnabled() { return properties.isSqlLogEnabled(); }
+
+    public String sanitizeText(String text, Map<?, ?> parameters) {
+        if (text == null) return null;
+        String safe = text;
+        if (parameters != null) safe = redactKnown(safe, parameters, false, 0);
+        safe = CREDENTIAL_QUOTED.matcher(safe).replaceAll("$1'[REDACTED]'");
+        safe = CREDENTIAL_TEXT.matcher(safe).replaceAll("$1[REDACTED]");
+        return truncate(PRIVATE_VALUE.matcher(safe).replaceAll("[REDACTED]"));
+    }
+
+    private String redactKnown(String text, Object value, boolean sensitive, int depth) {
+        if (depth >= 8) return "[REDACTED:deep-context]";
+        if (value instanceof SqlParameter parameter) {
+            sensitive |= parameter.name() != null && isSensitive(parameter.name());
+            value = parameter.value();
+        }
+        if (value instanceof Map<?, ?> map) {
+            if (map.size() > 1000) return "[REDACTED:large-context]";
+            for (var entry : map.entrySet()) text = redactKnown(text, entry.getValue(), sensitive || isSensitive(String.valueOf(entry.getKey())), depth + 1);
+        } else if (value instanceof Iterable<?> values) {
+            int count=0;
+            for (Object item : values) {
+                if (++count > 1000) return "[REDACTED:large-context]";
+                text = redactKnown(text,item,sensitive,depth+1);
+            }
+        } else if (value != null && value.getClass().isArray()) {
+            int size=Array.getLength(value);
+            if(size>1000)return "[REDACTED:large-context]";
+            for(int i=0;i<size;i++)text=redactKnown(text,Array.get(value,i),sensitive,depth+1);
+        } else if (sensitive && value != null && !String.valueOf(value).isEmpty()) {
+            String raw=String.valueOf(value);
+            text=text.replace(raw.replace("'","''"),"[REDACTED]").replace(raw,"[REDACTED]");
+        }
+        return text;
+    }
+
+    private boolean isSensitive(String name) {
+        String normalized = name.replace("_", "").replace("-", "").toLowerCase(java.util.Locale.ROOT);
+        if (SENSITIVE_KEY.matcher(name).matches()) return true;
+        return properties.getSensitiveColumns() != null && properties.getSensitiveColumns().stream()
+                .anyMatch(column -> column != null && normalized.equals(column.replace("_", "").replace("-", "").toLowerCase(java.util.Locale.ROOT)));
     }
 
     /**
@@ -107,8 +165,9 @@ public class R2dbcSqlLogger {
      */
     public String completeSql(String sql, Map<?, ?> parameters) {
         if (sql == null || sql.isBlank() || parameters == null || parameters.isEmpty()) {
-            return normalizeSql(sql);
+            return sanitizeText(normalizeSql(sql), parameters);
         }
+        Map<String, Object> sanitized = sanitizeParameters(parameters);
         StringBuilder result = new StringBuilder(sql.length() + parameters.size() * 16);
         LexerState state = LexerState.NORMAL;
         String delimiter = null;
@@ -138,6 +197,7 @@ public class R2dbcSqlLogger {
             }
             if (state == LexerState.SINGLE_QUOTE || state == LexerState.DOUBLE_QUOTE || state == LexerState.BACKTICK) {
                 result.append(ch);
+                if (ch == '\\' && next != 0) { result.append(next); i++; continue; }
                 char quote = state == LexerState.SINGLE_QUOTE ? '\'' : state == LexerState.DOUBLE_QUOTE ? '"' : '`';
                 if (ch == quote && next == quote) {
                     result.append(next); i++;
@@ -146,6 +206,7 @@ public class R2dbcSqlLogger {
                 }
                 continue;
             }
+            if (ch == '#') { result.append(ch); state = LexerState.LINE_COMMENT; continue; }
             if (ch == '-' && next == '-') {
                 result.append(ch).append(next); i++; state = LexerState.LINE_COMMENT; continue;
             }
@@ -176,13 +237,13 @@ public class R2dbcSqlLogger {
                 while (end < sql.length() && isParameterPart(sql.charAt(end))) end++;
                 String name = sql.substring(i + 1, end);
                 if (parameters.containsKey(name)) {
-                    Object value = SENSITIVE_KEY.matcher(name).matches() ? "[REDACTED]" : parameters.get(name);
+                    Object value = sanitized.get(name);
                     result.append(toSqlLiteral(value)); i = end - 1; continue;
                 }
             }
             result.append(ch);
         }
-        return normalizeSql(result.toString());
+        return sanitizeText(normalizeSql(result.toString()), parameters);
     }
 
     private String toSqlLiteral(Object value) {
@@ -254,12 +315,30 @@ public class R2dbcSqlLogger {
         Map<String, Object> sanitized = new LinkedHashMap<>();
         parameters.forEach((key, value) -> {
             String name = String.valueOf(key);
-            sanitized.put(name, SENSITIVE_KEY.matcher(name).matches() ? "[REDACTED]" : sanitizeValue(value));
+            sanitized.put(name, isSensitive(name) ? "[REDACTED]" : sanitizeValue(value));
         });
         return java.util.Collections.unmodifiableMap(sanitized);
     }
 
-    private Object sanitizeValue(Object value) {
+    private Object sanitizeValue(Object value) { return sanitizeValue(value, 0); }
+
+    private Object sanitizeValue(Object value, int depth) {
+        if (depth >= 8) return "[depth-limit]";
+        if (value instanceof SqlParameter parameter) {
+            if (parameter.name() != null && isSensitive(parameter.name())) return "[REDACTED]";
+            value = parameter.value();
+        }
+        if ((value instanceof CharSequence || value instanceof Number) && PRIVATE_VALUE.matcher(String.valueOf(value)).find()) return "[REDACTED]";
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> safe = new LinkedHashMap<>();
+            int count = 0;
+            for (var entry : map.entrySet()) {
+                if (count++ >= MAX_COLLECTION_ITEMS) { safe.put("[truncated]", true); break; }
+                String name = String.valueOf(entry.getKey());
+                safe.put(name, isSensitive(name) ? "[REDACTED]" : sanitizeValue(entry.getValue(), depth + 1));
+            }
+            return safe;
+        }
         if (value == null || value instanceof Number || value instanceof Boolean) {
             return value;
         }
@@ -274,7 +353,7 @@ public class R2dbcSqlLogger {
                     values.add("[truncated]");
                     break;
                 }
-                values.add(sanitizeValue(item));
+                values.add(sanitizeValue(item, depth + 1));
             }
             return values;
         }
@@ -282,14 +361,14 @@ public class R2dbcSqlLogger {
             int length = Array.getLength(value);
             java.util.List<Object> values = new java.util.ArrayList<>();
             for (int i = 0; i < Math.min(length, MAX_COLLECTION_ITEMS); i++) {
-                values.add(sanitizeValue(Array.get(value, i)));
+                values.add(sanitizeValue(Array.get(value, i), depth + 1));
             }
             if (length > MAX_COLLECTION_ITEMS) {
                 values.add("[truncated:" + length + "]");
             }
             return values;
         }
-        return truncate(String.valueOf(value));
+        return sanitizeText(String.valueOf(value), Map.of());
     }
 
     private Object describeResult(Object result) {

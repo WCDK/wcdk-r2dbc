@@ -72,6 +72,6 @@ class SnowflakeRuntimeTests {
  @Test void resolvesEnvironmentAndRejectsMalformedValues(){
   assertThat(new EnvironmentWorkerIdResolver(key->" 12 ").resolveWorkerId()).isEqualTo(12);
   assertThatThrownBy(()->new EnvironmentWorkerIdResolver(key->"abc").resolveWorkerId()).isInstanceOf(IllegalArgumentException.class);
-  assertThat(new EnvironmentWorkerIdResolver(key->null).resolveWorkerId()).isBetween(0L,1023L);
+  assertThatThrownBy(()->new EnvironmentWorkerIdResolver(key->null).resolveWorkerId()).hasMessageContaining("WCDK_R2DBC_WORKER_ID");
  }
 }

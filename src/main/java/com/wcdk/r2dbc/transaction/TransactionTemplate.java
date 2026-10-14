@@ -49,7 +49,7 @@ public class TransactionTemplate {
                 ManualTransaction::close,
                 this::rollbackAndClose,
                 ManualTransaction::close);
-        return R2dbcDataSourceContext.pinTransactionDataSource(execution);
+        return R2dbcDataSourceContext.pinTransactionDataSource(execution, primaryDataSource());
     }
 
     @SafeVarargs
@@ -73,7 +73,21 @@ public class TransactionTemplate {
                 ManualTransaction::close,
                 this::rollbackAndClose,
                 ManualTransaction::close);
-        return R2dbcDataSourceContext.pinTransactionDataSource(execution);
+        return R2dbcDataSourceContext.pinTransactionDataSource(execution, primaryDataSource());
+    }
+
+    /** 带数据源守卫的手动事务作用域。回调负责提交/回滚，离开作用域仍未完成则回滚并关闭。 */
+    public <T> Mono<T> executeManual(Function<ManualTransaction, Mono<T>> action) {
+        Objects.requireNonNull(action, "action");
+        Mono<T> execution = Mono.usingWhen(transactionManager.createTransaction(),
+                transaction -> Mono.defer(() -> action.apply(transaction)),
+                ManualTransaction::close, this::rollbackAndClose, ManualTransaction::close);
+        return R2dbcDataSourceContext.pinTransactionDataSource(execution, primaryDataSource());
+    }
+
+    private String primaryDataSource() {
+        return transactionManager.getConnectionFactory() instanceof
+                com.wcdk.r2dbc.datasource.DynamicRoutingConnectionFactory routing ? routing.getPrimary() : null;
     }
 
     public Mono<ManualTransaction> getTransaction() {

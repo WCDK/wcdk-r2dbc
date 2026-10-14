@@ -107,7 +107,7 @@ public class R2dbcUtil {
 
         // 初始化操作组件
         this.queryOperations = new R2dbcQueryOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
-        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger, this.properties.isQuoteIdentifier());
         this.transactionOperations = new R2dbcTransactionOperations(databaseClient, transactionalOperator, transactionManager);
     }
 
@@ -133,7 +133,7 @@ public class R2dbcUtil {
         this.sqlLogger = java.util.Objects.requireNonNull(sqlLogger, "sqlLogger");
         this.dataSourceRouter = java.util.Objects.requireNonNull(dataSourceRouter, "dataSourceRouter");
         this.queryOperations = new R2dbcQueryOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
-        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger);
+        this.updateOperations = new R2dbcUpdateOperations(databaseClient, parameterBinder, lifecycleExecutor, sqlLogger, this.properties.isQuoteIdentifier());
         this.transactionOperations = new R2dbcTransactionOperations(
                 databaseClient, transactionalOperator, transactionManager);
     }
@@ -277,6 +277,7 @@ public class R2dbcUtil {
         return entityTemplate().insert(entity);
     }
 
+    /** 仅更新已存在实体（update-only）；新增请使用 {@link #insert(Object)}。 */
     public <T> Mono<T> save(T entity) {
         return entityTemplate().update(entity);
     }

@@ -29,6 +29,12 @@ class SnowflakeConfigurationTests {
   runner().withPropertyValues("WCDK_R2DBC_WORKER_ID=1024").run(c->assertThat(c).hasFailed());
   runner().withBean(WorkerIdResolver.class,()->()->{throw new IllegalStateException("节点租约冲突");}).run(c->assertThat(c).hasFailed());
  }
+ @Test void missingNodeFailsStartupAndExplicitDevelopmentFallbackWorks(){
+  runner().withPropertyValues("WCDK_R2DBC_WORKER_ID=", "WCDK_R2DBC_WORKER_ID_FALLBACK=")
+   .run(c->assertThat(c).hasFailed());
+  runner().withPropertyValues("WCDK_R2DBC_WORKER_ID=", "WCDK_R2DBC_WORKER_ID_FALLBACK=digest")
+   .run(c->{assertThat(c).hasNotFailed();assertThat(c.getBean(SnowflakeIdGenerator.class).getWorkerId()).isBetween(0L,1023L);});
+ }
  @Test void userGeneratorBacksOffWithoutResolvingAnotherNode(){
   var resolver=mock(WorkerIdResolver.class);var g=new SnowflakeIdGenerator(14);
   runner().withBean(WorkerIdResolver.class,()->resolver).withBean(SnowflakeIdGenerator.class,()->g).run(c->{

@@ -87,7 +87,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 <dependency>
     <groupId>com.wcdk.r2dbc</groupId>
     <artifactId>wcdk-r2dbc</artifactId>
-    <version>3.5.16</version>
+    <version>3.6.0</version>
 </dependency>
 
 <!-- 按实际数据库选择一个驱动 -->
@@ -114,6 +114,7 @@ wcdk:
   r2dbc:
     enabled: true
     sql-log-enabled: false
+    snowflake-worker-id: 12  # 示例节点；部署时为每个进程分配唯一编号
 ```
 
 以上为 PostgreSQL 配置。达梦使用 `r2dbc:dm://127.0.0.1:5236` 形式；不要将 PostgreSQL 的数据库路径照搬为达梦 schema。目标 schema 应结合登录用户与会话设置确认，框架不会自动为每条连接执行 `SET SCHEMA`。URL 额外参数是否受支持，以实际使用的达梦驱动版本为准。
@@ -202,13 +203,18 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 | 配置项 | 默认值 | 说明 |
 |---|---:|---|
 | `wcdk.r2dbc.enabled` | `false` | 是否启用 WCDK R2DBC |
+| `wcdk.r2dbc.base-packages` | 未指定 | 显式仓储扫描包；设置后不追加默认包 |
+| `wcdk.r2dbc.transaction.aspect-enabled` | `false` | 是否启用 WCDK 自定义响应式事务切面 |
 | `wcdk.r2dbc.database-type` | 空 | 单数据源 WCDK 回退工厂的驱动提示及 Schema 初始化的类型提示；通常从 URL/连接元数据检测 |
-| `wcdk.r2dbc.sql-log-enabled` | `false` | 是否输出 SQL 日志 |
+| `wcdk.r2dbc.sql-log-enabled` | `false` | 是否输出参数化 SQL、脱敏参数及审计终态 |
+| `wcdk.r2dbc.sql-log-complete-enabled` | `false` | 完整 SQL 独立开关，须同时开启普通日志 |
+| `wcdk.r2dbc.sensitive-columns` | phone/mobile/tel/cardNo/idCard/password/token/secret/credential | 敏感参数/列名；忽略大小写、下划线和短横线 |
 | `wcdk.r2dbc.observability-enabled` | `false` | 是否启用 Micrometer 观测 |
 | `wcdk.r2dbc.snowflake-id` | `false` | 是否启用雪花 ID 生成 |
-| `wcdk.r2dbc.snowflake-worker-id` | 未指定 | 节点编号，0–1023；跨进程必须唯一 |
+| `wcdk.r2dbc.snowflake-worker-id` | 未指定；须提供节点来源 | 节点编号，0–1023；跨进程必须唯一 |
 | `wcdk.r2dbc.quote-identifier` | `true` | 是否引用数据库标识符；仓储按连接方言生成，MySQL使用反引号，PostgreSQL/Oracle/达梦使用双引号 |
 | `wcdk.r2dbc.mapper-locations` | `classpath*:repository/**/*.xml` | XML Mapper 扫描位置 |
+| `wcdk.r2dbc.strict-unused-parameters` | `true` | XML 未使用方法入参报错；设为 false 可暂时保留旧行为 |
 | `wcdk.r2dbc.logic-delete-field` | `delFlg` | 逻辑删除字段 |
 | `wcdk.r2dbc.logic-not-delete-value` | `0` | 未删除值 |
 | `wcdk.r2dbc.logic-delete-value` | `1` | 已删除值 |
@@ -222,13 +228,25 @@ wcdk:
       aspect-enabled: true
 ```
 
-数据库初始化配置位于 `wcdk.r2dbc.database-initializer`，支持 `enabled`、`sql-location`、`database-type`、`mode`、`ignore-errors` 和 `execute-in-transaction`。初始化类型优先级为初始化器专用 `database-type` > `wcdk.r2dbc.database-type` > 历史 `database.type` > 连接元数据。
+数据库初始化配置位于 `wcdk.r2dbc.database-initializer`：
 
-单数据源通常由 Spring Boot 的 `R2dbcAutoConfiguration` 创建连接工厂；WCDK 在它之后装配，仅当没有任何连接工厂、配置了 `spring.r2dbc.url` 且没有多数据源配置时创建回退工厂。可在排除 Spring Boot R2DBC 自动配置或仅导入 WCDK 自动配置的环境使用该回退。Boot 或用户提供的连接工厂优先，WCDK 类型提示不会覆盖其驱动；多数据源按各自 URL 和配置选择驱动。
+| 配置项 | 默认值 | 说明 |
+|---|---:|---|
+| `wcdk.r2dbc.database-initializer.enabled` | `false` | 是否初始化 Schema |
+| `wcdk.r2dbc.database-initializer.sql-location` | `classpath*:sql/**/*.sql` | SQL 资源模式 |
+| `wcdk.r2dbc.database-initializer.database-type` | 空 | 初始化专用类型提示 |
+| `wcdk.r2dbc.database-initializer.mode` | `always` | always / never / embedded |
+| `wcdk.r2dbc.database-initializer.ignore-errors` | `true` | 仅恢复错误码白名单中的异常 |
+| `wcdk.r2dbc.database-initializer.execute-in-transaction` | `true` | 使用同一连接执行事务初始化 |
+| `wcdk.r2dbc.database-initializer.timeout` | `30s` | 总等待上限，必须为正数；超时取消并使启动失败 |
+
+初始化类型优先级为初始化器专用 `database-type` > `wcdk.r2dbc.database-type` > 历史 `database.type` > 连接元数据。
+
+单数据源通常由 Spring Boot 的 `R2dbcAutoConfiguration` 创建连接工厂；WCDK 在它之后装配，仅当没有任何连接工厂、配置了 `spring.r2dbc.url` 且没有多数据源配置时创建回退工厂。可在排除 Spring Boot R2DBC 自动配置或仅导入 WCDK 自动配置的环境使用该回退。Boot 或用户提供的连接工厂优先，WCDK 类型提示不会覆盖其驱动；多数据源按各自 URL 和配置选择驱动。上下文关闭时 WCDK 只释放自己创建的工厂及连接池；应用或 Spring Boot 提供的工厂由其提供方管理。
 
 ### 初始化脚本选择与错误处理
 
-初始化器按路径完整目录段（`dm`/`dameng`、`mysql`、`oracle`、`postgresql`/`postgres`）及文件名前缀（如 `mysql-schema.sql`、`dm_schema.sql`）识别数据库专属脚本。找到目标数据库专属脚本时仅执行这些脚本，否则执行通用脚本；其他数据库目录中的普通 `schema.sql` 不会进入通用回退。`admin.sql`、`add_column.sql`、`user_id_map.sql` 均为通用脚本。资源查找失败会报告路径并阻止初始化。
+初始化器以 `sql-location` 的资源根为起点，按相对路径完整目录段（`dm`/`dameng`、`mysql`、`oracle`、`postgresql`/`postgres`）及文件名前缀（如 `mysql-schema.sql`、`dm_schema.sql`）识别数据库专属脚本。找到目标数据库专属脚本时仅执行这些脚本，否则执行通用脚本；其他数据库目录中的普通 `schema.sql` 不会进入通用回退。`admin.sql`、`add_column.sql`、`user_id_map.sql` 均为通用脚本。资源查找失败会报告路径并阻止初始化。部署路径祖先目录中的 `oracle` 等名称不参与脚本归属判定；初始化总等待受 `timeout` 限制，数据库无法连接或执行不结束时启动失败。
 
 `ignore-errors=true` 只恢复错误码白名单中的数据库异常（包括 Spring 包装的底层 R2DBC 异常）：SQLSTATE `42P07`、`42710`、`42S01`、`42S02` 或厂商码 `955`、`942`。仅出现 “already exists”等消息不会被忽略；未知驱动错误、其他错误码继续失败。每次忽略记录数据库类型、脚本、SQLSTATE、错误码和原因。`ignore-errors=false` 时白名单错误也会失败。事务模式下，错误信号恢复不会改变数据库自身的事务中止及 DDL 隐式提交规则；需要重复执行含可能失败 DDL 的脚本时使用非事务初始化。
 
@@ -236,7 +254,7 @@ wcdk:
 
 仓储生命周期直接传递执行计划中的实际 `Method`，保留声明接口、参数类型和 `@Param` 注解；不按方法名搜索重载。继承方法沿用父接口声明，覆写方法使用子接口声明。实体泛型覆写支持具体参数类型，编译器生成的默认桥接方法转发到具体方法；默认接口方法内部调用会重新进入仓储代理。`findAll` 的参数数组为空，`selectOne` 的生命周期方法仍为 `selectOne`。分页 count 阶段保留原 `selectPage` 方法与完整分页参数。
 
-雪花节点解析优先级为：`wcdk.r2dbc.snowflake-worker-id` 显式配置 → 应用提供的 `WorkerIdResolver`（无自定义 Bean 时使用 `WCDK_R2DBC_WORKER_ID` 环境变量解析器）→ 主机/进程摘要回退。编号必须为 0–1023 的整数，解析失败、越界或解析器报告租约冲突均使默认生成器创建失败。回退会警告跨进程碰撞风险，生产多实例部署应明确分配唯一节点或使用注册中心租约。
+雪花节点解析优先级为：`wcdk.r2dbc.snowflake-worker-id` 显式配置 → 应用提供的 `WorkerIdResolver`（无自定义 Bean 时使用 `WCDK_R2DBC_WORKER_ID` 环境变量解析器）。自动配置会提供默认 `SnowflakeIdGenerator` Bean，因此启用 WCDK 时须提供节点来源；`snowflake-id=false` 只关闭仓储自动填充。默认缺少节点配置时启动失败；开发环境只有显式设置 `WCDK_R2DBC_WORKER_ID_FALLBACK=digest` 才启用主机/进程摘要回退。编号必须为 0–1023 的整数，解析失败、越界或解析器报告租约冲突均使默认生成器创建失败。回退会警告跨进程碰撞风险，生产多实例部署应明确分配唯一节点或使用注册中心租约。
 
 ```yaml
 wcdk:
@@ -415,11 +433,22 @@ Flux<User> users = userRepository.selectList(wrapper);
 
 `eq(column, null)` 会渲染为 `column IS NULL`，`ne(column, null)` 会渲染为
 `column IS NOT NULL`；空 `IN` 渲染为 `1 = 0`，空 `NOT IN` 渲染为 `1 = 1`。
+IN/NOT IN 集合中的 null 元素按实体字段类型绑定为空值，保留 SQL 三值逻辑；例如 `in("id", Arrays.asList(1L, null))` 生成两项绑定，不等同于 `id = 1 OR id IS NULL`。集合在构建时快照，后续修改不会影响查询。
 如果实体配置了逻辑删除字段，Repository 查询构建时还会自动追加未删除条件。
 
 条件仅保存在 `expression()` 返回的 AST 中，普通条件、嵌套条件和 `copy()` 使用同一份表达式模型。`QueryWrapper` 没有 `conditions()` 访问器。
 
 ## 分页
+
+`QueryWrapper.page(pageNo, pageSize)` 页码从 1 开始，`PageRequest` 页码从 0 开始。limit 为 1–Integer.MAX_VALUE，offset 支持非负 long；页码乘法溢出时抛出明确错误，已设置的 limit/offset 保持不变。
+仅设置 `offset(n)` 时会跳过前 n 行并返回其余行，建议同时指定稳定排序。各方言生成的子句如下：
+
+| 方言 | offset-only（n=20） |
+| --- | --- |
+| PostgreSQL | `OFFSET 20` |
+| MySQL | `LIMIT 18446744073709551615 OFFSET 20` |
+| Oracle / 达梦 | `OFFSET 20 ROWS` |
+
 
 ```java
 import org.springframework.data.domain.Page;
@@ -490,12 +519,9 @@ public Flux<UserReport> queryReport() {
 
 数据源标识通过 Reactor Context 传递；不要使用普通 `ThreadLocal` 假设数据源上下文一定存在。
 
-事务第一次获取连接时，`DynamicRoutingConnectionFactory` 会把当时选中的数据源锁定到响应式事务
-上下文。之后无论通过 `@Transactional`、WCDK 切面、`TransactionalOperator`、WCDK
-`TransactionTemplate`，还是应用提供的 `ReactiveTransactionManager` 执行，只要同一事务链尝试选择
-其他数据源，就会以 `IllegalStateException` 失败，并在消息中给出原数据源和目标数据源。请在事务开始前
-完成数据源选择；需要访问多个数据源时应拆分事务边界，WCDK 不提供跨数据源的分布式事务语义。
-没有事务时，各条响应式链可以独立选择数据源。
+Spring 实际事务持有的连接决定数据源钉扎；`R2dbcDataSourceContext` 与动态连接工厂在选库和取连接时执行守卫。活跃事务中选择其他数据源会抛出包含源、目标和拒绝原因的 `IllegalStateException`。默认主数据源使用路由工厂的真实 `primary` 键；显式选择该键不算切库。非路由的单连接工厂使用任意选库键仍访问同一工厂，不触发跨库拒绝。
+
+请在事务获取连接前完成选库；跨库独立事务使用下方的传播作用域入口。没有实际事务时各链可以独立选库，WCDK 不提供跨数据源分布式事务语义。
 
 ## 事务
 
@@ -618,6 +644,74 @@ public Mono<User> create(User user) {
 `@Transactional` 和 `TransactionalOperator` 使用同一个响应式事务管理器，不能在同一条业务链上
 重复包裹事务，除非确实需要通过 `REQUIRES_NEW` 等传播行为创建独立事务。
 
+需要在外层事务中为 `REQUIRES_NEW` 选择另一数据源时，将选库和事务操作符放在同一入口：
+
+```java
+import com.wcdk.r2dbc.datasource.R2dbcDataSourceContext;
+import org.springframework.transaction.ReactiveTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
+
+@Service
+@RequiredArgsConstructor
+public class SecondaryTransactionService {
+    private final ReactiveTransactionManager reactiveTransactionManager;
+    private final UserRepository userRepository;
+
+    public Mono<User> create(User user) {
+        var definition = new DefaultTransactionDefinition(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        var inner = TransactionalOperator.create(reactiveTransactionManager, definition);
+        return R2dbcDataSourceContext.use("secondary", inner,
+                Mono.defer(() -> userRepository.insert(user)));
+    }
+}
+```
+
+`use(String, TransactionalOperator, Mono/Flux)` 在传播处理后校验实际事务：`REQUIRES_NEW` 挂起外层并锁定新事务的数据源，内层完成或失败后恢复外层守卫；`NOT_SUPPORTED` 挂起期间允许选库；`SUPPORTS` 无实际事务时不校验、不绑定。`REQUIRED` 加入现有事务仍拒绝跨库。新事务开始后也不能再次切换数据源。
+
+普通 `use(String, Mono/Flux)` 在当前事务中选库，因此不要用它在外层包裹一个尚未开始的跨库 `REQUIRES_NEW` 操作符。传播回归见 `DataSourceTransactionOrderingTests`。
+
+### 事务入口与守卫覆盖范围
+
+| 入口 | 守卫覆盖与连接使用 |
+|---|---|
+| Spring `@Transactional`、WCDK 切面、`TransactionalOperator` | 根据实际 Spring R2DBC 事务持有的连接校验；挂起/恢复同步处理钉扎资源 |
+| `use(String, TransactionalOperator, Mono/Flux)` | 目标键在取连接前可见，传播处理后校验；适用于跨库 `REQUIRES_NEW` 和 `NOT_SUPPORTED` |
+| `TransactionTemplate.execute` / `executeInTransaction` | 作用域内钉扎路由键，自动提交/回滚和关闭；数据库操作使用回调提供的 `Connection` |
+| `TransactionTemplate.executeManual` | 作用域内同等选库守卫，回调显式提交/回滚；离开时仍活跃则回滚并关闭 |
+| `getTransaction()`、`TransactionManager.createTransaction()`、`createManualTransaction()` | 返回独立事务对象，调用方负责提交/回滚和关闭；返回值不能将钉扎传播到任意后续 Reactor 链，跨库守卫应使用 `executeManual` |
+
+自定义 `ReactiveTransactionManager` 需建立实际 Spring R2DBC 事务及连接资源；WCDK 包装管理器在缺少响应式事务上下文时抛出包含根因和配置指引的异常。手动事务不会自动把连接注册为 Spring 事务资源，因此不要假定普通 Repository/DatabaseClient 调用会自动加入手动事务；使用 `transaction.getConnection()` 执行该事务的 SQL。
+
+### 带作用域的手动事务
+
+```java
+import com.wcdk.r2dbc.transaction.TransactionTemplate;
+
+@Service
+@RequiredArgsConstructor
+public class ManualUserService {
+    private final TransactionTemplate transactionTemplate;
+
+    public Mono<Boolean> activateUsers() {
+        return transactionTemplate.executeManual(transaction ->
+                Flux.from(transaction.getConnection()
+                                .createStatement("UPDATE sys_user SET status = 1 WHERE status = 0")
+                                .execute())
+                        .concatMap(result -> Mono.from(result.getRowsUpdated()))
+                        .then(transaction.commit()));
+    }
+}
+```
+
+`executeManual` 不自动提交：正常返回时事务仍活跃会回滚；错误或取消也清理连接。提交已在途时取消不会同时发起回滚，关闭等待提交终态；提交/回滚失败后的关闭会尝试 best-effort 回滚再关闭。`ManualTransaction.setTimeout` 仅传递驱动 `LOCK_WAIT_TIMEOUT`，不提供事务执行超时或自动超时回滚。
+
+行为回归：[数据源与传播守卫](src/test/java/com/wcdk/r2dbc/transaction/DataSourceTransactionOrderingTests.java)、[手动事务状态与锁等待超时](src/test/java/com/wcdk/r2dbc/transaction/ManualTransactionTests.java)、[模板提交/回滚/取消](src/test/java/com/wcdk/r2dbc/transaction/TransactionTemplateTests.java)。四方言真库冒烟见 [数据库矩阵](docs/database-matrix.md)。
+
+`R2dbcUtil.save(entity)` 为 update-only，仅更新已有实体；新增请使用 `R2dbcUtil.insert(entity)`。分页主查询和 COUNT 查询均执行生命周期拦截器，分别具有独立 executionId。按主键更新的 SET 参数与主键参数隔离，null 主键会在 SQL 执行前报出方法名。
+
+派生方法支持 `findBy`/`countBy`/`existsBy`/`deleteBy` 和 `updateBy<更新字段>By<条件>`；`findAllBy`、`findOneBy`、`updateXxxById` 在启动时拒绝并提供替代形式。字段含 By 时按实体字段集合匹配；精确字段令牌优先，归一后多候选会报出候选字段名。Integer 计数支持精确范围检查。
+
 ## XML SQL
 
 默认扫描路径为 `classpath*:repository/**/*.xml`。例如 `src/main/resources/repository/UserRepository.xml`：
@@ -660,11 +754,15 @@ XML 语句支持动态 SQL、参数绑定、`resultType`、`resultMap`、`discri
 
 条件和普通属性表达式使用 Spring SpEL 读取当前参数；表达式选中的属性值、字符串和数字会作为绑定参数传给数据库。字符串字面量请用单引号包裹。像 `now()` 这样的数据库函数会作为 SQL 表达式直接写入 SQL，不会作为字符串参数绑定。实体作为方法参数时可以直接引用其属性，例如 `#{updateTime}`；也可以用 `#{updateTime != null ? updateTime : now()}` 在属性为空时采用数据库函数。
 
+数值映射到整型时使用精确转换，溢出或非整数值会抛出包含列名、源值和目标类型的异常；Long/BigInteger 到 BigDecimal 不经过 double，保留整数精度。构造器内部异常直接作为映射错误的 cause；byte[] 不隐式转换为 String，请显式提供编码转换器。Map 查询与实体查询共用时间值归一化路径。
+
+XML SELECT 方法必须声明返回 Mono/Flux，非法返回类型在启动时携带 namespace.id 报错。XML 未使用方法入参默认拒绝执行，错误包含未使用参数名；动态条件/foreach 的参数读取也算使用，同一入参的 argN、paramN、@Param 别名合并判定。迁移期间可设置 `wcdk.r2dbc.strict-unused-parameters=false`，修复多余入参后恢复 true。渲染、绑定及执行错误均包含 namespace.id；foreach 集合 null 报错，空集合仍跳过。
+
 ### XML 仓储与实体映射契约
 
 XML 写操作返回值必须声明为 `Mono<Long>`、`Mono<Integer>`（影响行数）、`Mono<Boolean>`（行数大于零）、`Mono<Void>` 或 `Mono<Entity>`。返回实体时，方法签名必须有且只有一个类型匹配的实体入参，允许位于任意位置；框架在 SQL 完成后返回该对象，不会重新查询数据库或把首参当作实体。没有匹配实体、多个匹配实体、原始 `Mono`、通配符或嵌套泛型会在仓储编译时报告方法配置错误。
 
-`resultMap` 和普通查询复用同一映射计划，支持 record、无无参构造器的不可变对象和可变 POJO。优先选择 `@PersistenceCreator` 构造器；没有该注解时使用无参构造器，或唯一构造器。推荐开启 Java 编译器 `-parameters`，让构造器参数名与实体属性名一致。构造器参数可用 `com.wcdk.r2dbc.annotation.Column` 显式指定数据库列，优先级高于字段注解和参数名推导；字段上的列注解仍使用 `org.springframework.data.relational.core.mapping.Column`。未保留参数名时，每个构造器参数都须使用本项目的参数注解，此时显式 resultMap 的 property 使用注解值。
+普通查询的列名索引限定在每个 Result 内并只构建一次，精确列名优先，其次忽略大小写，不在不同结果或订阅间共享。`resultMap` 和普通查询复用同一实体映射计划，支持 record、无无参构造器的不可变对象和可变 POJO。优先选择 `@PersistenceCreator` 构造器；没有该注解时使用无参构造器，或唯一构造器。推荐开启 Java 编译器 `-parameters`，让构造器参数名与实体属性名一致。构造器参数可用 `com.wcdk.r2dbc.annotation.Column` 显式指定数据库列，优先级高于字段注解和参数名推导；字段上的列注解仍使用 `org.springframework.data.relational.core.mapping.Column`。未保留参数名时，每个构造器参数都须使用本项目的参数注解，此时显式 resultMap 的 property 使用注解值。 构造器参数注解参与普通仓储的自动 SELECT/INSERT/UPDATE 列解析时需保留 `-parameters`；参数注解的列名优先于字段注解，生成列名仍遵循 `quote-identifier`。
 
 ```java
 public final class UserView {
@@ -694,6 +792,9 @@ XML 中的 `property` 对应 Java 属性名（编译保留参数名时），`col
 
 原始 SQL 的参数 Map 必须与占位符完全匹配：无占位符时也不能传入额外参数。命名占位符使用字符串键；`?`、`$1`、`:1` 使用从 0 开始的整数索引键（后两种 SQL 标记从 1 开始）。缺失、多余、非法索引均在绑定前报错；字符串、标识符、注释中的占位符文本不参与校验。XML 动态 SQL 只绑定实际渲染出的 `#{...}` 或 `:name` 参数。
 
+生命周期参数上下文保留整数键；`SqlExecutionContext.getParameters()` 支持字符串名称和数值索引，拦截器处理参数键时应按实际类型判断。`SqlExecutionRequest` 保序快照不可修改；原始 null 参数在绑定时给出参数名及 `SqlParameter.nullOf(type)` 指引。枚举按 `name()` 绑定（不使用 `toString()`），枚举类型的 typed null 按 String 绑定。XML 实体参数包含继承字段，缺失属性不会回退为绑定整个实体；含 `$` 的占位符会明确报出无效参数名。逻辑删除布尔列接受 1/0/true/false，数值非零为 true；非法配置会报出逻辑删除配置项。
+
+
 ## SQL 生命周期与观测
 
 可以通过 `SqlLifecycleInterceptor`、`ReactiveSqlLifecycleInterceptor` 和 `SqlExecutionObserver` 扩展 SQL 执行生命周期：
@@ -707,7 +808,11 @@ SqlExecutionObserver sqlExecutionObserver(ObservationRegistry registry) {
 
 自动观测需要同时配置 `wcdk.r2dbc.observability-enabled=true` 和 `ObservationRegistry` Bean；上面的自定义 `SqlExecutionObserver` Bean 会替换默认实现。可观测信息包括 SQL 执行阶段、终止状态、结果数量、耗时和异常。
 
-SQL 日志默认关闭。当前开启 `sql-log-enabled` 后，执行日志在 INFO 级别输出 SQL、脱敏参数及替换参数后的 `completeSql`；尚无独立完整 SQL debug 开关。当前脱敏主要按 password、token、secret 等参数名匹配并限制输出长度，不提供手机号/身份证号等按值识别及自定义敏感列配置，原 SQL 中硬编码的字面量也不会自动脱敏。请勿将该日志机制当作完整的敏感信息保护方案；整改状态见 [D1 追踪](docs/audit-traceability.md)。
+SQL 日志与完整 SQL 日志默认均关闭。仅开启 `sql-log-enabled=true` 时，INFO 输出参数化 SQL、脱敏参数和结果；只有再开启 `sql-log-complete-enabled=true` 才输出 `completeSql`。输出使用实际生命周期的 executionId，原始无生命周期入口生成独立标识。完整 SQL 是日志诊断表示，脱敏、长度与集合数量限制可能使其无法直接执行，勿用于业务重放。
+
+脱敏同时匹配凭据关键词、`sensitive-columns` 和手机号/15 位或 18 位身份证格式；带类型参数、嵌套 Map、集合和数字值同样处理。自定义列名会替换默认集合，应保留需要的默认列；关键词和值模式始终生效。文本中的凭据赋值和已知敏感绑定值也会脱敏，错误消息先脱敏后截断。长数字可能被当作隐私格式，日志内容不改变数据库绑定值。此规则不识别所有行业隐私格式，业务自定义格式需添加敏感列名。
+
+`SqlAuditInterceptor` 不再带 `@Component`。普通日志开启时自动配置注册一个审计 Bean；用户同类型 Bean 可替换默认实现。审计语句、原因和错误消息走同一开关及脱敏管线，只记录终态、耗时和标识。手动构造无参审计器默认关闭输出，需要通过带 `R2dbcSqlLogger` 的构造器注入配置。before 阶段异常立即失败；FINALLY 同步/响应式回调逐个隔离异常并继续后续回调，成功结果保持成功，业务异常保留并追加 suppressed 异常。拒绝、缓存命中、审计跳过和降级均触发一次 FINALLY；`degrade(reason, fallback)` 可提供备用结果，没有结果时明确报出原因。
 
 ### 自动配置扩展 Bean
 
@@ -742,9 +847,11 @@ mvn -Pall test
 
 数据库生成主键策略按实际连接方言选择：PostgreSQL 生成 `RETURNING` SQL，MySQL 使用 INSERT 响应中的 last insert id，Oracle/达梦通过驱动请求指定生成列；不支持生成键的策略会在执行插入前报错。空业务字段插入由方言统一生成：PostgreSQL 使用 `DEFAULT VALUES`，MySQL 使用 `() VALUES ()`，Oracle 使用生成主键列的 `VALUES (DEFAULT)`（要求实体有生成主键列），达梦使用省略自增列的 `DEFAULT VALUES`。
 
+`GeneratedKeyStrategy` 仅有 `CLAUSE_RETURNING`（PostgreSQL SQL 子句）、`DRIVER_GENERATED_KEYS`（MySQL/Oracle/达梦驱动 API）、`NONE`（插入前报错），执行器由单一策略分派。扩展方言迁移时，将旧 `RETURNING` 按用途改为 `CLAUSE_RETURNING` 或 `DRIVER_GENERATED_KEYS`，旧 `LAST_INSERT_ID` 改为 `DRIVER_GENERATED_KEYS`。
+
 `generatedValueColumn(rawColumn, renderedColumn)` 为驱动选择生成列参数：Oracle 使用与 INSERT 一致的引用形式，MySQL/达梦使用列名。仓储传递实体元数据渲染的列名，保持 `quote-identifier` 开关一致。
 
-`supportsReturning` 表示支持 PostgreSQL 式 SQL RETURNING；Oracle/达梦的驱动生成列能力由 `generatedKeyStrategy` 声明。`supportsUpsert` 表示原生 INSERT upsert 能力，Oracle/达梦为 false，MERGE 需自行提供 SQL。未接入执行链的 `renderBoolean`、`renderCurrentTimestamp` 已移除，扩展实现需删除对应 override，自定义 XML SQL 继续自行指定常量和时间表达式。
+`supportsReturning` 表示支持 PostgreSQL 式 SQL RETURNING；Oracle/达梦的驱动生成列能力由 `generatedKeyStrategy` 声明。无消费方的 `supportsSavepoint`、`supportsUpsert` 已移除；扩展方言应删除对应 override，MERGE/upsert 需自行提供 SQL。未接入执行链的 `renderBoolean`、`renderCurrentTimestamp` 已移除，扩展实现需删除对应 override，自定义 XML SQL 继续自行指定常量和时间表达式。方言按 `ConnectionFactory` 缓存，数据库名称统一忽略大小写并按 contains 识别，支持带版本后缀的名称及 `dameng`。参数转换器仅保留通用 `DefaultParameterValueConverter` 和达梦 `DmParameterValueConverter`。
 
 `exists` 使用限定一条记录的 `SELECT 1`，不执行 COUNT；派生 `existsBy` 使用短路 EXISTS 并返回数值 1/0，由映射层转为 boolean，避免 Oracle/达梦的 BOOLEAN SQL 差异。
 
@@ -759,6 +866,22 @@ mvn -Pall test
 - 异常使用 `switchIfEmpty`、`onErrorMap`、`onErrorResume` 和 `doOnError` 按语义处理，不能无条件吞异常。
 
 ## API 迁移
+
+### 3.6.0 的五项 BREAKING 迁移
+
+| 项目 | 3.5.x 行为 / 旧用法 | 3.6.0 行为 / 替代用法 |
+|---|---|---|
+| XML 未使用参数 | `Mono<User> read(Long id, String unused)` 的 SQL 只引用 id，unused 被丢弃 | 默认报错；移除 unused、在动态条件中实际使用，或临时设置 `strict-unused-parameters=false` |
+| 派生方法名 | `findAllByStatus`、`findOneByStatus`、`updateNameById` 推迟到调用报错 | 启动快速失败；使用 `findByStatus` / `updateByNameById`，需保留旧名则提供同名 XML |
+| 雪花节点 | 未配置环境变量时自动摘要回退 | 缺配置启动失败；配置 `snowflake-worker-id=12` 或 `WCDK_R2DBC_WORKER_ID=12`（每个进程独占），自定义租约解析器亦可；仅开发显式开启 `WCDK_R2DBC_WORKER_ID_FALLBACK=digest` |
+| 仓储简名冲突 | `a.OrderRepository` 与 `b.OrderRepository` 静默只注册一个 | 启动失败并列两个 FQN；重命名接口或显式收窄 `basePackages` / `basePackageClasses` |
+| 日志与审计 | `sql-log-enabled=true` 自动输出完整 SQL；扫描 SqlAuditInterceptor 会无条件输出 | 普通日志只输出脱敏结构；完整 SQL 须再显式开启 `sql-log-complete-enabled=true`；审计移至条件装配，手动审计 Bean 注入同一 logger |
+
+
+显式设置 `@EnableWcdkR2dbcRepositories(basePackages=...)`、`basePackageClasses` 或 `wcdk.r2dbc.base-packages` 后，只扫描给定范围及子包。未指定时沿用导入类包与 Spring Boot 自动配置包。两个不同包的同简名仓储以前会静默跳过一个，现在启动失败并列出两个全限定名；请重命名接口或收窄扫描范围。
+
+不可达的 `config.R2dbcConfiguration` 与未使用的 `page.PageInfo` 已删除。自动装配使用 `WcdkR2dbcAutoConfiguration`；分页返回 Spring Data `Page<T>`。`QueryWrapper.Condition` 标记为待移除，条件表示使用 `SqlExpression` AST。行映射不支持的源/目标类型现在明确报错，扩展转换应提供 `R2dbcValueConverter`。
+
 
 自 3.5.16 起，下列兼容类型标注 `@Deprecated(since = "3.5.16", forRemoval = true)`，计划在 4.0.0 移除；3.x 中仍保留类型供旧代码编译。
 

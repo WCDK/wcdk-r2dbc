@@ -59,8 +59,8 @@ class DerivedQueryContractsTests {
             var method = Arrays.stream(Combined.class.getDeclaredMethods()).filter(m -> m.getName().equals(name)).findFirst().orElseThrow();
             var definition = resolver.compile(method);
             var model = DerivedQueryPlanModel.compile(method, definition, metadata);
-            assertThat(model.conditions()).hasSize(2);
-            assertThat(model.conditions().stream().map(c -> c.fieldName()).toList())
+            assertThat(model.definition().conditions()).hasSize(2);
+            assertThat(model.definition().conditions().stream().map(c -> c.fieldName()).toList())
                     .isEqualTo(definition.conditions().stream().map(c -> c.fieldName()).toList());
             assertThat(resolver.resolveCompiled(model, new Object[]{"a", "b"}).parameters())
                     .containsKeys("p0", "p1");
@@ -71,9 +71,16 @@ class DerivedQueryContractsTests {
         assertThat(definition.conditions().getFirst().fieldName()).isEqualTo("nameOrBrand");
         var ordered = resolver.compile(Combined.class.getMethod("findByBrandOrderByCoordinatorAscBrandAndModelDesc", String.class));
         var model = DerivedQueryPlanModel.compile(method, ordered, metadata);
-        assertThat(model.orders()).hasSize(2);
+        assertThat(model.definition().orders()).hasSize(2);
         assertThat(resolver.resolve(ordered, method, new Object[]{"a"}).sql())
                 .contains("ORDER BY \"coordinator\" ASC, \"brand_and_model\" DESC");
+    }
+
+    interface Ambiguous { Mono<User> findByCOORDINATOR(String value); }
+    @Test void normalizedFieldAmbiguityNamesEveryCandidateAtStartup() throws Exception {
+        var compiler = new DerivedMethodCompiler(Ambiguous.class, metadata, properties);
+        assertThatThrownBy(() -> compiler.compile(Ambiguous.class.getMethod("findByCOORDINATOR", String.class)))
+                .hasMessageContaining("歧义").hasMessageContaining("coordinator").hasMessageContaining("coOrdinator");
     }
 
     interface Combined {

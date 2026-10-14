@@ -101,9 +101,9 @@ public interface ManualTransaction {
     void setReadOnly(boolean readOnly);
 
     /**
-     * 设置事务超时时间（秒）。
+     * 设置驱动锁等待超时时间（秒）。
      * <p>
-     * 超时后事务将自动回滚。
+     * 仅映射为 R2DBC LOCK_WAIT_TIMEOUT，具体支持由驱动决定；不提供事务执行超时或自动回滚。
      *
      * @param timeoutSeconds 超时时间（秒），0表示不限制
      */

@@ -98,7 +98,7 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         };
     }
 
-    private boolean isQueryMethod(String methodName) {
+    static boolean isQueryMethod(String methodName) {
         return methodName.equals("findAll")
                 || (methodName.startsWith("select") && !methodName.equals("selectById"))
                 || methodName.equals("exists");
@@ -251,6 +251,7 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     private Mono<Long> deleteById(Object id, Method method, Object[] arguments) {
         FieldColumn idColumn = metadata.requireIdColumn();
         Object deleteId = normalizeDeleteId(id, idColumn);
+        requireId(deleteId, method);
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
                 method, repositoryInterface, arguments.clone());
@@ -263,17 +264,17 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                     if (logicDeleteColumn != null) {
                         sql = "UPDATE " + metadata.tableName()
                                 + " SET " + logicDeleteColumn.name() + " = :logicDeleteValue"
-                                + " WHERE " + idColumn.name() + " = :id"
+                                + " WHERE " + idColumn.name() + " = :__pk"
                                 + querySqlBuilder.logicNotDeleteSql(" AND ");
                         parameters = Map.of(
-                                "id", deleteId,
+                                "__pk", deleteId,
                                 "logicDeleteValue", LogicDeleteValueConverter.convert(
                                         properties.getLogicDeleteValue(), logicDeleteColumn.field().getType()),
                                 "logicNotDeleteValue", LogicDeleteValueConverter.convert(
                                         properties.getLogicNotDeleteValue(), logicDeleteColumn.field().getType()));
                     } else {
-                        sql = "DELETE FROM " + metadata.tableName() + " WHERE " + idColumn.name() + " = :id";
-                        parameters = Map.of("id", deleteId);
+                        sql = "DELETE FROM " + metadata.tableName() + " WHERE " + idColumn.name() + " = :__pk";
+                        parameters = Map.of("__pk", deleteId);
                     }
 
                     context.setSql(sql);
@@ -290,6 +291,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
      * @param idColumn 实体主键字段
      * @return SQL 使用的主键值
      */
+    private static void requireId(Object id, Method method) {
+        if (id == null) throw new IllegalArgumentException(method.getName() + "：主键不能为空");
+    }
+
     private Object normalizeDeleteId(Object value, FieldColumn idColumn) {
         if (value == null || !metadata.entityClass().isInstance(value)) {
             return value;
@@ -307,29 +312,30 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
                 () -> Mono.fromRunnable(() -> {
                     Map<String, Object> parameters = new LinkedHashMap<>();
                     Object updateEntity = context.getArguments()[0];
+                    Object id = updateEntity == null ? null : fieldValue(idColumn, updateEntity);
+                    requireId(id, method);
                     String setSql = metadata.columns().stream()
                             .filter(column -> column != idColumn)
                             .filter(column -> includeNulls || fieldValue(column, updateEntity) != null)
                             .peek(column -> {
                                 Object value = fieldValue(column, updateEntity);
-                                parameters.put(column.field().getName(), value == null
+                                parameters.put("set_" + column.field().getName(), value == null
                                         ? SqlParameter.nullOf(column.field().getType()) : value);
                             })
-                            .map(column -> column.name() + " = :" + column.field().getName())
+                            .map(column -> column.name() + " = :set_" + column.field().getName())
                             .collect(Collectors.joining(", "));
                     if (setSql.isBlank()) {
                         context.cacheHit(0L);
                         return;
                     }
-                    Object id = fieldValue(idColumn, updateEntity);
-                    parameters.put("id", id);
+                    parameters.put("__pk", id);
                     if (metadata.logicDeleteColumn() != null) {
                         parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(
                                 properties.getLogicNotDeleteValue(), metadata.logicDeleteColumn().field().getType()));
                     }
                     String sql = "UPDATE " + metadata.tableName()
                             + " SET " + setSql
-                            + " WHERE " + idColumn.name() + " = :id"
+                            + " WHERE " + idColumn.name() + " = :__pk"
                             + querySqlBuilder.logicNotDeleteSql(" AND ");
 
                     context.setSql(sql);
@@ -340,6 +346,7 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
     }
 
     private Mono<?> selectById(Object id, Method method, Object[] arguments) {
+        requireId(id, method);
         FieldColumn idColumn = metadata.requireIdColumn();
         SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
         SqlExecutionContext context = new SqlExecutionContext(
@@ -348,10 +355,10 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         Mono<Boolean> lifecycle = lifecycleExecutor().prepare(chain, context,
                 () -> Mono.fromRunnable(() -> {
                     String sql = "SELECT " + querySqlBuilder.selectColumns() + " FROM " + metadata.tableName()
-                            + " WHERE " + idColumn.name() + " = :id"
+                            + " WHERE " + idColumn.name() + " = :__pk"
                             + querySqlBuilder.logicNotDeleteSql(" AND ");
                     Map<String, Object> parameters = new LinkedHashMap<>();
-                    parameters.put("id", id);
+                    parameters.put("__pk", id);
                     if (metadata.logicDeleteColumn() != null) {
                         parameters.put("logicNotDeleteValue", LogicDeleteValueConverter.convert(
                                 properties.getLogicNotDeleteValue(), metadata.logicDeleteColumn().field().getType()));
@@ -401,9 +408,15 @@ final class CrudRepositoryExecutor implements RepositoryMethodExecutor {
         String sql = "SELECT " + querySqlBuilder.selectColumns() + " FROM " + metadata.tableName() + where.sql()
                 + querySqlBuilder.orderBySql(pageable, queryWrapper)
                 + querySqlBuilder.pageSql(pageable, dialectContext);
-        Mono<List<Object>> records = sqlExecutionEngine.query(sql, where.parameters(), (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass()))
-                .cast(Object.class)
-                .collectList();
+        SqlLifecycleInterceptorChain chain = lifecycleExecutor().getChain();
+        SqlExecutionContext execution = new SqlExecutionContext(method, repositoryInterface, arguments.clone());
+        execution.setSql(sql); execution.setParameters(where.parameters());
+        execution.setCommandType(com.wcdk.r2dbc.execution.SqlCommandType.SELECT);
+        Mono<List<Object>> records = lifecycleExecutor().executeFlux(chain, execution,
+                        lifecycleExecutor().prepare(chain, execution, Mono::empty),
+                        () -> sqlExecutionEngine.queryWithoutLifecycle(execution.getSql(), execution.getParameters(),
+                                (row, rowMetadata) -> sqlExecutionEngine.map(row, metadata.entityClass())))
+                .cast(Object.class).collectList();
         // 先完成 count，再订阅 records，避免事务内同一连接并发执行 statement。
         return selectCount(queryWrapper, dialectContext, method, arguments)
                 .flatMap(total -> records

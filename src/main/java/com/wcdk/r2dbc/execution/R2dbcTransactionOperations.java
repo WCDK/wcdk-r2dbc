@@ -58,7 +58,7 @@ public class R2dbcTransactionOperations {
         }
         Flux<T> execution = Flux.defer(() -> Flux.from(action.apply(databaseClient)))
                 .as(transactionalOperator::transactional);
-        return R2dbcDataSourceContext.pinTransactionDataSource(execution);
+        return execution;
     }
 
     /**
@@ -114,14 +114,6 @@ public class R2dbcTransactionOperations {
         }
         return transactionTemplate.execute(transactionName, action);
     }
-
-    /**
-     * 使用只读事务模板执行操作。
-     *
-     * @param action 事务操作
-     * @param <T>    返回类型
-     * @return 操作结果
-     */
 
     /**
      * 获取事务模板。
