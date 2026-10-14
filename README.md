@@ -85,9 +85,9 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 
 ```xml
 <dependency>
-    <groupId>com.wcdk.r2dbc</groupId>
+    <groupId>io.github.wcdk</groupId>
     <artifactId>wcdk-r2dbc</artifactId>
-    <version>3.6.0</version>
+    <version>3.5.16</version>
 </dependency>
 
 <!-- 按实际数据库选择一个驱动 -->

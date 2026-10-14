@@ -8,11 +8,31 @@
         <version>3.5.16</version>
         <relativePath/>
     </parent>
-    <groupId>com.wcdk.r2dbc</groupId>
+    <groupId>io.github.wcdk</groupId>
     <artifactId>wcdk-r2dbc</artifactId>
     <name>wcdk-r2dbc</name>
     <description>WCDK R2DBC 响应式数据库访问框架</description>
-    <version>3.6.0</version>
+    <version>3.5.16</version>
+    <url>https://github.com/WCDK/wcdk-r2dbc</url>
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/license/mit</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>wcdk</id>
+            <name>WCDK</name>
+            <url>https://github.com/WCDK</url>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:https://github.com/WCDK/wcdk-r2dbc.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/WCDK/wcdk-r2dbc.git</developerConnection>
+        <url>https://github.com/WCDK/wcdk-r2dbc</url>
+    </scm>
 
     <properties>
         <java.version>21</java.version>
@@ -144,6 +164,79 @@
     </dependencies>
 
     <profiles>
+        <!-- Local release artifacts: no signing or remote upload. -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals><goal>jar-no-fork</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.11.2</version>
+                        <configuration>
+                            <encoding>UTF-8</encoding>
+                            <docencoding>UTF-8</docencoding>
+                            <charset>UTF-8</charset>
+                            <doclint>none</doclint>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals><goal>jar</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- Use together with release; requires a GPG key and Central token. -->
+        <profile>
+            <id>central</id>
+            <properties>
+                <central.skipUpload>true</central.skipUpload>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <configuration>
+                            <bestPractices>true</bestPractices>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.12.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                            <skipUpload>${central.skipUpload}</skipUpload>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <!-- 达梦数据库 -->
         <profile>
             <id>dm</id>
@@ -265,6 +358,16 @@
     </profiles>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}</directory>
+                <targetPath>META-INF</targetPath>
+                <includes><include>LICENSE</include></includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
