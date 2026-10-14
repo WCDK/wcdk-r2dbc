@@ -35,7 +35,8 @@ class ReadmeExamplesTests {
     private static final String REPOSITORY = """
         interface UserRepository extends BaseRepository<User> {
             Flux<User> findByStatus(Integer status);
-            Mono<Long> updateByStatusById(Integer status, Long id);
+            Mono<Long> updateStatusById(Integer status, Long id);
+            Mono<Long> updateUserNameAndStatusById(String userName, Integer status, Long id);
             Mono<Long> deleteByStatus(Integer status);
         }
         """;
@@ -134,7 +135,7 @@ class ReadmeExamplesTests {
                     assertThat(success).as("README Java 片段 %s：%s", count, diagnostics.getDiagnostics()).isTrue();
                 }
             }
-            assertThat(count).isEqualTo(21);
+            assertThat(count).isEqualTo(23);
         } finally {
             try (var paths = Files.walk(output)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);

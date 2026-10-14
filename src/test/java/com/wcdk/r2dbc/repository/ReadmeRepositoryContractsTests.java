@@ -30,7 +30,7 @@ class ReadmeRepositoryContractsTests {
             assertThat(plans.get(method).kind()).as(method.toGenericString()).isEqualTo(RepositoryMethodPlan.Kind.DERIVED);
         }
         var resolver = new CustomMethodResolver(metadata, 1, 0);
-        var method = Users.class.getMethod("updateByStatusById", Integer.class, Long.class);
+        var method = Users.class.getMethod("updateStatusById", Integer.class, Long.class);
         var parsed = resolver.resolve(method, new Object[]{1, 7L});
         assertThat(parsed.sql()).contains("UPDATE", "SET", "WHERE");
         assertThat(parsed.parameters()).containsValue(1).containsValue(7L);
@@ -45,7 +45,7 @@ class ReadmeRepositoryContractsTests {
         Mono<Long> countByStatus(Integer status);
         Mono<Boolean> existsByEmail(String email);
         Mono<Long> deleteByStatus(Integer status);
-        Mono<Integer> updateByUserNameById(String userName, Long id);
-        Mono<Long> updateByStatusById(Integer status, Long id);
+        Mono<Integer> updateUserNameById(String userName, Long id);
+        Mono<Long> updateStatusById(Integer status, Long id);
     }
 }

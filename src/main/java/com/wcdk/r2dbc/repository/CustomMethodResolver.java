@@ -27,8 +27,8 @@ import java.util.stream.Collectors;
  * - 计数：countBy[Field] / countBy[Field1]And[Field2]
  * - 判断是否存在：existsBy[Field] / existsBy[Field1]And[Field2]
  * - 删除：deleteBy[Field] (逻辑删除)
- * - 按主键更新：updateBy[Field]ById
- * - 按条件更新：updateBy[Field1]And[Field2]By[Condition]
+ * - 按主键更新：update[Field]ById
+ * - 按条件更新：update[Field1]And[Field2]By[Condition]
  * - 排序：orderBy[Field]Asc / orderBy[Field]Desc
  *
  * @author WCDK
@@ -37,9 +37,11 @@ import java.util.stream.Collectors;
  */
 public class CustomMethodResolver {
 
-    private static final Pattern METHOD_PATTERN = Pattern.compile(
-            "^(find|count|exists|delete|update)(All|One)?(By|OrderBy)(.+)?$"
+    private static final Pattern QUERY_METHOD_PATTERN = Pattern.compile(
+            "^(find|count|exists|delete)(All|One)?(By|OrderBy)(.+)?$"
     );
+
+    private static final Pattern UPDATE_METHOD_PATTERN = Pattern.compile("^update(.+)$");
 
     private final RepositoryMetadata metadata;
     private final List<FieldToken> fieldTokens;
@@ -67,19 +69,24 @@ public class CustomMethodResolver {
     }
 
     public static boolean supports(Method method) {
-        Matcher matcher = METHOD_PATTERN.matcher(method.getName());
-        return matcher.matches() && matcher.group(2) == null;
+        Matcher queryMatcher = QUERY_METHOD_PATTERN.matcher(method.getName());
+        return (queryMatcher.matches() && queryMatcher.group(2) == null)
+                || UPDATE_METHOD_PATTERN.matcher(method.getName()).matches();
     }
 
     public DerivedQueryDefinition compile(Method method) {
-        Matcher matcher = METHOD_PATTERN.matcher(method.getName());
-        if (!matcher.matches() || matcher.group(2) != null) {
-            throw new IllegalArgumentException("不支持的派生仓库方法：" + method.toGenericString() + "；请使用 findBy/countBy/existsBy/deleteBy 或 updateBy<更新字段>By<条件>，不支持 findAllBy/findOneBy/updateXxxById");
+        Matcher queryMatcher = QUERY_METHOD_PATTERN.matcher(method.getName());
+        Matcher updateMatcher = UPDATE_METHOD_PATTERN.matcher(method.getName());
+        if ((!queryMatcher.matches() || queryMatcher.group(2) != null) && !updateMatcher.matches()) {
+            throw new IllegalArgumentException("不支持的派生仓库方法：" + method.toGenericString()
+                    + "；请使用 findBy/countBy/existsBy/deleteBy 或 update<更新字段>By<条件>，不支持 findAllBy/findOneBy");
         }
         validateMethodNameLength(method.getName());
-        String operation = matcher.group(1);
-        String fieldPart = matcher.group(4);
-        if ("OrderBy".equals(matcher.group(3))) fieldPart = "OrderBy" + (fieldPart == null ? "" : fieldPart);
+        String operation = updateMatcher.matches() ? "update" : queryMatcher.group(1);
+        String fieldPart = updateMatcher.matches() ? updateMatcher.group(1) : queryMatcher.group(4);
+        if (!updateMatcher.matches() && "OrderBy".equals(queryMatcher.group(3))) {
+            fieldPart = "OrderBy" + (fieldPart == null ? "" : fieldPart);
+        }
         String conditionPart = fieldPart;
         List<String> setFields = List.of();
         if ("update".equals(operation)) {
@@ -95,7 +102,8 @@ public class CustomMethodResolver {
                     // 下一候选切分继续按字段集合校验。
                 }
             }
-            if (byIndex <= 0) throw new IllegalArgumentException("update方法必须使用 updateBy<更新字段>By<条件>：" + method.getName());
+            if (byIndex <= 0) throw new IllegalArgumentException(
+                    "update方法必须使用 update<更新字段>By<条件>：" + method.getName());
             conditionPart = fieldPart.substring(byIndex + 2);
             if ("Id".equals(conditionPart)) conditionPart = metadata.requireIdColumn().field().getName();
         }

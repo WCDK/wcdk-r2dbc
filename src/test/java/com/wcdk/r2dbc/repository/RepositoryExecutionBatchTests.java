@@ -30,13 +30,14 @@ class RepositoryExecutionBatchTests {
         Flux<Entity> findBy();
     }
     interface Methods {
-        Mono<Long> updateByUpdatedByByKey(String updatedBy, Long key);
-        Mono<Long> updateByCOORDINATORByKey(String value, Long key);
+        Mono<Long> updateUpdatedByByKey(String updatedBy, Long key);
+        Mono<Long> updateCOORDINATORByKey(String value, Long key);
         Mono<Entity> findByCOORDINATOR(String value);
         Mono<Entity> findByCoOrdinator(String value);
         Mono<Entity> findAllById(String value);
         Mono<Entity> findOneById(String value);
         Mono<Long> updateIdById(String value, Long key);
+        Mono<Long> updateByIdById(String value, Long key);
         Mono<Entity> findByIdNotLike(String value);
         Mono<Entity> findByMissing(String value);
     }
@@ -77,10 +78,15 @@ class RepositoryExecutionBatchTests {
 
     @Test void updateDelimiterRespectsFieldContainingBy() throws Exception {
         var resolver = resolver();
-        var method = Methods.class.getMethod("updateByUpdatedByByKey", String.class, Long.class);
+        var method = Methods.class.getMethod("updateUpdatedByByKey", String.class, Long.class);
         var parsed = resolver.resolve(method, new Object[]{"editor", 7L});
         assertThat(parsed.sql()).contains("\"updated_by\" = :set0", "\"key\" = :p0");
         assertThat(parsed.parameters()).containsEntry("set0", "editor").containsEntry("p0", 7L);
+
+        var idMethod = Methods.class.getMethod("updateIdById", String.class, Long.class);
+        var idParsed = resolver.resolve(idMethod, new Object[]{"external-id", 8L});
+        assertThat(idParsed.sql()).contains("\"id\" = :set0", "\"key\" = :p0");
+        assertThat(idParsed.parameters()).containsEntry("set0", "external-id").containsEntry("p0", 8L);
     }
 
     @Test void exactCaseWinsAndNormalizedAmbiguityListsBothFields() throws Exception {
@@ -88,17 +94,22 @@ class RepositoryExecutionBatchTests {
                 .conditions().getFirst().fieldName()).isEqualTo("coOrdinator");
         assertThatThrownBy(() -> resolver().compile(Methods.class.getMethod("findByCOORDINATOR", String.class)))
                 .hasMessageContaining("歧义").hasMessageContaining("coordinator").hasMessageContaining("coOrdinator");
-        assertThatThrownBy(() -> resolver().compile(Methods.class.getMethod("updateByCOORDINATORByKey", String.class, Long.class)))
+        assertThatThrownBy(() -> resolver().compile(Methods.class.getMethod("updateCOORDINATORByKey", String.class, Long.class)))
                 .hasMessageContaining("歧义").hasMessageContaining("coordinator").hasMessageContaining("coOrdinator");
     }
 
     @Test void unsupportedNamesFailAtCompilationWithActionableGuidance() {
         var compiler = new DerivedMethodCompiler(Methods.class, metadata(), new WcdkR2dbcProperties());
-        for (String name : List.of("findAllById", "findOneById", "updateIdById")) {
+        for (String name : List.of("findAllById", "findOneById")) {
             var method = Arrays.stream(Methods.class.getMethods()).filter(m -> m.getName().equals(name)).findFirst().orElseThrow();
             assertThatThrownBy(() -> compiler.compile(method)).hasMessageContaining(name)
-                    .hasMessageContaining("findBy").hasMessageContaining("updateBy");
+                    .hasMessageContaining("findBy");
         }
+        var legacyUpdate = Arrays.stream(Methods.class.getMethods())
+                .filter(method -> method.getName().equals("updateByIdById")).findFirst().orElseThrow();
+        assertThatThrownBy(() -> compiler.compile(legacyUpdate))
+                .hasMessageContaining("updateByIdById")
+                .hasMessageContaining("update<更新字段>By<条件>");
     }
 
     @Test void invalidFieldsAndOperatorsHaveDifferentDiagnostics() throws Exception {

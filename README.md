@@ -59,7 +59,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 - **响应式 API**：仓储查询统一返回 `Mono` / `Flux`，适配 Spring WebFlux。
 - **Repository 动态代理**：启动时扫描接口并生成仓储代理，业务代码只需定义接口。
 - **标准 CRUD**：提供新增、按 ID 查询、更新、删除、列表、单条、统计和存在性查询。
-- **派生方法**：支持 `findBy`、`countBy`、`existsBy`、`deleteBy`、`updateBy<更新字段>By<条件字段>` 等方法名约定。
+- **派生方法**：支持 `findBy`、`countBy`、`existsBy`、`deleteBy`、`update<更新字段>By<条件字段>` 等方法名约定。
 - **查询构造器**：支持实体属性名或映射列名，覆盖等值、范围、模糊、集合、空值、嵌套 `AND` / `OR`、排序、分页。
 - **逻辑删除**：查询、统计、更新和派生删除默认过滤已删除数据。
 - **多数据源路由**：支持通过 `@R2dbcDataSource` 和 Reactor Context 切换数据源。
@@ -357,20 +357,57 @@ public interface UserRepository extends BaseRepository<User> {
     Mono<Long> countByStatus(Integer status);
     Mono<Boolean> existsByEmail(String email);
     Mono<Long> deleteByStatus(Integer status);
-    Mono<Integer> updateByUserNameById(String userName, Long id);
+    Mono<Integer> updateUserNameById(String userName, Long id);
 }
 ```
 
 支持的常见操作包括：
 
 - `findBy`、`countBy`、`existsBy`、`deleteBy`
-- `updateByXxxById`、`updateByXxxByField`；SET 参数在前，条件参数在后
+- `updateXxxById`、`updateXxxByField`
 - `And`、`Or`、`OrderBy`
 - 无后缀等值、`Not`、`Like`、`Between`
 - `GreaterThan`、`GreaterThanEqual`、`LessThan`、`LessThanEqual`
 - `In`、`NotIn`、`IsNull`、`IsNotNull`
 
-当前派生更新需使用 `updateByUserNameById` 这种双 `By` 形式；`updateUserNameById` 不会被当前解析器识别，若要保留该名称，请提供同名 XML 更新语句。`Equals`、`StartingWith`、`EndingWith` 不在当前算子集合中。
+### 派生更新方法
+
+派生更新统一使用单 `By` 语法：
+
+```text
+update<更新字段>By<条件字段>
+```
+
+`By` 前面是需要写入的字段，后面是筛选记录的条件字段。方法参数顺序固定为“更新值在前、条件值在后”：
+
+```java
+public interface UserRepository extends BaseRepository<User> {
+    // 更新一个字段：SET status = ? WHERE id = ?
+    Mono<Long> updateStatusById(Integer status, Long id);
+
+    // 更新多个字段：SET user_name = ?, status = ? WHERE id = ?
+    Mono<Long> updateUserNameAndStatusById(String userName, Integer status, Long id);
+
+    // 使用多个条件：SET status = ? WHERE email = ? AND id = ?
+    Mono<Long> updateStatusByEmailAndId(Integer status, String email, Long id);
+}
+```
+
+调用时保持同样的参数顺序：
+
+```java
+Mono<Long> updated = userRepository.updateUserNameAndStatusById(
+        "新用户名",
+        1,
+        1001L
+);
+```
+
+更新或删除方法可以声明为 `Mono<Long>`、`Mono<Integer>`、`Mono<Boolean>` 或 `Mono<Void>`；推荐使用 `Mono<Long>` 获取数据库实际影响行数。实体配置逻辑删除字段时，派生更新会自动过滤已删除记录。
+
+方法名中的分隔符固定写为 `By`，例如 `updateAgeById`。实体字段本身包含 `By` 时仍可识别，例如字段 `updatedBy` 对应 `updateUpdatedByById`：其中第一个 `By` 属于字段名，第二个 `By` 是更新字段与条件字段的分隔符。
+
+`Equals`、`StartingWith`、`EndingWith` 不在当前算子集合中。
 
 方法名中的字段必须能映射到实体属性；方法参数数量和返回类型不符合约定时，应在应用启动阶段修正，而不是在请求链路中兜底。
 
@@ -710,7 +747,7 @@ public class ManualUserService {
 
 `R2dbcUtil.save(entity)` 为 update-only，仅更新已有实体；新增请使用 `R2dbcUtil.insert(entity)`。分页主查询和 COUNT 查询均执行生命周期拦截器，分别具有独立 executionId。按主键更新的 SET 参数与主键参数隔离，null 主键会在 SQL 执行前报出方法名。
 
-派生方法支持 `findBy`/`countBy`/`existsBy`/`deleteBy` 和 `updateBy<更新字段>By<条件>`；`findAllBy`、`findOneBy`、`updateXxxById` 在启动时拒绝并提供替代形式。字段含 By 时按实体字段集合匹配；精确字段令牌优先，归一后多候选会报出候选字段名。Integer 计数支持精确范围检查。
+派生方法支持 `findBy`/`countBy`/`existsBy`/`deleteBy` 和 `update<更新字段>By<条件>`；`findAllBy`、`findOneBy` 在启动时拒绝并提供替代形式。字段含 By 时按实体字段集合匹配；精确字段令牌优先，归一后多候选会报出候选字段名。Integer 计数支持精确范围检查。
 
 ## XML SQL
 
@@ -872,7 +909,7 @@ mvn -Pall test
 | 项目 | 3.5.x 行为 / 旧用法 | 3.6.0 行为 / 替代用法 |
 |---|---|---|
 | XML 未使用参数 | `Mono<User> read(Long id, String unused)` 的 SQL 只引用 id，unused 被丢弃 | 默认报错；移除 unused、在动态条件中实际使用，或临时设置 `strict-unused-parameters=false` |
-| 派生方法名 | `findAllByStatus`、`findOneByStatus`、`updateNameById` 推迟到调用报错 | 启动快速失败；使用 `findByStatus` / `updateByNameById`，需保留旧名则提供同名 XML |
+| 派生方法名 | `findAllByStatus`、`findOneByStatus` 推迟到调用报错 | 启动快速失败；统一使用 `findByStatus`，派生更新使用 `updateNameById` 单 `By` 语法 |
 | 雪花节点 | 未配置环境变量时自动摘要回退 | 缺配置启动失败；配置 `snowflake-worker-id=12` 或 `WCDK_R2DBC_WORKER_ID=12`（每个进程独占），自定义租约解析器亦可；仅开发显式开启 `WCDK_R2DBC_WORKER_ID_FALLBACK=digest` |
 | 仓储简名冲突 | `a.OrderRepository` 与 `b.OrderRepository` 静默只注册一个 | 启动失败并列两个 FQN；重命名接口或显式收窄 `basePackages` / `basePackageClasses` |
 | 日志与审计 | 扫描 SqlAuditInterceptor 会无条件输出 | 日志与审计受 `sql-log-enabled` 控制；开启后保留原始参数并输出完整 SQL，不进行脱敏；手动审计 Bean 注入同一 logger |
@@ -904,7 +941,7 @@ import reactor.core.publisher.Mono;
 @Repository
 interface UserRepository extends BaseRepository<User> {
     Flux<User> findByStatus(Integer status);
-    Mono<Long> updateByStatusById(Integer status, Long id);
+    Mono<Long> updateStatusById(Integer status, Long id);
     Mono<Long> deleteByStatus(Integer status);
 }
 ```
@@ -915,7 +952,7 @@ interface UserRepository extends BaseRepository<User> {
 QueryWrapper<User> wrapper = new QueryWrapper<User>()
         .eq("status", 1).orderByDesc("id");
 Flux<User> users = userRepository.selectList(wrapper);
-Mono<Long> updated = userRepository.updateByStatusById(1, 1L);
+Mono<Long> updated = userRepository.updateStatusById(1, 1L);
 Mono<Long> deleted = userRepository.deleteByStatus(0);
 ```
 

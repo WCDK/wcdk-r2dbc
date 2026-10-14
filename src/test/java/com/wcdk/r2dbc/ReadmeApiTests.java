@@ -25,7 +25,7 @@ class ReadmeApiTests {
     @com.wcdk.r2dbc.annotation.Repository
     public interface UserRepository extends BaseRepository<User> {
         Flux<User> findByStatus(Integer status);
-        Mono<Long> updateByStatusById(Integer status, Long id);
+        Mono<Long> updateStatusById(Integer status, Long id);
         Mono<Long> deleteByStatus(Integer status);
     }
 
@@ -37,11 +37,11 @@ class ReadmeApiTests {
         UserRepository repository = mock(UserRepository.class);
         User user = new User(1L, "张三", "u@example.com", 1);
         when(repository.selectList(any())).thenReturn(Flux.just(user));
-        when(repository.updateByStatusById(1, 1L)).thenReturn(Mono.just(1L));
+        when(repository.updateStatusById(1, 1L)).thenReturn(Mono.just(1L));
         when(repository.deleteByStatus(0)).thenReturn(Mono.just(2L));
         QueryWrapper<User> wrapper = new QueryWrapper<User>().eq("status", 1).orderByDesc("id");
         Flux<User> users = repository.selectList(wrapper);
-        Mono<Long> updated = repository.updateByStatusById(1, 1L);
+        Mono<Long> updated = repository.updateStatusById(1, 1L);
         Mono<Long> deleted = repository.deleteByStatus(0);
         StepVerifier.create(users).expectNext(user).verifyComplete();
         StepVerifier.create(updated).expectNext(1L).verifyComplete();
