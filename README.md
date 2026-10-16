@@ -41,7 +41,6 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 - [@Transient 字段](#transient-字段)
 - [派生查询方法](#派生查询方法)
 - [QueryWrapper](#querywrapper)
-- [API 迁移](#api-迁移)
 - [分页](#分页)
 - [逻辑删除](#逻辑删除)
 - [多数据源](#多数据源)
@@ -85,7 +84,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 
 ## 环境要求
 
-本轮验收基于 Spring Boot 3.5.16 / JDK 21；其他主版本和数据库版本需在目标环境另行验证。
+当前版本基于 Spring Boot 3.5.16 / JDK 21；其他主版本和数据库版本需在目标环境另行验证。
 
 - Java 21（本项目 Maven 构建限定 JDK 21）
 - Spring Boot 3.5.x
@@ -180,7 +179,7 @@ public interface UserRepository extends BaseRepository<User> {
 }
 ```
 
-> 历史注解 `com.wcdk.r2dbc.Repository` 已弃用，迁移到 `com.wcdk.r2dbc.annotation.Repository`；兼容入口计划在 4.0.0 移除。基础仓储接口使用 `com.wcdk.r2dbc.repository.BaseRepository`。
+> 仓储注解使用 `com.wcdk.r2dbc.annotation.Repository`，基础仓储接口使用 `com.wcdk.r2dbc.repository.BaseRepository`。
 
 ### 5. 在 Service 中使用
 
@@ -220,14 +219,12 @@ Controller、Service 和 Repository 之间应保持 `Mono` / `Flux` 链路，不
 | `wcdk.r2dbc.transaction.aspect-enabled` | `false` | 是否启用 WCDK 自定义响应式事务切面 |
 | `wcdk.r2dbc.database-type` | 空 | 单数据源 WCDK 回退工厂的驱动提示及 Schema 初始化的类型提示；通常从 URL/连接元数据检测 |
 | `wcdk.r2dbc.sql-log-enabled` | `false` | 是否输出原始参数、可执行完整 SQL 及审计终态 |
-| `wcdk.r2dbc.sql-log-complete-enabled` | `false` | 兼容旧配置；开启 SQL 日志后始终打印完整 SQL，此项不再控制输出 |
-| `wcdk.r2dbc.sensitive-columns` | 保留旧默认值 | 兼容旧配置；不再对日志参数脱敏，此项不再生效 |
 | `wcdk.r2dbc.observability-enabled` | `false` | 是否启用 Micrometer 观测 |
 | `wcdk.r2dbc.snowflake-id` | `false` | 是否启用雪花 ID 生成 |
 | `wcdk.r2dbc.snowflake-worker-id` | 未指定；须提供节点来源 | 节点编号，0–1023；跨进程必须唯一 |
 | `wcdk.r2dbc.quote-identifier` | `true` | 是否引用数据库标识符；仓储按连接方言生成，MySQL使用反引号，PostgreSQL/Oracle/达梦使用双引号 |
 | `wcdk.r2dbc.mapper-locations` | `classpath*:repository/**/*.xml` | XML Mapper 扫描位置 |
-| `wcdk.r2dbc.strict-unused-parameters` | `true` | XML 未使用方法入参报错；设为 false 可暂时保留旧行为 |
+| `wcdk.r2dbc.strict-unused-parameters` | `true` | XML 未使用方法入参报错；设为 false 可允许未使用参数 |
 | `wcdk.r2dbc.logic-delete-field` | `delFlg` | 逻辑删除字段 |
 | `wcdk.r2dbc.logic-not-delete-value` | `0` | 未删除值 |
 | `wcdk.r2dbc.logic-delete-value` | `1` | 已删除值 |
@@ -253,7 +250,7 @@ wcdk:
 | `wcdk.r2dbc.database-initializer.execute-in-transaction` | `true` | 使用同一连接执行事务初始化 |
 | `wcdk.r2dbc.database-initializer.timeout` | `30s` | 总等待上限，必须为正数；超时取消并使启动失败 |
 
-初始化类型优先级为初始化器专用 `database-type` > `wcdk.r2dbc.database-type` > 历史 `database.type` > 连接元数据。
+初始化类型优先级为初始化器专用 `database-type` > `wcdk.r2dbc.database-type` > 连接元数据。
 
 单数据源通常由 Spring Boot 的 `R2dbcAutoConfiguration` 创建连接工厂；WCDK 在它之后装配，仅当没有任何连接工厂、配置了 `spring.r2dbc.url` 且没有多数据源配置时创建回退工厂。可在排除 Spring Boot R2DBC 自动配置或仅导入 WCDK 自动配置的环境使用该回退。Boot 或用户提供的连接工厂优先，WCDK 类型提示不会覆盖其驱动；多数据源按各自 URL 和配置选择驱动。上下文关闭时 WCDK 只释放自己创建的工厂及连接池；应用或 Spring Boot 提供的工厂由其提供方管理。
 
@@ -280,7 +277,7 @@ wcdk:
 
 默认生成器使用 `AtomicLong`/CAS 更新时间与序列，同一应用类加载器内相同 workerId 的生成器共享状态，避免多次实例化产生重复 ID。跨进程和进程重启的唯一性需要节点分配、租约及可靠时钟共同保证，摘要回退不提供分布式冲突检测。ID 位布局保持不变：41 位时间、10 位节点、12 位序列。
 
-**回拨行为变更**：任何幅度的时钟回拨立即抛出 `IllegalStateException`，不再容忍 1 秒以内回拨。时钟恢复后可以重试；调用方应通过响应式延迟重试避免阻塞事件线程。每毫秒 4096 个序列耗尽时以短暂休眠等待下一毫秒，不持有互斥锁，也不忙等；等待会响应线程中断，并在回拨时失败。该同步方法仍可能等待，需严格避免事件线程等待的场景可将批量 ID 分配调度到工作线程。CAS 去除了全局互斥锁，但吞吐仍受时钟粒度、同一节点序列上限及竞争影响，不保证在所有环境中更快。验证与吞吐记录见 [第 7 节验证记录](docs/validation/2026-10-10-section-7.md)。
+任何幅度的时钟回拨都会立即抛出 `IllegalStateException`。时钟恢复后可以重试；调用方应通过响应式延迟重试避免阻塞事件线程。每毫秒 4096 个序列耗尽时以短暂休眠等待下一毫秒，不持有互斥锁，也不忙等；等待会响应线程中断，并在回拨时失败。该同步方法仍可能等待，需严格避免事件线程等待的场景可将批量 ID 分配调度到工作线程。CAS 去除了全局互斥锁，但吞吐仍受时钟粒度、同一节点序列上限及竞争影响。
 
 ## Repository API
 
@@ -295,7 +292,7 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 |---|---|---|
 | `insert(entity)` | `Mono<T>` | 插入并返回带主键的实体；record 回填时可能返回新实例 |
 | `deleteById(id)` | `Mono<Long>` | 按 ID 删除，返回影响行数 |
-| `updateById(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段，兼容历史行为 |
+| `updateById(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段 |
 | `updateByIdIgnoringNulls(entity)` | `Mono<Long>` | 按 ID 更新非 null 字段，null 表示保留原值 |
 | `updateByIdIncludingNulls(entity)` | `Mono<Long>` | 按 ID 更新全部非主键持久化字段，null 表示将列置为 NULL |
 | `selectById(id)` | `Mono<T>` | 按 ID 查询 |
@@ -309,9 +306,9 @@ import com.wcdk.r2dbc.repository.BaseRepository;
 
 基础 CRUD 更新/删除返回 `Mono<Long>`。派生及 XML 更新/删除可按契约声明 `Mono<Long>`、`Mono<Integer>`、`Mono<Boolean>`、`Mono<Void>`；XML 返回实体时必须有类型兼容的实体入参。
 
-### 更新 null 语义与迁移
+### 更新 null 语义
 
-`updateById` 保持忽略 null 的行为。建议局部更新迁移到 `updateByIdIgnoringNulls`，让 null 表示保留数据库原值。需要将列置空时，使用 `updateByIdIncludingNulls`：它更新全部非主键持久化字段（包括逻辑删除字段），因此应提供其他字段需保留的值；`@Transient` 字段不参与更新，数据库 NOT NULL 约束仍然生效。
+`updateById` 忽略 null。局部更新推荐使用 `updateByIdIgnoringNulls`，让 null 表示保留数据库原值。需要将列置空时，使用 `updateByIdIncludingNulls`：它更新全部非主键持久化字段（包括逻辑删除字段），因此应提供其他字段需保留的值；`@Transient` 字段不参与更新，数据库 NOT NULL 约束仍然生效。
 
 ```java
 // 局部更新：null 字段保持原值。
@@ -434,9 +431,9 @@ Mono<Long> updated = userRepository.updateUserNameAndStatusById(
 
 默认表名和列名统一使用 `com.wcdk.r2dbc.mapping.NamingStrategy`：在小写/数字转大写，以及连续大写缩写与后续单词之间加下划线。例如 `URLValue → url_value`、`userID → user_id`、`CPUTime → cpu_time`、`XMLHTTPParser → xmlhttp_parser`。显式 Spring Data `@Table`、字段 `@Column` 保留原名；构造器参数的本项目 `@Column` 仍优先指定读取列。标识符引用在命名之后由数据库方言处理。
 
-**命名迁移**：连续大写以前可能被逐字拆分；现有数据库若使用 `u_r_l_value` 等旧列名，请添加显式 `@Column("u_r_l_value")`，旧表名可用 `@Table` 保留。
+连续大写按统一命名规则映射；数据库若使用 `u_r_l_value` 等列名，请添加显式 `@Column("u_r_l_value")`，表名可通过 `@Table` 指定。
 
-SQL 命令类型统一为 `com.wcdk.r2dbc.execution.SqlCommandType`，包含 `INSERT`、`UPDATE`、`DELETE`、`SELECT`、`MERGE`、`UNKNOWN`。直接使用旧 `query.xml.SqlCommandType`、`repository.plan.SqlCommandType`、`CustomMethodResolver.SqlCommandType` 或 `QueryCommandType` 的扩展代码需要修改 import；原 `NONE` 使用 `UNKNOWN`。XML 计划使用语句实际命令，派生执行生命周期使用生成 SQL 的实际命令（逻辑删除为 UPDATE）。
+SQL 命令类型为 `com.wcdk.r2dbc.execution.SqlCommandType`，包含 `INSERT`、`UPDATE`、`DELETE`、`SELECT`、`MERGE`、`UNKNOWN`。XML 计划使用语句实际命令，派生执行生命周期使用生成 SQL 的实际命令（逻辑删除为 UPDATE）。
 
 ## QueryWrapper
 
@@ -519,7 +516,7 @@ Mono<Page<User>> result = userRepository.selectPage(
 
 `selectPage(pageable)` 默认方法通过仓储代理调用双参数入口，相当于传入空 QueryWrapper，使用同一套排序和字段校验规则。
 
-同时设置两侧排序时，Pageable 排序键在前，QueryWrapper 的其他排序键依次追加；同一映射列只出现一次，使用 Pageable 中首次指定的方向。例如 Pageable 按 `id DESC`，Wrapper 按 `id ASC, name ASC`，最终为 `id DESC, name ASC`，且不会修改 Wrapper。Pageable 无排序时使用 Wrapper 排序，两侧均无排序时不生成 ORDER BY。`Pageable.unpaged(sort)` 仍应用排序，但不追加分页限制。迁移时应检查此前同时指定两侧排序的调用，因为原先被忽略的 Pageable 排序现在具有优先级。
+同时设置两侧排序时，Pageable 排序键在前，QueryWrapper 的其他排序键依次追加；同一映射列只出现一次，使用 Pageable 中首次指定的方向。例如 Pageable 按 `id DESC`，Wrapper 按 `id ASC, name ASC`，最终为 `id DESC, name ASC`，且不会修改 Wrapper。Pageable 无排序时使用 Wrapper 排序，两侧均无排序时不生成 ORDER BY。`Pageable.unpaged(sort)` 仍应用排序，但不追加分页限制。
 
 ## 逻辑删除
 
@@ -719,7 +716,7 @@ public class SecondaryTransactionService {
 
 `use(String, TransactionalOperator, Mono/Flux)` 在传播处理后校验实际事务：`REQUIRES_NEW` 挂起外层并锁定新事务的数据源，内层完成或失败后恢复外层守卫；`NOT_SUPPORTED` 挂起期间允许选库；`SUPPORTS` 无实际事务时不校验、不绑定。`REQUIRED` 加入现有事务仍拒绝跨库。新事务开始后也不能再次切换数据源。
 
-普通 `use(String, Mono/Flux)` 在当前事务中选库，因此不要用它在外层包裹一个尚未开始的跨库 `REQUIRES_NEW` 操作符。传播回归见 `DataSourceTransactionOrderingTests`。
+普通 `use(String, Mono/Flux)` 在当前事务中选库，因此不要用它在外层包裹一个尚未开始的跨库 `REQUIRES_NEW` 操作符。
 
 ### 事务入口与守卫覆盖范围
 
@@ -755,8 +752,6 @@ public class ManualUserService {
 ```
 
 `executeManual` 不自动提交：正常返回时事务仍活跃会回滚；错误或取消也清理连接。提交已在途时取消不会同时发起回滚，关闭等待提交终态；提交/回滚失败后的关闭会尝试 best-effort 回滚再关闭。`ManualTransaction.setTimeout` 仅传递驱动 `LOCK_WAIT_TIMEOUT`，不提供事务执行超时或自动超时回滚。
-
-行为回归：[数据源与传播守卫](src/test/java/com/wcdk/r2dbc/transaction/DataSourceTransactionOrderingTests.java)、[手动事务状态与锁等待超时](src/test/java/com/wcdk/r2dbc/transaction/ManualTransactionTests.java)、[模板提交/回滚/取消](src/test/java/com/wcdk/r2dbc/transaction/TransactionTemplateTests.java)。四方言真库冒烟见 [数据库矩阵](docs/database-matrix.md)。
 
 `R2dbcUtil.save(entity)` 为 update-only，仅更新已有实体；新增请使用 `R2dbcUtil.insert(entity)`。分页主查询和 COUNT 查询均执行生命周期拦截器，分别具有独立 executionId。按主键更新的 SET 参数与主键参数隔离，null 主键会在 SQL 执行前报出方法名。
 
@@ -806,7 +801,7 @@ XML 语句支持动态 SQL、参数绑定、`resultType`、`resultMap`、`discri
 
 数值映射到整型时使用精确转换，溢出或非整数值会抛出包含列名、源值和目标类型的异常；Long/BigInteger 到 BigDecimal 不经过 double，保留整数精度。构造器内部异常直接作为映射错误的 cause；byte[] 不隐式转换为 String，请显式提供编码转换器。Map 查询与实体查询共用时间值归一化路径。
 
-XML SELECT 方法必须声明返回 Mono/Flux，非法返回类型在启动时携带 namespace.id 报错。XML 未使用方法入参默认拒绝执行，错误包含未使用参数名；动态条件/foreach 的参数读取也算使用，同一入参的 argN、paramN、@Param 别名合并判定。迁移期间可设置 `wcdk.r2dbc.strict-unused-parameters=false`，修复多余入参后恢复 true。渲染、绑定及执行错误均包含 namespace.id；foreach 集合 null 报错，空集合仍跳过。
+XML SELECT 方法必须声明返回 Mono/Flux，非法返回类型在启动时携带 namespace.id 报错。XML 未使用方法入参默认拒绝执行，错误包含未使用参数名；动态条件/foreach 的参数读取也算使用，同一入参的 argN、paramN、@Param 别名合并判定。需要允许未使用参数时可设置 `wcdk.r2dbc.strict-unused-parameters=false`。渲染、绑定及执行错误均包含 namespace.id；foreach 集合 null 报错，空集合仍跳过。
 
 ### XML 仓储与实体映射契约
 
@@ -860,9 +855,9 @@ SqlExecutionObserver sqlExecutionObserver(ObservationRegistry registry) {
 
 SQL 日志默认关闭。开启 `sql-log-enabled=true` 后，INFO 输出参数化 SQL、原始参数、结果和可复制执行的 `completeSql`，无需再开启 `sql-log-complete-enabled`。日志不进行参数名、敏感列或值模式脱敏，不截断参数字符串或集合。输出使用实际生命周期的 executionId，原始无生命周期入口生成独立标识。完整 SQL 支持命名参数和位置参数（`?`、`$1`、`:1`），保留字符串和注释中的占位符文本；字符串单引号按 SQL 规则转义，带类型空值输出 NULL，枚举使用 name()。
 
-审计日志使用同一个 SQL 日志开关，保留原始原因及错误消息，并打印填入原始参数的 SQL。`sensitive-columns` 和旧的 `sanitize*` 方法仅保留接口兼容，不再执行脱敏。完整 SQL 保留换行与字符串内空白，避免改变字面量或行注释语义；数据库特有类型的字面量规则仍以目标方言为准。
+审计日志使用同一个 SQL 日志开关，保留原始原因及错误消息，并打印填入原始参数的 SQL。完整 SQL 保留换行与字符串内空白，避免改变字面量或行注释语义；数据库特有类型的字面量规则仍以目标方言为准。
 
-`SqlAuditInterceptor` 不再带 `@Component`。普通日志开启时自动配置注册一个审计 Bean；用户同类型 Bean 可替换默认实现。审计语句、原因和错误消息走同一开关，保留原值，只记录终态、耗时和标识。手动构造无参审计器默认关闭输出，需要通过带 `R2dbcSqlLogger` 的构造器注入配置。before 阶段异常立即失败；FINALLY 同步/响应式回调逐个隔离异常并继续后续回调，成功结果保持成功，业务异常保留并追加 suppressed 异常。拒绝、缓存命中、审计跳过和降级均触发一次 FINALLY；`degrade(reason, fallback)` 可提供备用结果，没有结果时明确报出原因。
+普通日志开启时，自动配置会注册一个 `SqlAuditInterceptor` 审计 Bean；用户同类型 Bean 可替换默认实现。审计语句、原因和错误消息走同一开关，保留原值，只记录终态、耗时和标识。手动构造无参审计器默认关闭输出，需要通过带 `R2dbcSqlLogger` 的构造器注入配置。before 阶段异常立即失败；FINALLY 同步/响应式回调逐个隔离异常并继续后续回调，成功结果保持成功，业务异常保留并追加 suppressed 异常。拒绝、缓存命中、审计跳过和降级均触发一次 FINALLY；`degrade(reason, fallback)` 可提供备用结果，没有结果时明确报出原因。
 
 ### 自动配置扩展 Bean
 
@@ -878,7 +873,7 @@ SQL 日志默认关闭。开启 `sql-log-enabled=true` 后，INFO 输出参数�
 
 以上扩展点按类型（包含子类）检查 `@ConditionalOnMissingBean`。应用声明同类型或子类 Bean 时默认实现退让；没有自定义 Bean 时提供默认实现。多个候选时按 Spring 的 `@Primary` 选择，无唯一候选会启动失败；Bean 名称或 `@Order` 不替代 `@Primary`。`R2dbcValueConverter` 与同步/响应式拦截器通过有序 Bean 列表追加，使用 `@Order` 控制其顺序。
 
-仓储启动时，单数据源只构建所需执行器和方法计划；多数据源分别基于每个目标方言编译一次，再创建一个路由 dispatcher。primary 不会额外预编译一次。多仓储、多数据源的计数测试及启动微基准见 [第 6 节验证记录](docs/validation/2026-10-10-section-6.md)。
+仓储启动时，单数据源只构建所需执行器和方法计划；多数据源分别基于每个目标方言编译一次，再创建一个路由 dispatcher。primary 不会额外预编译一次。
 
 ## 数据库支持
 
@@ -897,11 +892,11 @@ mvn -Pall test
 
 数据库生成主键策略按实际连接方言选择：PostgreSQL 生成 `RETURNING` SQL，MySQL 使用 INSERT 响应中的 last insert id，Oracle/达梦通过驱动请求指定生成列；不支持生成键的策略会在执行插入前报错。空业务字段插入由方言统一生成：PostgreSQL 使用 `DEFAULT VALUES`，MySQL 使用 `() VALUES ()`，Oracle 使用生成主键列的 `VALUES (DEFAULT)`（要求实体有生成主键列），达梦使用省略自增列的 `DEFAULT VALUES`。
 
-`GeneratedKeyStrategy` 仅有 `CLAUSE_RETURNING`（PostgreSQL SQL 子句）、`DRIVER_GENERATED_KEYS`（MySQL/Oracle/达梦驱动 API）、`NONE`（插入前报错），执行器由单一策略分派。扩展方言迁移时，将旧 `RETURNING` 按用途改为 `CLAUSE_RETURNING` 或 `DRIVER_GENERATED_KEYS`，旧 `LAST_INSERT_ID` 改为 `DRIVER_GENERATED_KEYS`。
+`GeneratedKeyStrategy` 包含 `CLAUSE_RETURNING`（PostgreSQL SQL 子句）、`DRIVER_GENERATED_KEYS`（MySQL/Oracle/达梦驱动 API）和 `NONE`（插入前报错），执行器由单一策略分派。
 
 `generatedValueColumn(rawColumn, renderedColumn)` 为驱动选择生成列参数：Oracle 使用与 INSERT 一致的引用形式，MySQL/达梦使用列名。仓储传递实体元数据渲染的列名，保持 `quote-identifier` 开关一致。
 
-`supportsReturning` 表示支持 PostgreSQL 式 SQL RETURNING；Oracle/达梦的驱动生成列能力由 `generatedKeyStrategy` 声明。无消费方的 `supportsSavepoint`、`supportsUpsert` 已移除；扩展方言应删除对应 override，MERGE/upsert 需自行提供 SQL。未接入执行链的 `renderBoolean`、`renderCurrentTimestamp` 已移除，扩展实现需删除对应 override，自定义 XML SQL 继续自行指定常量和时间表达式。方言按 `ConnectionFactory` 缓存，数据库名称统一忽略大小写并按 contains 识别，支持带版本后缀的名称及 `dameng`。参数转换器仅保留通用 `DefaultParameterValueConverter` 和达梦 `DmParameterValueConverter`。
+`supportsReturning` 表示支持 PostgreSQL 式 SQL RETURNING；Oracle/达梦的驱动生成列能力由 `generatedKeyStrategy` 声明。MERGE/upsert 需自行提供 SQL，自定义 XML SQL 需自行指定常量和时间表达式。方言按 `ConnectionFactory` 缓存，数据库名称统一忽略大小写并按 contains 识别，支持带版本后缀的名称及 `dameng`。参数转换器提供通用 `DefaultParameterValueConverter` 和达梦 `DmParameterValueConverter`。
 
 `exists` 使用限定一条记录的 `SELECT 1`，不执行 COUNT；派生 `existsBy` 使用短路 EXISTS 并返回数值 1/0，由映射层转为 boolean，避免 Oracle/达梦的 BOOLEAN SQL 差异。
 
@@ -915,71 +910,6 @@ mvn -Pall test
 - 大量元素使用 `flatMap` 时应设置合理并发上限。
 - 异常使用 `switchIfEmpty`、`onErrorMap`、`onErrorResume` 和 `doOnError` 按语义处理，不能无条件吞异常。
 
-## API 迁移
-
-### 3.6.0 的五项 BREAKING 迁移
-
-| 项目 | 3.5.x 行为 / 旧用法 | 3.6.0 行为 / 替代用法 |
-|---|---|---|
-| XML 未使用参数 | `Mono<User> read(Long id, String unused)` 的 SQL 只引用 id，unused 被丢弃 | 默认报错；移除 unused、在动态条件中实际使用，或临时设置 `strict-unused-parameters=false` |
-| 派生方法名 | `findAllByStatus`、`findOneByStatus` 推迟到调用报错 | 启动快速失败；统一使用 `findByStatus`，派生更新使用 `updateNameById` 单 `By` 语法 |
-| 雪花节点 | 未配置环境变量时自动摘要回退 | 缺配置启动失败；配置 `snowflake-worker-id=12` 或 `WCDK_R2DBC_WORKER_ID=12`（每个进程独占），自定义租约解析器亦可；仅开发显式开启 `WCDK_R2DBC_WORKER_ID_FALLBACK=digest` |
-| 仓储简名冲突 | `a.OrderRepository` 与 `b.OrderRepository` 静默只注册一个 | 启动失败并列两个 FQN；重命名接口或显式收窄 `basePackages` / `basePackageClasses` |
-| 日志与审计 | 扫描 SqlAuditInterceptor 会无条件输出 | 日志与审计受 `sql-log-enabled` 控制；开启后保留原始参数并输出完整 SQL，不进行脱敏；手动审计 Bean 注入同一 logger |
-
-
-显式设置 `@EnableWcdkR2dbcRepositories(basePackages=...)`、`basePackageClasses` 或 `wcdk.r2dbc.base-packages` 后，只扫描给定范围及子包。未指定时沿用导入类包与 Spring Boot 自动配置包。两个不同包的同简名仓储以前会静默跳过一个，现在启动失败并列出两个全限定名；请重命名接口或收窄扫描范围。
-
-不可达的 `config.R2dbcConfiguration` 与未使用的 `page.PageInfo` 已删除。自动装配使用 `WcdkR2dbcAutoConfiguration`；分页返回 Spring Data `Page<T>`。`QueryWrapper.Condition` 标记为待移除，条件表示使用 `SqlExpression` AST。行映射不支持的源/目标类型现在明确报错，扩展转换应提供 `R2dbcValueConverter`。
-
-
-自 3.5.16 起，下列兼容类型标注 `@Deprecated(since = "3.5.16", forRemoval = true)`，计划在 4.0.0 移除；3.x 中仍保留类型供旧代码编译。
-
-| 历史入口 | 替代入口 |
-|---|---|
-| `com.wcdk.r2dbc.Repository` | `com.wcdk.r2dbc.annotation.Repository` |
-| `LambdaQueryWrapper<T>` | `QueryWrapper<T>`，字段由实体元数据白名单校验 |
-| `LambdaUpdateWrapper<T>` | `updateByIdIgnoringNulls` / `updateByIdIncludingNulls` 或派生更新方法 |
-| `LambdaDeleteWrapper<T>` | `deleteById` 或派生删除方法 |
-
-三个历史 Lambda Wrapper 没有接入 `BaseRepository`，不能直接传入查询、更新或删除入口。更新和删除的迁移应使用明确支持的仓储方法：
-
-```java
-import com.wcdk.r2dbc.annotation.Repository;
-import com.wcdk.r2dbc.repository.BaseRepository;
-import com.wcdk.r2dbc.query.QueryWrapper;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-
-@Repository
-interface UserRepository extends BaseRepository<User> {
-    Flux<User> findByStatus(Integer status);
-    Mono<Long> updateStatusById(Integer status, Long id);
-    Mono<Long> deleteByStatus(Integer status);
-}
-```
-
-以上 `User` 使用快速开始中的实体声明，仓储调用如下（编译和执行回归见 [ReadmeApiTests](src/test/java/com/wcdk/r2dbc/ReadmeApiTests.java)）：
-
-```java
-QueryWrapper<User> wrapper = new QueryWrapper<User>()
-        .eq("status", 1).orderByDesc("id");
-Flux<User> users = userRepository.selectList(wrapper);
-Mono<Long> updated = userRepository.updateStatusById(1, 1L);
-Mono<Long> deleted = userRepository.deleteByStatus(0);
-```
-
-带事务注解的方法必须声明返回 `Publisher`，通常选择 `Mono<T>` / `Flux<T>`。同步返回 `T` 或 `void` 的方法会在执行方法体前被 WCDK 事务切面拒绝，不会自动包装；方法体与事务均在订阅时执行。
-
-历史配置 `database.type` 自 3.5.16 起弃用，3.x 继续兼容，计划在 4.0.0 移除。请迁移到 `wcdk.r2dbc.database-type`；同时配置非空值时新属性优先，新值为空时使用旧值，均为空时从 URL/元数据检测。启用 WCDK 后出现非空旧配置会输出弃用提示（即使新属性已覆盖旧值）。IDE 配置元数据同时提供新属性与旧属性的替代提示。该提示只作用于 WCDK 回退工厂和初始化器，不更改 Spring Boot 已创建的工厂。
-
-```yaml
-wcdk:
-  r2dbc:
-    enabled: true
-    database-type: postgresql
-```
-
 ## 项目结构
 
 ```text
@@ -990,7 +920,7 @@ com.wcdk.r2dbc
 ├── dialect          # 数据库方言
 ├── repository       # 仓储公共接口
 ├── execution        # 仓储执行接口
-├── query           # QueryWrapper 与查询表达式（保留已弃用 Lambda 类型）
+├── query           # QueryWrapper 与查询表达式
 │   ├── sql         # SQL 表达式渲染
 │   └── xml         # XML SQL 与结果映射
 └── database         # 各数据库驱动适配
@@ -1003,12 +933,6 @@ mvn test
 mvn verify
 mvn -DskipTests package
 ```
-
-响应式单元测试推荐使用 `StepVerifier`，WebFlux 接口测试推荐使用 `WebTestClient`。
-
-`mvn verify` 必须有 Docker，实际运行 PostgreSQL/MySQL Testcontainers 矩阵。Oracle/达梦通过环境变量启用真实库用例；未配置时显示 skipped。CI 包含 Oracle-XE。达梦 R2DBC 1.0.0 与 Oracle 驱动共存时存在 Provider.supports 异常风险；生产应按目标数据库选择驱动或提供显式连接工厂，`all` profile 的测试通过不代表自动装配共存可用。测试范围、驱动配置和达梦发布前记录模板见 [数据库真实库验收](docs/database-matrix.md)。SQL 桩测试用于快速回归，不替代真实库验证。
-
-整改进度见 [35 项缺陷追踪表](docs/audit-traceability.md)，四库及文档示例验证见 [收尾验收记录](docs/validation/2026-10-10-section-8.md)。
 
 ## 许可证
 
