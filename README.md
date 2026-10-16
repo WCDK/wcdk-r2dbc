@@ -32,6 +32,7 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 
 ## 目录
 
+- [在线案例](#在线案例)
 - [特性](#特性)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
@@ -53,6 +54,18 @@ WCDK R2DBC is a reactive database access framework for **Spring Boot 3.5.x, Spri
 - [数据库支持](#数据库支持)
 - [响应式使用约束](#响应式使用约束)
 - [项目结构](#项目结构)
+
+## 在线案例
+
+基于 WCDK R2DBC 的在线案例：[次元工会](http://120.26.144.72/#/)。案例展示了商品浏览、悬赏大厅、购物车和订单等典型业务页面。
+
+### 首页
+
+![次元工会首页](docs/images/case-study/home.png)
+
+### 悬赏大厅
+
+![次元工会悬赏大厅](docs/images/case-study/bounty.png)
 
 ## 特性
 
