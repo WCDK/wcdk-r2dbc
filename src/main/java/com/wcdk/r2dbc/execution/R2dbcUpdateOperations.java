@@ -147,7 +147,13 @@ public class R2dbcUpdateOperations {
      * @param sqlList SQL列表
      * @return 影响行数
      */
+    @Deprecated
     public Mono<Long> batch(List<String> sqlList) {
+        return executeSequentially(sqlList);
+    }
+
+    /** 顺序逐条执行 SQL，分别经过生命周期处理；不使用驱动批处理。 */
+    public Mono<Long> executeSequentially(List<String> sqlList) {
         if (sqlList == null || sqlList.isEmpty()) {
             return Mono.just(0L);
         }

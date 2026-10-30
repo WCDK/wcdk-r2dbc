@@ -52,6 +52,14 @@ public class TransactionTemplate {
         return R2dbcDataSourceContext.pinTransactionDataSource(execution, primaryDataSource());
     }
 
+    /**
+     * 流式执行事务操作。<strong>收到元素不表示事务已提交</strong>：元素可能在提交前发出，
+     * 之后提交仍可能失败或订阅被取消。只有收到完成信号才表示提交成功且资源清理完成。
+     * 需要提交后获得单个结果时可使用 {@link #execute(Function)}。
+     * @param actions 顺序执行的事务操作
+     * @param <T> 元素类型
+     * @return 事务结果流
+     */
     @SafeVarargs
     public final <T> Flux<T> executeInTransaction(Function<Connection, Publisher<T>>... actions) {
         Objects.requireNonNull(actions, "actions");

@@ -53,6 +53,31 @@ public class R2dbcUtil {
     private final R2dbcUpdateOperations updateOperations;
     private final R2dbcTransactionOperations transactionOperations;
 
+    /** 创建构建器，按需配置可选组件。 */
+    public static Builder builder(DatabaseClient databaseClient) {
+        return new Builder(databaseClient);
+    }
+
+    /** R2dbcUtil 构建器。 */
+    public static final class Builder {
+        private final DatabaseClient databaseClient;
+        private R2dbcEntityTemplate entityTemplate;
+        private TransactionalOperator transactionalOperator;
+        private WcdkR2dbcProperties properties;
+        private WcdkSpringR2dbcProperties springProperties;
+        private TransactionManager transactionManager;
+        private SqlLifecycleInterceptorChain interceptorChain = new SqlLifecycleInterceptorChain(List.of(), List.of());
+
+        private Builder(DatabaseClient databaseClient) { this.databaseClient = java.util.Objects.requireNonNull(databaseClient, "databaseClient"); }
+        public Builder entityTemplate(R2dbcEntityTemplate value) { this.entityTemplate = value; return this; }
+        public Builder transactionalOperator(TransactionalOperator value) { this.transactionalOperator = value; return this; }
+        public Builder properties(WcdkR2dbcProperties value) { this.properties = value; return this; }
+        public Builder springProperties(WcdkSpringR2dbcProperties value) { this.springProperties = value; return this; }
+        public Builder transactionManager(TransactionManager value) { this.transactionManager = value; return this; }
+        public Builder interceptorChain(SqlLifecycleInterceptorChain value) { this.interceptorChain = java.util.Objects.requireNonNull(value); return this; }
+        public R2dbcUtil build() { return new R2dbcUtil(databaseClient, entityTemplate, transactionalOperator, properties, springProperties, transactionManager, interceptorChain); }
+    }
+
     public R2dbcUtil(DatabaseClient databaseClient,
                      R2dbcEntityTemplate entityTemplate,
                      TransactionalOperator transactionalOperator) {
@@ -222,8 +247,15 @@ public class R2dbcUtil {
         return updateOperations.insertReturningIdWithoutLifecycle(sql, parameters, idColumn, renderedIdColumn);
     }
 
+    /** 顺序逐条执行 SQL，并汇总影响行数；不是驱动批处理。 */
+    public Mono<Long> executeSequentially(List<String> sqlList) {
+        return updateOperations.executeSequentially(sqlList);
+    }
+
+    /** @deprecated 使用 {@link #executeSequentially(List)}，此方法并非驱动批处理。 */
+    @Deprecated
     public Mono<Long> batch(List<String> sqlList) {
-        return updateOperations.batch(sqlList);
+        return executeSequentially(sqlList);
     }
 
     // ==================== 委托方法：事务管理 ====================
@@ -277,9 +309,15 @@ public class R2dbcUtil {
         return entityTemplate().insert(entity);
     }
 
-    /** 仅更新已存在实体（update-only）；新增请使用 {@link #insert(Object)}。 */
-    public <T> Mono<T> save(T entity) {
+    /** 更新已有实体；新增请使用 {@link #insert(Object)}。 */
+    public <T> Mono<T> updateEntity(T entity) {
         return entityTemplate().update(entity);
+    }
+
+    /** @deprecated 此方法只更新，使用 {@link #updateEntity(Object)} 或 {@link #insert(Object)}。 */
+    @Deprecated
+    public <T> Mono<T> save(T entity) {
+        return updateEntity(entity);
     }
 
     public <T> Mono<T> delete(T entity) {

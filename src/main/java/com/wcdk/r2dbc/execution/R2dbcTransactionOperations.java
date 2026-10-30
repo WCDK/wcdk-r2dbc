@@ -15,6 +15,7 @@ import java.util.function.Function;
 
 /**
  * R2DBC事务操作，负责事务管理。
+ * 缺少事务组件或传入空操作时，相关方法在调用时同步抛出异常，而非返回错误 Publisher。
  *
  * @author WCDK
  *
