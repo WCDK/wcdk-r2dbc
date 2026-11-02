@@ -129,8 +129,14 @@ public class WcdkR2dbcAutoConfiguration {
                     + dataSources.keySet());
         }
         Map<String, ConnectionFactory> connectionFactories = new LinkedHashMap<>();
-        dataSources.forEach((name, dataSourceProperties) -> connectionFactories.put(name, createConnectionFactory(name, dataSourceProperties, properties.getPool())));
-        return owned(new DynamicRoutingConnectionFactory(properties.getPrimary(), connectionFactories));
+        try {
+            dataSources.forEach((name, dataSourceProperties) ->
+                    connectionFactories.put(name, createConnectionFactory(name, dataSourceProperties, properties.getPool())));
+            return owned(new DynamicRoutingConnectionFactory(properties.getPrimary(), connectionFactories));
+        } catch (RuntimeException error) {
+            disposeConnectionFactories(connectionFactories.values(), error);
+            throw error;
+        }
     }
 
     /**
@@ -442,18 +448,36 @@ public class WcdkR2dbcAutoConfiguration {
         if (poolConfig == null || !poolConfig.isEnabled()) {
             return connectionFactory;
         }
-        ConnectionPoolConfiguration.Builder poolBuilder = ConnectionPoolConfiguration.builder(connectionFactory)
-                .name(name)
-                .maxSize(poolConfig.getMaxSize())
-                .maxIdleTime(poolConfig.getMaxIdleTime())
-                .maxLifeTime(poolConfig.getMaxLifeTime())
-                .maxAcquireTime(poolConfig.getMaxAcquireTime())
-                .acquireRetry(poolConfig.getAcquireRetry())
-                .maxCreateConnectionTime(poolConfig.getMaxCreateConnectionTime())
-                .initialSize(poolConfig.getInitialSize());
-        if (poolConfig.getValidationQuery() != null && !poolConfig.getValidationQuery().isBlank()) {
-            poolBuilder.validationQuery(poolConfig.getValidationQuery());
+        try {
+            ConnectionPoolConfiguration.Builder poolBuilder = ConnectionPoolConfiguration.builder(connectionFactory)
+                    .name(name)
+                    .maxSize(poolConfig.getMaxSize())
+                    .maxIdleTime(poolConfig.getMaxIdleTime())
+                    .maxLifeTime(poolConfig.getMaxLifeTime())
+                    .maxAcquireTime(poolConfig.getMaxAcquireTime())
+                    .acquireRetry(poolConfig.getAcquireRetry())
+                    .maxCreateConnectionTime(poolConfig.getMaxCreateConnectionTime())
+                    .initialSize(poolConfig.getInitialSize());
+            if (poolConfig.getValidationQuery() != null && !poolConfig.getValidationQuery().isBlank()) {
+                poolBuilder.validationQuery(poolConfig.getValidationQuery());
+            }
+            return new ConnectionPool(poolBuilder.build());
+        } catch (RuntimeException error) {
+            disposeConnectionFactories(List.of(connectionFactory), error);
+            throw error;
         }
-        return new ConnectionPool(poolBuilder.build());
+    }
+
+    private void disposeConnectionFactories(Iterable<? extends ConnectionFactory> connectionFactories, RuntimeException failure) {
+        java.util.Set<ConnectionFactory> unique = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (ConnectionFactory connectionFactory : connectionFactories) {
+            if (connectionFactory instanceof Disposable disposable && unique.add(connectionFactory)) {
+                try {
+                    disposable.dispose();
+                } catch (RuntimeException disposeFailure) {
+                    failure.addSuppressed(disposeFailure);
+                }
+            }
+        }
     }
 }
