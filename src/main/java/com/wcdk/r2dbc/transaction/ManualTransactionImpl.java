@@ -252,8 +252,14 @@ class ManualTransactionImpl implements ManualTransaction {
                     .doOnSuccess(ignored -> finish(TransactionStatus.ROLLED_BACK))
                     .onErrorResume(error -> {
                         finish(TransactionStatus.FAILED);
-                        log.warn("关闭事务时回滚失败，继续关闭连接", error);
-                        return Mono.empty();
+                        return closeConnection(TransactionStatus.FAILED)
+                                .onErrorResume(closeError -> {
+                                    if (closeError != error) {
+                                        error.addSuppressed(closeError);
+                                    }
+                                    return Mono.empty();
+                                })
+                                .then(Mono.error(error));
                     })
                     .then(Mono.defer(() -> closeConnection(status.get())));
         }

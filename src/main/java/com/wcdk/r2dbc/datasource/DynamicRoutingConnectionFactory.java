@@ -52,6 +52,9 @@ public class DynamicRoutingConnectionFactory implements ConnectionFactory, Dispo
     @Override
     public Publisher<? extends Connection> create() {
         return Mono.deferContextual(contextView -> {
+            if (disposed.get()) {
+                return Mono.error(new IllegalStateException("动态路由连接工厂已释放"));
+            }
             String dataSource = R2dbcDataSourceContext.get(contextView);
             String selected = dataSource == null ? primary : dataSource;
             return R2dbcDataSourceContext.guardTransactionDataSource(contextView, selected, primary)
