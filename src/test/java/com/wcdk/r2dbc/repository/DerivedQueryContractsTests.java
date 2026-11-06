@@ -36,7 +36,7 @@ class DerivedQueryContractsTests {
             String suffix = method.getName().substring("findByAge".length());
             var definition = resolver.compile(method);
             resolver.validateMethod(method);
-            var condition = definition.conditions().getFirst();
+            var condition = definition.conditions().get(0);
             assertThat(condition.fieldName()).isEqualTo("age");
             assertThat(condition.operator()).isEqualTo(sql.get(suffix));
             assertThat(condition.argumentCount()).isEqualTo(expected.get(suffix));
@@ -68,7 +68,7 @@ class DerivedQueryContractsTests {
         var method = Combined.class.getMethod("findByNameOrBrand", String.class);
         var definition = resolver.compile(method);
         assertThat(definition.conditions()).hasSize(1);
-        assertThat(definition.conditions().getFirst().fieldName()).isEqualTo("nameOrBrand");
+        assertThat(definition.conditions().get(0).fieldName()).isEqualTo("nameOrBrand");
         var ordered = resolver.compile(Combined.class.getMethod("findByBrandOrderByCoordinatorAscBrandAndModelDesc", String.class));
         var model = DerivedQueryPlanModel.compile(method, ordered, metadata);
         assertThat(model.definition().orders()).hasSize(2);

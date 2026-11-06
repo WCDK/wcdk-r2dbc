@@ -16,34 +16,34 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 class RepositoryMethodContextTests {
  @Test void inheritedAndRedeclaredMethodsKeepAnnotations() throws Exception {
-  var a=new Fixture<>(Inherited.class); a.repository.deleteById(9L).block(); check(a.contexts.getFirst(), Parent.class,"parentId",9L);
-  var b=new Fixture<>(Redeclared.class); b.repository.deleteById(8L).block(); check(b.contexts.getFirst(), Redeclared.class,"childId",8L);
+  var a=new Fixture<>(Inherited.class); a.repository.deleteById(9L).block(); check(a.contexts.get(0), Parent.class,"parentId",9L);
+  var b=new Fixture<>(Redeclared.class); b.repository.deleteById(8L).block(); check(b.contexts.get(0), Redeclared.class,"childId",8L);
  }
  @Test void overloadsKeepTheInvokedSignature() throws Exception {
   var f=new Fixture<>(Overloaded.class); Object id=7L; f.repository.deleteById(id).block();
-  check(f.contexts.getFirst(),Overloaded.class,"crudId",id);
+  check(f.contexts.get(0),Overloaded.class,"crudId",id);
   assertThat(f.repository.deleteById("local").block()).isEqualTo(11L); assertThat(f.contexts).hasSize(1);
  }
  @Test void defaultBridgeMethodsReenterTheProxy() throws Exception {
   var f=new Fixture<>(BridgeRepository.class); GenericRemove<Long> generic=f.repository;
   assertThat(generic.remove(6L).block()).isEqualTo(7L);
   assertThat(Arrays.stream(BridgeRepository.class.getDeclaredMethods()).anyMatch(m->m.isBridge()&&m.isDefault())).isTrue();
-  check(f.contexts.getFirst(),Parent.class,"parentId",6L);
+  check(f.contexts.get(0),Parent.class,"parentId",6L);
  }
  @Test void genericAndZeroArgumentMethodsKeepOriginalArguments() throws Exception {
   var f=new Fixture<>(Inherited.class); User user=new User(); assertThat(f.repository.insert(user).block()).isSameAs(user);
-  assertThat(f.contexts.getFirst().getMethod()).isEqualTo(BaseRepository.class.getMethod("insert",Object.class));
-  assertThat(f.contexts.getFirst().getArguments()).containsExactly(user);
+  assertThat(f.contexts.get(0).getMethod()).isEqualTo(BaseRepository.class.getMethod("insert",Object.class));
+  assertThat(f.contexts.get(0).getArguments()).containsExactly(user);
   f.repository.findAll().collectList().block();
-  assertThat(f.contexts.getLast().getMethod()).isEqualTo(BaseRepository.class.getMethod("findAll"));
-  assertThat(f.contexts.getLast().getArguments()).isEmpty();
+  assertThat(f.contexts.get(f.contexts.size() - 1).getMethod()).isEqualTo(BaseRepository.class.getMethod("findAll"));
+  assertThat(f.contexts.get(f.contexts.size() - 1).getArguments()).isEmpty();
  }
  @Test void concreteGenericOverridesKeepTheirAnnotationThroughTheCompilerBridge() throws Exception {
   var f = new Fixture<>(Typed.class);
   User user = new User();
   BaseRepository<User> base = f.repository;
   assertThat(base.insert(user).block()).isSameAs(user);
-  var method = f.contexts.getFirst().getMethod();
+  var method = f.contexts.get(0).getMethod();
   assertThat(method).isEqualTo(Typed.class.getMethod("insert", User.class));
   assertThat(method.getParameters()[0].getAnnotation(Param.class).value()).isEqualTo("typedEntity");
   assertThat(method.isBridge()).isFalse();

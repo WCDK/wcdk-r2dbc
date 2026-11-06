@@ -42,25 +42,35 @@ public final class SqlExpressionRenderer {
         if (expression == null) {
             return false;
         }
-        return switch (expression) {
-            case SqlExpression.Empty ignored -> false;
-            case SqlExpression.Comparison comparison -> column(comparison.column()).equals(target);
-            case SqlExpression.In in -> column(in.column()).equals(target);
-            case SqlExpression.NullCheck check -> column(check.column()).equals(target);
-            case SqlExpression.Logical logical -> logical.operands().stream()
-                    .anyMatch(operand -> referencesColumn(operand, target));
-        };
+        if (expression instanceof SqlExpression.Comparison comparison) {
+            return column(comparison.column()).equals(target);
+        }
+        if (expression instanceof SqlExpression.In in) {
+            return column(in.column()).equals(target);
+        }
+        if (expression instanceof SqlExpression.NullCheck check) {
+            return column(check.column()).equals(target);
+        }
+        if (expression instanceof SqlExpression.Logical logical) {
+            return logical.operands().stream().anyMatch(operand -> referencesColumn(operand, target));
+        }
+        return false;
     }
 
     private String renderExpression(SqlExpression expression, RenderState state) {
-        return switch (expression) {
-            case SqlExpression.Empty ignored -> "";
-            case SqlExpression.Comparison comparison -> renderComparison(comparison, state);
-            case SqlExpression.In in -> renderIn(in, state);
-            case SqlExpression.NullCheck check -> column(check.column()).name()
-                    + (check.negated() ? " IS NOT NULL" : " IS NULL");
-            case SqlExpression.Logical logical -> renderLogical(logical, state);
-        };
+        if (expression instanceof SqlExpression.Comparison comparison) {
+            return renderComparison(comparison, state);
+        }
+        if (expression instanceof SqlExpression.In in) {
+            return renderIn(in, state);
+        }
+        if (expression instanceof SqlExpression.NullCheck check) {
+            return column(check.column()).name() + (check.negated() ? " IS NOT NULL" : " IS NULL");
+        }
+        if (expression instanceof SqlExpression.Logical logical) {
+            return renderLogical(logical, state);
+        }
+        return "";
     }
 
     private String renderComparison(SqlExpression.Comparison comparison, RenderState state) {
