@@ -6,6 +6,10 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.*;
 class SnowflakeRuntimeTests {
+ // JDK17 兼容：ExecutorService 在 JDK19+ 才实现 AutoCloseable
+ record PoolCloser(ExecutorService pool) implements AutoCloseable {
+  public void close(){ pool.shutdownNow(); }
+ }
  private static final long NOW=1800000000000L;
  @Test void validatesRanges(){
   for(long node:new long[]{-1,1024}) assertThatThrownBy(()->new SnowflakeIdGenerator(node)).isInstanceOf(IllegalArgumentException.class);
@@ -24,7 +28,7 @@ class SnowflakeRuntimeTests {
   var clock=new AtomicLong(NOW); var g=new SnowflakeIdGenerator(2,clock::get); var ids=new HashSet<Long>();
   for(int i=0;i<4096;i++) assertThat(ids.add(g.nextId())).isTrue();
   assertThat(ids.stream().mapToLong(id->id&4095).max().orElseThrow()).isEqualTo(4095);
-  try(var pool=Executors.newSingleThreadExecutor()){
+  var pool=Executors.newSingleThreadExecutor(); try(var closer=new PoolCloser(pool)){
    var waiting=pool.submit(g::nextId);
    assertThatThrownBy(()->waiting.get(50,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
    clock.incrementAndGet(); long next=waiting.get(1,TimeUnit.SECONDS);
@@ -34,7 +38,7 @@ class SnowflakeRuntimeTests {
  @Test void waitingObservesRollbackAndInterruption() throws Exception {
   var clock=new AtomicLong(NOW); var g=new SnowflakeIdGenerator(3,clock::get);
   for(int i=0;i<4096;i++)g.nextId();
-  try(var pool=Executors.newSingleThreadExecutor()){
+  var pool=Executors.newSingleThreadExecutor(); try(var closer=new PoolCloser(pool)){
    var waiting=pool.submit(g::nextId);
    assertThatThrownBy(()->waiting.get(50,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
    clock.decrementAndGet(); assertThatThrownBy(()->waiting.get(1,TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalStateException.class);
@@ -45,7 +49,7 @@ class SnowflakeRuntimeTests {
  @Test void concurrentSameNodeInstancesRemainUnique() throws Exception {
   int threads=8,each=20000; Set<Long> ids=ConcurrentHashMap.newKeySet(); var work=new ArrayList<Future<?>>();
   var start=new CountDownLatch(1); long begin=System.nanoTime();
-  try(var pool=Executors.newFixedThreadPool(threads)){
+  var pool=Executors.newFixedThreadPool(threads); try(var closer=new PoolCloser(pool)){
    for(int t=0;t<threads;t++){
     var g=new SnowflakeIdGenerator(1022);
     work.add(pool.submit(()->{try{start.await();}catch(InterruptedException e){throw new RuntimeException(e);}
@@ -60,7 +64,7 @@ class SnowflakeRuntimeTests {
   for(int threads:new int[]{1,8}){
    int each=20000; var g=new SnowflakeIdGenerator(1021); for(int i=0;i<10000;i++)g.nextId();
    var ready=new CountDownLatch(threads);var start=new CountDownLatch(1); var work=new ArrayList<Future<Long>>();long elapsed;
-   try(var pool=Executors.newFixedThreadPool(threads)){
+   var pool=Executors.newFixedThreadPool(threads); try(var closer=new PoolCloser(pool)){
     for(int t=0;t<threads;t++)work.add(pool.submit(()->{ready.countDown();start.await();long last=0;
      for(int i=0;i<each;i++)last=g.nextId();return last;}));
     assertThat(ready.await(5,TimeUnit.SECONDS)).isTrue();long begin=System.nanoTime();start.countDown();

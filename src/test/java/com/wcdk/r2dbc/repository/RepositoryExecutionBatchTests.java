@@ -91,7 +91,7 @@ class RepositoryExecutionBatchTests {
 
     @Test void exactCaseWinsAndNormalizedAmbiguityListsBothFields() throws Exception {
         assertThat(resolver().compile(Methods.class.getMethod("findByCoOrdinator", String.class))
-                .conditions().getFirst().fieldName()).isEqualTo("coOrdinator");
+                .conditions().get(0).fieldName()).isEqualTo("coOrdinator");
         assertThatThrownBy(() -> resolver().compile(Methods.class.getMethod("findByCOORDINATOR", String.class)))
                 .hasMessageContaining("歧义").hasMessageContaining("coordinator").hasMessageContaining("coOrdinator");
         assertThatThrownBy(() -> resolver().compile(Methods.class.getMethod("updateCOORDINATORByKey", String.class, Long.class)))

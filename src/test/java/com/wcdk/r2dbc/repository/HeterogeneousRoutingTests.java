@@ -99,7 +99,7 @@ class HeterogeneousRoutingTests {
         for (String key : fixture.nodes.keySet()) {
             StepVerifier.create(R2dbcDataSourceContext.use(key, insert)).expectNext(setting).verifyComplete();
             Node node = fixture.nodes.get(key);
-            assertThat(node.sql.getFirst()).contains(key.equals("mysql") ? "INSERT INTO `order`" : "INSERT INTO \"order\"");
+            assertThat(node.sql.get(0)).contains(key.equals("mysql") ? "INSERT INTO `order`" : "INSERT INTO \"order\"");
             assertThat(node.parameters.stream().map(Parameter::getValue).toList())
                     .contains(key.equals("dm") ? Date.from(instant) : instant);
         }
@@ -115,7 +115,7 @@ class HeterogeneousRoutingTests {
                 .assertNext(page -> assertThat(page.getTotalElements()).isZero()).verifyComplete();
         assertThat(fixture.nodes.get("oracle").sql).hasSize(2)
                 .allSatisfy(sql -> assertThat(sql).contains("FROM \"order\"", "\"key\" = :"));
-        assertThat(fixture.nodes.get("oracle").sql.getFirst()).doesNotContain("ORDER BY");
+        assertThat(fixture.nodes.get("oracle").sql.get(0)).doesNotContain("ORDER BY");
         assertThat(fixture.nodes.get("oracle").sql.get(1))
                 .contains("ORDER BY \"key\" DESC OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY");
     }
@@ -134,7 +134,7 @@ class HeterogeneousRoutingTests {
                     }).verifyComplete();
             List<String> sql = fixture.nodes.get(key).sql;
             assertThat(sql).hasSize(2);
-            assertThat(sql.getFirst()).doesNotContain("ORDER BY");
+            assertThat(sql.get(0)).doesNotContain("ORDER BY");
             assertThat(sql.get(1)).contains(key.equals("mysql")
                     ? "ORDER BY `key` DESC, `id` ASC" : "ORDER BY \"key\" DESC, \"id\" ASC");
         }
@@ -170,7 +170,7 @@ class HeterogeneousRoutingTests {
             StepVerifier.create(R2dbcDataSourceContext.use(key, insert))
                     .assertNext(saved -> assertThat(saved).isEqualTo(new Setting(42L, original.settingKey(), original.createdAt()))
                             .isNotSameAs(original)).verifyComplete();
-            assertThat(fixture.nodes.get(key).sql.getFirst())
+            assertThat(fixture.nodes.get(key).sql.get(0))
                     .contains(key.equals("mysql") ? "(`key`, `created_at`)" : "(\"key\", \"created_at\")");
         }
         assertThat(original.id()).isNull();

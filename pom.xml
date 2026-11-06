@@ -36,6 +36,7 @@
 
     <properties>
         <java.version>21</java.version>
+        <wcdk.enforcer.jdk.range>[21,22)</wcdk.enforcer.jdk.range>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.compiler.encoding>UTF-8</maven.compiler.encoding>
@@ -164,6 +165,13 @@
     </dependencies>
 
     <profiles>
+        <profile>
+            <id>jdk17</id>
+            <properties>
+                <java.version>17</java.version>
+                <wcdk.enforcer.jdk.range>[17,22)</wcdk.enforcer.jdk.range>
+            </properties>
+        </profile>
         <!-- Local release artifacts: no signing or remote upload. -->
         <profile>
             <id>release</id>
@@ -422,7 +430,7 @@
                         <configuration>
                             <rules>
                                 <requireJavaVersion>
-                                    <version>[21,22)</version>
+                                    <version>${wcdk.enforcer.jdk.range}</version>
                                     <message>Maven must run with JDK 21. Set JAVA_HOME to a JDK 21 installation.</message>
                                 </requireJavaVersion>
                                 <requireMavenVersion>
@@ -438,4 +446,5 @@
         </plugins>
     </build>
 
+    
 </project>
