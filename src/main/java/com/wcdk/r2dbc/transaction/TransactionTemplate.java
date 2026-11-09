@@ -45,7 +45,7 @@ public class TransactionTemplate {
                             }
                             return transaction.commit().then(Mono.just(values));
                         })
-                        .flatMap(values -> values.isEmpty() ? Mono.empty() : Mono.just(values.getFirst())),
+                        .flatMap(values -> values.isEmpty() ? Mono.empty() : Mono.just(values.get(0))),
                 ManualTransaction::close,
                 this::rollbackAndClose,
                 ManualTransaction::close);

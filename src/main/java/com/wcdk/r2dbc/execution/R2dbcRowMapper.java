@@ -153,7 +153,7 @@ public class R2dbcRowMapper {
                         + entityClass.getName());
             }
             if (!selected.isEmpty()) {
-                return constructorPlan(entityClass, selected.getFirst());
+                return constructorPlan(entityClass, selected.get(0));
             }
 
             try {

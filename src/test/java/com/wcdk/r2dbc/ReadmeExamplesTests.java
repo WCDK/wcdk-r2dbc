@@ -124,7 +124,7 @@ class ReadmeExamplesTests {
                 Files.writeString(file, source);
                 DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
                 try (StandardJavaFileManager files = compiler.getStandardFileManager(diagnostics, null, null)) {
-                    List<String> options = new ArrayList<>(List.of("--release", "21", "-parameters", "-classpath",
+                    List<String> options = new ArrayList<>(List.of("--release", System.getProperty("java.specification.version"), "-parameters", "-classpath",
                             System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
                             "-d", output.toString()));
                     if (code.contains("@RequiredArgsConstructor")) {

@@ -32,7 +32,7 @@ class NamingAndCommandContractsTests {
             var method = Methods.class.getMethod("findByURLValueAndCPUTime", String.class, Long.class);
             var definition = resolver.compile(method);
             var plan = DerivedQueryPlanModel.compile(method, definition, metadata);
-            assertThat(metadata.columnByName(plan.definition().conditions().getFirst().fieldName()).name()).isEqualTo(metadata.columnByName("URLValue").name());
+            assertThat(metadata.columnByName(plan.definition().conditions().get(0).fieldName()).name()).isEqualTo(metadata.columnByName("URLValue").name());
             assertThat(resolver.resolveCompiled(plan, new Object[]{"link", 9L}).sql())
                     .contains(metadata.columnByName("URLValue").name() + " = :p0");
         }
@@ -46,7 +46,7 @@ class NamingAndCommandContractsTests {
         var mapped = new R2dbcRowMapper().map(row, URLInfo.class);
         assertThat(mapped.URLValue).isEqualTo("link"); assertThat(mapped.CPUTime).isEqualTo(9L); assertThat(mapped.URL).isEqualTo("explicit");
         assertThat(NamingStrategy.tableName(ExplicitTable.class)).isEqualTo("KeepTable");
-        assertThat(LambdaDeleteWrapper.of(URLInfo.class).eq(URLInfo::getURL, "value").getConditions().getFirst().column()).isEqualTo("ExplicitURL");
+        assertThat(LambdaDeleteWrapper.of(URLInfo.class).eq(URLInfo::getURL, "value").getConditions().get(0).column()).isEqualTo("ExplicitURL");
     }
 
     @Test void commandIdentityIsSharedByPlansStatementsRequestsAndLifecycle() throws Exception {

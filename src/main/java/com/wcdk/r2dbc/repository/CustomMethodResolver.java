@@ -294,7 +294,7 @@ public class CustomMethodResolver {
         List<FieldToken> matches = longestTokens().stream()
                 .filter(t -> text.regionMatches(true, offset, t.token(), 0, t.token().length())).toList();
         if (matches.isEmpty()) return matches;
-        int length = matches.getFirst().token().length();
+        int length = matches.get(0).token().length();
         List<FieldToken> longest = matches.stream().filter(t -> t.token().length() == length).toList();
         List<FieldToken> exact = longest.stream()
                 .filter(t -> text.startsWith(t.column().field().getName(), offset)
