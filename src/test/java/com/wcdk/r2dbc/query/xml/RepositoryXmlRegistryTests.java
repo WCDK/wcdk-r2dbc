@@ -112,6 +112,39 @@ class RepositoryXmlRegistryTests {
 
 
     @Test
+    void acceptsProjectPublicIdentifierDoctype() throws Exception {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE repository PUBLIC "-//WCDK/wcdk-r2dbc" "wcdk-r2dbc-repository.dtd">
+                <repository namespace="%s">
+                  <select id="find">SELECT 1</select>
+                </repository>
+                """.formatted(TestRepository.class.getName());
+
+        assertThat(registry(xml).find(TestRepository.class, "find")).isPresent();
+    }
+
+    @Test
+    void rejectsUnknownPublicIdentifierEvenWithBuiltinSystemId() {
+        String xml = """
+                <!DOCTYPE repository PUBLIC "-//ATTACKER/evil" "wcdk-r2dbc-repository.dtd">
+                <repository namespace="%s"><select id="find">SELECT 1</select></repository>
+                """.formatted(TestRepository.class.getName());
+
+        assertThatThrownBy(() -> registry(xml)).hasStackTraceContaining("禁止访问外部实体");
+    }
+
+    @Test
+    void rejectsProjectPublicIdentifierWithExternalSystemId() {
+        String xml = """
+                <!DOCTYPE repository PUBLIC "-//WCDK/wcdk-r2dbc" "http://127.0.0.1:9/wcdk-r2dbc-repository.dtd">
+                <repository namespace="%s"><select id="find">SELECT 1</select></repository>
+                """.formatted(TestRepository.class.getName());
+
+        assertThatThrownBy(() -> registry(xml)).hasStackTraceContaining("禁止访问外部实体");
+    }
+
+    @Test
     void rejectsExternalAndInvalidDtdsWithoutLoadingThem() {
         for (String uri : java.util.List.of("file:///etc/wcdk-r2dbc-repository.dtd",
                 "http://127.0.0.1:9/wcdk-r2dbc-repository.dtd", "unknown.dtd")) {

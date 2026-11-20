@@ -43,6 +43,16 @@ public class RepositoryXmlRegistry {
     private static final Pattern SQL_LESS_THAN_OPERATOR = Pattern.compile(
             "<(?=\\s*(?:=|>|#|[0-9]))|<(?=\\s+[^/!?])");
 
+    /** 项目内置 DTD 的固定资源位置。 */
+    private static final String BUILTIN_DTD_LOCATION = "dtd/wcdk-r2dbc-repository.dtd";
+
+    /** 项目内置 DTD 的固定公共标识符。 */
+    private static final String BUILTIN_DTD_PUBLIC_ID = "-//WCDK/wcdk-r2dbc";
+
+    /** 项目内置 DTD 允许出现的系统标识符。 */
+    private static final Set<String> BUILTIN_DTD_SYSTEM_IDS = Set.of(
+            "wcdk-r2dbc-repository.dtd", "classpath:/dtd/wcdk-r2dbc-repository.dtd");
+
     private final Map<String, RepositoryStatement> statements = new LinkedHashMap<>();
 
     private final Map<String, ResultMapDefinition> resultMapDefinitions = new LinkedHashMap<>();
@@ -102,7 +112,7 @@ public class RepositoryXmlRegistry {
                     normalizeSqlOperators(xmlContent).getBytes(StandardCharsets.UTF_8)));
             if (document.getDoctype() != null) {
                 var doctype = document.getDoctype();
-                if (doctype.getPublicId() != null || !allowedDtd(doctype.getSystemId())
+                if (!allowedPublicId(doctype.getPublicId()) || !allowedDtd(doctype.getSystemId())
                         || StringUtils.hasText(doctype.getInternalSubset())) {
                     throw new SAXException("DOCTYPE only permits the fixed built-in DTD; internal subsets are forbidden");
                 }
@@ -158,8 +168,12 @@ public class RepositoryXmlRegistry {
         }
     }
     private static boolean allowedDtd(String systemId) {
-        return "wcdk-r2dbc-repository.dtd".equals(systemId)
-                || "classpath:/dtd/wcdk-r2dbc-repository.dtd".equals(systemId);
+        return systemId != null && BUILTIN_DTD_SYSTEM_IDS.contains(systemId);
+    }
+
+    private static boolean allowedPublicId(String publicId) {
+        // 允许无公共标识符（SYSTEM 写法）或项目固定的公共标识符（PUBLIC 写法），其余一律拒绝。
+        return publicId == null || BUILTIN_DTD_PUBLIC_ID.equals(publicId);
     }
 
     private String normalizeSqlOperators(String xmlContent) {
@@ -195,11 +209,12 @@ public class RepositoryXmlRegistry {
      * @author wcdk
      */
     private InputSource resolveLocalDtd(String publicId, String systemId) throws SAXException {
-        if (publicId != null || !allowedDtd(systemId)) {
-            throw new SAXException("仅允许加载项目内置 R2DBC DTD，禁止访问外部实体：" + systemId);
+        if (!allowedPublicId(publicId) || !allowedDtd(systemId)) {
+            throw new SAXException("仅允许加载项目内置 R2DBC DTD，禁止访问外部实体：publicId="
+                    + publicId + ", systemId=" + systemId);
         }
         try {
-            ClassPathResource dtd = new ClassPathResource("dtd/wcdk-r2dbc-repository.dtd");
+            ClassPathResource dtd = new ClassPathResource(BUILTIN_DTD_LOCATION);
             if (!dtd.exists()) {
                 throw new SAXException("未找到项目内置 R2DBC DTD");
             }

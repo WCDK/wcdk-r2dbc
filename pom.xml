@@ -213,7 +213,7 @@
         <profile>
             <id>central</id>
             <properties>
-                <central.skipUpload>true</central.skipUpload>
+                <central.skipUpload>false</central.skipUpload>
             </properties>
             <build>
                 <plugins>
